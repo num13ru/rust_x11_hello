@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-TARGET="armv7-unknown-linux-gnueabihf"
+TARGET="armv7-unknown-linux-musleabihf"
 BIN_NAME="rust_hello"
 EXT_DIR="kindle-extension/rust_hello"
 OUT_BIN="target/${TARGET}/release/${BIN_NAME}"
@@ -28,11 +28,17 @@ echo "Binary info:"
 file "${EXT_DIR}/bin/${BIN_NAME}" || true
 
 echo
-echo "Interpreter:"
-if command -v arm-linux-gnueabihf-readelf >/dev/null 2>&1; then
-    arm-linux-gnueabihf-readelf -l "${EXT_DIR}/bin/${BIN_NAME}" | grep interpreter || true
-elif command -v readelf >/dev/null 2>&1; then
-    readelf -l "${EXT_DIR}/bin/${BIN_NAME}" | grep interpreter || true
+echo "Interpreter check:"
+if command -v readelf >/dev/null 2>&1; then
+    readelf -l "${EXT_DIR}/bin/${BIN_NAME}" | grep interpreter || echo "No dynamic interpreter found. Good for static musl."
 else
     echo "readelf not found"
+fi
+
+echo
+echo "GLIBC symbols check:"
+if command -v arm-linux-gnueabihf-objdump >/dev/null 2>&1; then
+    arm-linux-gnueabihf-objdump -T "${EXT_DIR}/bin/${BIN_NAME}" | grep GLIBC_ || echo "No GLIBC symbols found. Good."
+else
+    echo "objdump not found"
 fi
