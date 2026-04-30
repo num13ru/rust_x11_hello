@@ -10,4 +10,4 @@ RUN apt-get update \
 
 WORKDIR /work
 
-CMD ["bash", "scripts/build-kindle-armv7hf.sh"]
+CMD ["bash", "scripts/build-kindle-armv7hf-musl.sh"]
