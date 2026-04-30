@@ -1,0 +1,12 @@
+{
+  "items": [
+    {
+      "name": "Run Rust Hello",
+      "action": "sh bin/run.sh"
+    },
+    {
+      "name": "Show Last Result",
+      "action": "sh bin/show.sh"
+    }
+  ]
+}
