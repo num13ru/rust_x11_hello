@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BIN="${1:-kindle-extension/rust_hello/bin/rust_hello}"
+BIN="${1:-kindle-extension/rust_x11_hello/bin/rust_x11_hello}"
 
 if [ ! -f "$BIN" ]; then
     echo "ERROR: binary not found: $BIN"

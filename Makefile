@@ -34,4 +34,4 @@ clean-target:
 
 clean:
 	rm -rf target logs
-	rm -f kindle-extension/rust_hello/bin/rust_hello
+	rm -f kindle-extension/rust_x11_hello/bin/rust_x11_hello

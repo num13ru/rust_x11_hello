@@ -1,3 +1,5 @@
-/kindle-extension/rust_hello/bin/rust_hello
+*.log
+.DS_Store
+/kindle-extension/rust_x11_hello/bin/rust_x11_hello
 /target
 /logs
