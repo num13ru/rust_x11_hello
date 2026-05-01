@@ -2,8 +2,8 @@
 set -euo pipefail
 
 TARGET="armv7-unknown-linux-musleabihf"
-BIN_NAME="rust_hello"
-EXT_DIR="kindle-extension/rust_hello"
+BIN_NAME="rust_x11_hello"
+EXT_DIR="kindle-extension/rust_x11_hello"
 OUT_BIN="target/${TARGET}/release/${BIN_NAME}"
 
 rustup target add "${TARGET}"
