@@ -1,7 +1,7 @@
 {
   "items": [
     {
-      "name": "Run Rust Hello",
+      "name": "Run Rust X11 Hello",
       "action": "sh bin/run.sh"
     },
     {

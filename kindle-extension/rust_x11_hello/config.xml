@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <extension>
     <information>
-        <name>Rust Hello</name>
+        <name>Rust X11 Hello</name>
         <version>0.1.0</version>
         <author>local</author>
-        <id>hello-kual</id>
+        <id>rust-x11-hello</id>
     </information>
     <menus>
         <menu type="json" dynamic="true">menu.json</menu>

@@ -1,2 +1,1 @@
-# rust_hello_kual
-
+# rust_x11_hello
