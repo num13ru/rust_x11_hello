@@ -23,59 +23,67 @@ Verified on 2026-08-29:
 - `Cargo.toml` uses `anyhow = "1"` and `x11rb = "0.13"`;
 - the program still draws once, waits five seconds, and exits;
 - the repository contains `kindle-extension/rust_x11_hello`, whose runner expects `/mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello`;
-- the ARM build and verification scripts expect the same `kindle-extension/rust_x11_hello/bin/rust_x11_hello` artifact.
+- the ARM build and verification scripts expect the same `kindle-extension/rust_x11_hello/bin/rust_x11_hello` artifact;
+- `mtp-rs ls /` succeeds against the connected Kindle;
+- the MTP root `/` maps to Kindle shared storage `/mnt/us` at runtime;
+- the installed KUAL extension is `/extensions/rust_hello` over MTP, with `bin/rust_hello`, `bin/run.sh`, `bin/show.sh`, `menu.json`, `config.xml`, and `hello.log`;
+- the installed launcher runs `/mnt/us/extensions/rust_hello/bin/rust_hello` and writes `/mnt/us/extensions/rust_hello/hello.log`.
 
-The attached source plan says the existing KUAL path works, but that claim has not been verified on a device here. The directory/binary mismatch must be resolved before touch work, otherwise a successful build may not be the binary KUAL launches.
-
-Naming decision: use `rust_x11_hello` consistently for the KUAL extension directory, Cargo output, and deployed binary. The canonical installed path is `/mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello`. If the Kindle still has an installation under a noncanonical path, remove or rename it before testing; do not support both paths during the experiment.
+The repository/device mismatch is now verified rather than hypothetical. Until Phase 0 deliberately migrates and proves another layout, the existing `rust_hello` installation is the canonical device layout. The Cargo output may remain `rust_x11_hello`; deployment must explicitly rename/map it to `rust_hello` instead of assuming host and device names match.
 
 ## Conditions required for device testing
 
 Before installing the persistent build, all of the following must be true:
 
 - the Kindle is jailbroken and KUAL can launch the current extension;
-- the chosen extension path and binary name are known from the device, not assumed from the repository;
-- the tester has a working recovery/control path independent of the X11 window, preferably SSH through USBNetwork or Wi-Fi;
-- a second terminal can remain connected to stop the process and follow the log;
+- `mtp-rs devices`, `mtp-rs ls /extensions`, and a small upload/download readback have succeeded with the Kindle unlocked and USB accessory access allowed;
+- the chosen MTP path, runtime path, and binary name are recorded explicitly;
+- a bounded launcher watchdog has been tested independently of the X11 window; MTP alone cannot signal a running process or follow a growing log safely;
 - the last known-good binary is retained on the host;
 - the Kindle model, firmware version, orientation, and screen dimensions are recorded with the test result.
 
-If SSH or another tested out-of-band stop path is unavailable, do not launch the persistent build. First add and prove a bounded watchdog or another recovery mechanism. A KUAL “Stop” menu item alone is not sufficient because the override-redirect window may cover KUAL.
+SSH through USBNetwork or Wi-Fi is optional and useful for live `tail`/manual stop, but it is not the deployment prerequisite. With MTP-only access, never launch an unbounded persistent test build: use a 90-second launcher watchdog until another stop mechanism has been proved while the X11 window is active. A KUAL “Stop” menu item alone is not sufficient because the override-redirect window may cover KUAL.
 
 ## Phase 0 - Reproducible and recoverable baseline
 
 ### Repository work
 
-1. Inspect the actual Kindle over SSH:
+1. Inspect the actual Kindle over MTP:
 
-   ```sh
-   ls -la /mnt/us/extensions/rust_x11_hello
-   find /mnt/us/extensions/rust_x11_hello -maxdepth 2 -type f 2>/dev/null
-   ```
+```sh
+mtp-rs devices
+mtp-rs ls /extensions
+mtp-rs ls /extensions/rust_hello --recursive
+mtp-rs ls /extensions/rust_hello/bin
+```
 
-2. Choose exactly one canonical extension directory, installed binary name, log path, and PID-file path. Unless the device contradicts the repository, use:
+2. Record both sides of the verified deployment mapping. For the currently connected device, use:
 
-   ```text
-   extension: /mnt/us/extensions/rust_x11_hello
-   binary:    /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
-   log:       /mnt/us/extensions/rust_x11_hello/rust_x11_hello.log
-   PID file:  /mnt/us/extensions/rust_x11_hello/rust_x11_hello.pid
-   ```
+```text
+host build artifact: kindle-extension/rust_x11_hello/bin/rust_x11_hello
+MTP extension: /extensions/rust_hello
+MTP binary: /extensions/rust_hello/bin/rust_hello
+runtime extension: /mnt/us/extensions/rust_hello
+runtime binary: /mnt/us/extensions/rust_hello/bin/rust_hello
+runtime log: /mnt/us/extensions/rust_hello/hello.log
+runtime PID file: /mnt/us/extensions/rust_hello/rust_hello.pid
+```
 
-3. Align `scripts/build-kindle-armv7hf.sh`, `scripts/check-static.sh`, `Makefile`, the extension directory, `menu.json`, and the launcher with that decision. Keep the Cargo package/binary name `rust_x11_hello`; a deploy-time rename is acceptable.
+3. Align `scripts/build-kindle-armv7hf.sh`, `scripts/check-static.sh`, `Makefile`, `menu.json`, and the launcher with that explicit mapping. Keep the Cargo package/binary name `rust_x11_hello`; deploy-time rename to `rust_hello` is acceptable. Do not delete or rename the known-working device extension merely to make the names uniform.
 
 4. Make the launcher safe for a persistent child process:
 
-   - reject a second launch when the PID file identifies a live instance;
-   - start the binary as a child, record its PID, and wait for it;
-   - remove a stale PID file only after confirming that it does not identify the expected live binary;
-   - clean up the PID file when the child exits;
-   - retain the child exit status and error text in `rust_x11_hello.log`;
-   - provide a small stop script that validates the PID belongs to this extension before sending `TERM`.
+- reject a second launch when the PID file identifies a live expected instance;
+- start the binary as a child, record its PID, and wait for it;
+- remove a stale PID file only after confirming it does not identify the expected live binary;
+- clean up the PID file when the child exits;
+- retain the child exit status and error text in `hello.log`;
+- for test builds, start a separate 90-second watchdog that sends `TERM` only to the recorded child and is cancelled/reaped if the child exits first;
+- optionally provide a stop script that validates the PID belongs to this extension before sending `TERM`; do not treat it as MTP-callable unless an MTP stop-sentinel workflow has been implemented and proved.
 
-5. Update “Show Last Result” or add a diagnostic action that displays a useful final status. Do not attempt to render a live event stream with `eips`; use SSH and `tail` for live input diagnostics.
+5. Update “Show Last Result” or add a diagnostic action that displays useful final status. Do not attempt to render the live event stream with `eips`. Retrieve completed logs with `mtp-rs get`; if SSH happens to be available, `tail -F` is an optional convenience only.
 
-6. Keep the current five-second program behavior for this phase. The purpose is to prove that build, package, KUAL launch, logging, and cleanup all refer to the same artifact before changing its lifetime.
+6. Keep the current five-second program behavior for this phase. The purpose is to prove the build, MTP package transfer, KUAL launch, logging, and cleanup all refer to the same artifact before changing its lifetime.
 
 ### Host verification gate
 
@@ -94,50 +102,99 @@ Record the produced binary's path and checksum. `make verify` must report no dyn
 
 ### Manual Kindle baseline guide
 
-1. Keep the known-good device binary on the host. Install the new binary as a temporary name first:
+1. Back up the known-working device files to the host before replacing anything:
 
-   ```sh
-   scp kindle-extension/rust_x11_hello/bin/rust_x11_hello \
-     root@<kindle-ip>:/mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello.new
-   ssh root@<kindle-ip> \
-     'chmod +x /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello.new && mv /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello.new /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello'
-   ```
+```sh
+KINDLE_BACKUP_DIR=artifacts/kindle-backups/phase0
+mkdir -p "$KINDLE_BACKUP_DIR"
+mtp-rs get /extensions/rust_hello/bin/rust_hello "$KINDLE_BACKUP_DIR/rust_hello.before-phase0"
+mtp-rs get /extensions/rust_hello/bin/run.sh "$KINDLE_BACKUP_DIR/run.sh.before-phase0"
+mtp-rs get /extensions/rust_hello/bin/show.sh "$KINDLE_BACKUP_DIR/show.sh.before-phase0"
+mtp-rs get /extensions/rust_hello/menu.json "$KINDLE_BACKUP_DIR/menu.json.before-phase0"
+mtp-rs get /extensions/rust_hello/config.xml "$KINDLE_BACKUP_DIR/config.xml.before-phase0"
+shasum -a 256 "$KINDLE_BACKUP_DIR/rust_hello.before-phase0"
+```
 
-   Copy updated launcher/menu files as well when Phase 0 changes them. USB mass-storage copying is acceptable, but cleanly eject the Kindle before opening KUAL. A persistent build still must not be launched without a separate stop path.
+If a backup destination already exists, choose a new run-specific directory; do not overwrite the only known-good copy.
 
-2. In terminal A, confirm SSH remains usable and follow the log:
+2. Confirm the five-second baseline process has exited and KUAL is usable. Upload the new binary under a temporary remote name and request byte-for-byte readback verification:
 
-   ```sh
-   ssh root@<kindle-ip> 'tail -n 50 -F /mnt/us/extensions/rust_x11_hello/rust_x11_hello.log'
-   ```
+```sh
+mtp-rs put kindle-extension/rust_x11_hello/bin/rust_x11_hello \
+  /extensions/rust_hello/bin/rust_hello.new --verify
+mtp-rs ls /extensions/rust_hello/bin
+```
 
-3. On the Kindle, open KUAL, open **Rust X11 Hello**, and select **Run Rust X11 Hello**.
+3. Only after `--verify` succeeds, replace the stopped binary with recoverable in-place renames:
 
-4. Confirm all of the following:
+```sh
+mtp-rs rename /extensions/rust_hello/bin/rust_hello rust_hello.before-phase0
+mtp-rs rename /extensions/rust_hello/bin/rust_hello.new rust_hello
+mtp-rs ls /extensions/rust_hello/bin
+```
 
-   - the expected X11 window appears;
-   - it closes after approximately five seconds;
-   - KUAL/device UI becomes usable again;
-   - the log names the expected binary and contains the X11 connection/screen data;
-   - the launcher records exit status `0`;
-   - the PID file is gone after exit.
+The backup name must not already exist. If it does, stop and choose a unique recorded name. MTP does not preserve Unix executable bits reliably; the KUAL launcher must run `chmod +x` before execution.
 
-5. Run it a second time to prove stale state does not prevent relaunch.
+4. Upload any Phase 0 launcher/menu changes to their verified MTP paths:
+
+```sh
+mtp-rs put kindle-extension/rust_x11_hello/bin/run.sh \
+  /extensions/rust_hello/bin/run.sh --replace --verify
+mtp-rs put kindle-extension/rust_x11_hello/bin/show.sh \
+  /extensions/rust_hello/bin/show.sh --replace --verify
+mtp-rs put kindle-extension/rust_x11_hello/menu.json \
+  /extensions/rust_hello/menu.json --replace --verify
+mtp-rs put kindle-extension/rust_x11_hello/config.xml \
+  /extensions/rust_hello/config.xml --replace --verify
+```
+
+5. Wait for every MTP command to finish. If USB/MTP mode prevents interaction with KUAL on this firmware, disconnect the cable before launching and reconnect only after the process exits.
+
+6. On the Kindle, open KUAL, open **Rust Hello**, and select **Run Rust Hello**.
+
+7. Confirm all of the following:
+
+- the expected X11 window appears;
+- it closes after five seconds;
+- KUAL/device UI becomes usable again;
+- the launcher records exit status `0`;
+- no PID file remains after exit.
+
+8. Run it a second time to prove stale state does not prevent relaunch.
+
+9. Reconnect MTP if necessary and retrieve the completed log and deployed binary for evidence:
+
+```sh
+mtp-rs get /extensions/rust_hello/hello.log \
+  "$KINDLE_BACKUP_DIR/hello.phase0.log" --replace
+mtp-rs get /extensions/rust_hello/bin/rust_hello \
+  "$KINDLE_BACKUP_DIR/rust_hello.deployed" --replace
+shasum -a 256 \
+  kindle-extension/rust_x11_hello/bin/rust_x11_hello \
+  "$KINDLE_BACKUP_DIR/rust_hello.deployed"
+```
+
+The two binary checksums must match. Treat `mtp-rs get` as post-run evidence collection, not a live log follower.
 
 ### Failure and recovery paths
 
-- **“binary file does not exist”**: the build/deployment naming is still inconsistent; do not begin Phase 1.
-- **No window, X11 connection error**: record `DISPLAY`, `XAUTHORITY`, and `/tmp/.X11-unix`; compare the KUAL environment with the previously working launcher. Do not guess credentials or switch GUI libraries.
-- **Window appears but KUAL never returns after five seconds**: inspect the child PID and launcher log; fix wait/status/PID cleanup before continuing.
-- **SSH drops when the window opens**: do not install the persistent version until a separate recovery method is proven.
+- **Kindle is not visible or macOS denies USB access**: unlock the Mac and Kindle, allow the accessory, close competing MTP clients, run `mtp-rs doctor`, and retry from an interactive Terminal if the process lacks macOS USB user-client access. Do not silently substitute SSH/SCP and claim the MTP workflow was tested.
+- **Remote path not found**: rerun `mtp-rs ls /extensions` and use the path actually reported by the device. Remember that MTP `/extensions/...` is runtime `/mnt/us/extensions/...`.
+- **Upload succeeds but rename/replacement fails**: inspect `/extensions/rust_hello/bin`. Do not launch a partial install. If the old binary was renamed, restore it with `mtp-rs rename`; retain the verified host backup.
+- **“binary file does not exist”**: the build/deployment mapping is still inconsistent; do not begin Phase 1.
+- **No window, X11 connection error**: retrieve `hello.log`, record `DISPLAY`, `XAUTHORITY`, and `/tmp/.X11-unix` if an optional shell is available, and compare the KUAL environment with the previously working launcher. Do not guess credentials or switch GUI libraries.
+- **Window appears but KUAL never returns after five seconds**: wait for the process to exit before retrieving the log, then fix child wait/status/PID cleanup. Prove the watchdog separately before continuing.
+- **Log changes while being downloaded**: discard that copy, wait for clean process exit, and download again. MTP retrieval is not a replacement for `tail -F`.
 
 ### Phase 0 exit criteria
 
-- One canonical extension path is used everywhere.
-- The macOS checks pass.
-- The ARM/static build and static verification pass, or are explicitly marked unverified with the missing prerequisite named.
+- The host-build-to-MTP-to-runtime path mapping is explicit and used everywhere.
+- macOS checks pass.
+- ARM/static build and static verification pass, or are explicitly marked unverified with the missing prerequisite named.
+- The MTP upload completes with `--verify`, and a downloaded deployed binary has the same checksum as the host artifact.
 - The same packaged binary launches twice through KUAL, exits normally, and leaves no live process or PID file.
-- Remote log following and remote process termination have both been tested.
+- Completed-log retrieval with `mtp-rs get` is tested.
+- The 90-second watchdog is independently proved before an unbounded Rust event loop is deployed without another stop path.
 
 Suggested commit: `chore: align Kindle build and KUAL launcher paths`
 
@@ -172,37 +229,43 @@ Suggested commit: `chore: align Kindle build and KUAL launcher paths`
 
 ### Manual Kindle persistence guide
 
-1. Confirm terminal A is already following `rust_x11_hello.log` and open terminal B with a working SSH prompt.
-2. Deploy the verified binary using the temporary-name/atomic-move procedure from Phase 0. Never replace a binary while its previous process is live.
-3. Launch **Run Rust X11 Hello** from KUAL.
-4. Observe the window for at least 30 seconds. It must remain visible and the process must remain live; the old five-second auto-exit must not occur.
-5. If practical, sleep/wake or briefly cover/uncover the X11 window through a known-safe device action. Confirm an `Expose` redraw when the X server actually emits one. Absence of an `Expose` during this gesture is inconclusive; do not force repeated refreshes solely for this test.
-6. Touching the window is not an input test yet. No touch output is expected before Phases 2-3.
-7. From terminal B, invoke the validated stop script (or send `TERM` only to the PID recorded by this extension).
-8. Confirm that:
+1. Confirm the Phase 0 MTP backup exists and the 90-second watchdog was proved. Without a proved watchdog or another independent stop path, do not deploy the persistent build.
+2. Confirm no previous instance is running. Deploy the verified binary through the temporary-name/readback/rename procedure from Phase 0. Never replace the binary while the previous process may still be live.
+3. Wait for MTP commands to finish. Disconnect USB if this firmware blocks KUAL while MTP is connected.
+4. Launch **Run Rust Hello** from KUAL.
+5. Observe the window for at least 30 seconds. It must remain visible and the process must remain live; the old five-second auto-exit must not occur. Finish observations before the 90-second watchdog deadline.
+6. If practical, sleep/wake or briefly cover/uncover the X11 window through a known-safe device action. Confirm an `Expose` redraw only if the X server actually emits one. Absence of an `Expose` during that gesture is inconclusive.
+7. Touching the window is not an input test yet. No touch output is expected before Phases 2-3.
+8. For the MTP-only workflow, allow the 90-second watchdog to stop the child. A proved MTP stop sentinel or optional SSH stop may end the run earlier, but neither is required for this plan.
+9. Confirm the window disappears and KUAL/device UI becomes usable. Reconnect MTP if necessary and retrieve evidence:
 
-   - the process exits;
-   - the X11 window disappears;
-   - KUAL/device UI becomes usable;
-   - the launcher records the child result;
-   - the PID file is removed.
+```sh
+KINDLE_EVIDENCE_DIR=artifacts/kindle-runs/phase1
+mkdir -p "$KINDLE_EVIDENCE_DIR"
+mtp-rs get /extensions/rust_hello/hello.log \
+  "$KINDLE_EVIDENCE_DIR/hello.phase1.log" --replace
+mtp-rs ls /extensions/rust_hello
+```
 
-9. Launch and stop once more to prove restartability.
+10. Confirm the launcher recorded why the child ended and that `rust_hello.pid` is absent. Launch and stop once more to prove restartability.
 
 ### Failure and recovery paths
 
-- **Immediate exit**: read the first connection/event-loop error in the log; do not hide it with a cleanup error.
-- **Frozen-looking e-ink image but process is gone**: the X11 resource should disappear when the connection closes, but pixels can remain visually stale. Return to Home or sleep/wake to request a normal system redraw before considering a reboot.
-- **`TERM` does not stop it**: verify the PID and executable path, retry `TERM`, then use `KILL` only for that verified PID as a last recovery step. Preserve the log.
-- **Device UI inaccessible and SSH unavailable**: use the previously tested recovery method. Mark the persistence gate failed; do not proceed to pointer testing.
+- **Immediate exit**: after the run ends, retrieve `hello.log` with MTP and preserve the first connection/event-loop error; do not hide it behind cleanup errors.
+- **Watchdog deadline passes but the window/process remains**: do not relaunch or overwrite the binary. Use the previously proved recovery method and mark the persistence gate failed. MTP file transfer by itself cannot kill the process.
+- **Frozen-looking e-ink image but the process is gone**: an X11 resource should disappear when the connection closes, but pixels can remain visually stale. Return Home or sleep/wake to request a normal system redraw before considering reboot.
+- **Optional `TERM` stop does not work**: verify the PID and executable path, retry `TERM`, then use `KILL` only on the verified PID as a last recovery step. Preserve the log.
+- **MTP is unavailable after reconnect**: run `mtp-rs doctor`, resolve USB/accessory ownership, and retrieve evidence later. Do not infer cleanup or input behavior from a missing log download.
+- **Device UI is inaccessible and the watchdog also failed**: use the previously tested device recovery method. Do not proceed to pointer testing.
 
 ### Phase 1 exit criteria
 
 - The window remains open beyond 30 seconds.
-- The event loop blocks rather than spins (no growing idle log and no obvious idle CPU problem).
+- The event loop blocks rather than spins: no growing idle log and no obvious idle CPU problem.
 - `Expose` is handled without a timed repaint loop.
-- Connection failure is reported without a panic.
-- The process can be remotely stopped and relaunched without stale state.
+- Connection failure is reported without panic.
+- The proved watchdog or another verified stop path ends the process; the app can then be relaunched without stale state.
+- The completed Phase 1 log is retrieved through MTP and tied to the tested binary checksum.
 - The static ARM build still passes.
 
 Suggested commit: `feat: add persistent X11 event loop`
@@ -271,23 +334,38 @@ Suggested commit: `feat: subscribe to X11 pointer events`
 
 1. Record:
 
-   ```text
-   Kindle model:
-   Firmware:
-   Orientation:
-   Reported X11 width x height:
-   Binary checksum/commit:
-   Extension path:
-   Date/time:
-   ```
+```text
+Kindle model:
+Firmware:
+Orientation:
+Reported X11 width x height:
+Host binary checksum/commit:
+MTP extension path: /extensions/rust_hello
+Runtime extension path: /mnt/us/extensions/rust_hello
+Date/time:
+```
 
-2. Start `tail -F` in terminal A and keep the stop-capable SSH session in terminal B.
-3. Deploy the Phase 3 binary atomically and launch it through KUAL.
-4. Wait until the log confirms that the window is mapped. Keep test touches away from the bezel/system gesture area unless a test explicitly calls for it.
+2. Confirm the device paths and preserve the previous completed log if one exists:
+
+```sh
+KINDLE_EVIDENCE_DIR=artifacts/kindle-runs/phase3
+mkdir -p "$KINDLE_EVIDENCE_DIR"
+mtp-rs ls /extensions/rust_hello
+mtp-rs ls /extensions/rust_hello/bin
+mtp-rs get /extensions/rust_hello/hello.log \
+  "$KINDLE_EVIDENCE_DIR/hello.before-phase3.log"
+```
+
+If there is no prior log, record that fact instead of treating it as a deployment failure. Do not download or replace a log while the app is writing it.
+
+3. Deploy the Phase 3 binary with the Phase 0 temporary-name/readback/rename procedure. Confirm its readback checksum, and confirm the previous instance is not running before replacement.
+4. Wait for MTP commands to finish. Disconnect USB if necessary for KUAL interaction.
+5. Launch it through KUAL. Use the visible mapped window as the start signal; without optional SSH, do not claim the log was observed live.
+6. Complete the input sequence within the 90-second watchdog window. Keep test touches away from bezel/system gesture areas unless a test explicitly calls for them.
 
 #### Perform the input matrix
 
-Perform each action slowly, pause to identify its log lines, and annotate the captured log with the test ID afterward.
+Perform each action slowly with a short, consistent pause. Record the action order and approximate host time; after the clean stop and MTP log retrieval, annotate the corresponding lines with the test ID.
 
 | ID | Manual action | Evidence to look for |
 |---|---|---|
@@ -303,7 +381,22 @@ Repeat T1 and T2 once after stopping and relaunching the app.
 
 #### Validate the evidence
 
-For each normal tap, check:
+1. Let the 90-second watchdog or another proved stop path end the run cleanly. Confirm the window disappears and KUAL/device UI returns before accessing the log.
+2. Reconnect MTP if necessary and retrieve the complete post-run log plus a readback of the deployed binary:
+
+```sh
+mtp-rs get /extensions/rust_hello/hello.log \
+  "$KINDLE_EVIDENCE_DIR/hello.phase3.log" --replace
+mtp-rs get /extensions/rust_hello/bin/rust_hello \
+  "$KINDLE_EVIDENCE_DIR/rust_hello.phase3.deployed" --replace
+mtp-rs ls /extensions/rust_hello
+shasum -a 256 \
+  kindle-extension/rust_x11_hello/bin/rust_x11_hello \
+  "$KINDLE_EVIDENCE_DIR/rust_hello.phase3.deployed"
+```
+
+3. Require matching binary checksums, a launcher session header for this run, and no remaining `rust_hello.pid`. If the log contains earlier appended sessions, preserve the whole file and identify the tested session by its launcher timestamp/header.
+4. For each normal tap, check:
 
 - press precedes release;
 - `detail` is stable for primary touch, whatever its value actually is;
@@ -313,13 +406,8 @@ For each normal tap, check:
 - the event window ID matches the created application window;
 - no panic, connection failure, or unexpected process exit occurs.
 
-Copy the complete log back to the host before the next build. Do not keep only a screenshot or the last `eips` line.
-
-#### End the run
-
-1. Stop only the PID validated by the extension stop mechanism.
-2. Confirm process exit, window removal, PID-file cleanup, and device UI recovery.
-3. Preserve the log with the commit/checksum and device metadata.
+5. Relaunch and repeat T1/T2 once. After the second clean stop, retrieve the log again as `hello.phase3.relaunch.log` and tie both sessions to the same binary checksum.
+6. Preserve the complete logs, checksum, commit, and device metadata before any next build. Do not keep only a screenshot or the last `eips` line.
 
 ### Interpreting failures without jumping to a fallback
 
@@ -359,7 +447,9 @@ Kindle model and firmware:
 Orientation and X11 geometry:
 Launch through KUAL: PASS / FAIL
 Persistent >30 seconds: PASS / FAIL
-Remote stop and relaunch: PASS / FAIL
+MTP upload/readback verification: PASS / FAIL
+Watchdog/verified stop and relaunch: PASS / FAIL
+Completed log retrieved with MTP: PASS / FAIL
 ButtonPress observed: YES / NO
 ButtonRelease observed: YES / NO
 Coordinates position-dependent: YES / NO
