@@ -7,3 +7,4 @@
 # Keep human-readable Kindle run evidence, but not downloaded binary readbacks.
 !/artifacts/**/*.log
 /artifacts/**/*.deployed
+/artifacts/**/*.previous

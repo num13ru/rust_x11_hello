@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """Companion listener for Kindle rust_x11_hello semantic activations.
 
-Listens on the USBNetwork interface for the one-line protocol:
+Listens on a TCP port for the one-line protocol:
     event action=<semantic-id>
-and prints each received action. Requires the Mac USBNetwork interface to be
-up with the Kindle at 192.168.15.201 and this host routable to it.
+and prints each received action, validating it against the six known ids.
+
+Defaults to 0.0.0.0:5581 (the USBNetwork companion port). For a Wi-Fi run,
+bind explicitly and/or select a specific interface:
+    python3 tools/companion_listen.py --host 0.0.0.0 --port 5581
 """
 
+import argparse
 import socket
 import sys
 
@@ -23,12 +27,17 @@ KNOWN_ACTIONS = {
 }
 
 
-def main() -> int:
+def main(argv) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--host", default=HOST, help=f"bind address (default {HOST})")
+    parser.add_argument("--port", type=int, default=PORT, help=f"bind port (default {PORT})")
+    args = parser.parse_args(argv)
+
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv:
         srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        srv.bind((HOST, PORT))
+        srv.bind((args.host, args.port))
         srv.listen(1)
-        print(f"listening on {HOST}:{PORT}", flush=True)
+        print(f"listening on {args.host}:{args.port}", flush=True)
         while True:
             conn, addr = srv.accept()
             with conn:
@@ -46,4 +55,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

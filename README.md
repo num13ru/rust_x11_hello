@@ -56,12 +56,24 @@ companion host:
 event action=<semantic-id>;
 ```
 
-The Kindle connects to `192.168.15.201:5581` (the USBNetwork static host) with
-a 150 ms connect timeout, writes the line, and disconnects. A companion that is
-down or unreachable costs a bounded 150 ms per activation and is logged as
-`transport error: ...` on the device; it never breaks the X11 event loop or the
-on-device activation log. This milestone still opens no listening socket of its
-own and carries no network payload other than the action id.
+The Kindle connects to the companion with a 150 ms connect timeout, writes the
+line, and disconnects. The target defaults to `192.168.15.201:5581` (the
+USBNetwork static host) and can be overridden per run with the
+`RUST_X11_HELLO_COMPANION` environment variable, e.g. for a Wi-Fi run where
+the Mac is at `192.168.0.12`:
+
+```sh
+RUST_X11_HELLO_COMPANION=192.168.0.12 python3 tools/companion_listen.py
+```
+
+On the device, export the same variable in the KUAL launch environment so the
+binary targets the Mac over Wi-Fi instead of the (PW6-unavailable) USBNetwork
+static host. A companion that is down or unreachable costs a bounded 150 ms per
+activation and is logged as `transport error: ...` on the device; it never
+breaks the X11 event loop or the on-device activation log. This milestone still
+opens no listening socket of its own and carries no network payload other than
+the action id.
+
 
 The companion receiver is:
 
@@ -70,11 +82,13 @@ python3 tools/companion_listen.py
 ```
 
 It listens on `0.0.0.0:5581` on the Mac, prints each received line, and
-validates the id against the six known semantic actions. The Mac must have the
-USBNetwork interface up with this host at `192.168.15.201` (Kindle at
-`.200`); MTP mode and USBNetwork cannot run over the same USB link at once, so
-deploy the binary over MTP first, then switch the device to USBNetwork for the
-run.
+validates the id against the six known semantic actions. For the default
+USBNetwork path, the Mac must have the USBNetwork interface up with this host
+at `192.168.15.201` (Kindle at `.200`); MTP mode and USBNetwork cannot run over
+the same USB link at once, so deploy the binary over MTP first, then switch the
+device to USBNetwork for the run. For a Wi-Fi run, the listener binds the Mac's
+local address (e.g. `--host 0.0.0.0`) and the Kindle targets that address via
+`RUST_X11_HELLO_COMPANION`; Wi-Fi and MTP can coexist over the USB link.
 
 ## Host checks and Kindle build
 

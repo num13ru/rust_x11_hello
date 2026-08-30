@@ -208,9 +208,11 @@ rm -f "$WATCHDOG_MARKER"
 if ! chmod +x "$BIN" 2>> "$LOG"; then
     echo "WARNING: chmod +x failed; attempting launch with existing mode" >> "$LOG"
 fi
-
+if [ -n "$RUST_X11_HELLO_COMPANION" ]; then
+    echo "Companion host override: $RUST_X11_HELLO_COMPANION" >> "$LOG"
+fi
 echo "---- running Rust binary ----" >> "$LOG"
-"$BIN" >> "$LOG" 2>&1 &
+RUST_X11_HELLO_COMPANION="${RUST_X11_HELLO_COMPANION:-}" "$BIN" >> "$LOG" 2>&1 &
 CHILD_PID=$!
 
 if ! printf '%s\n' "$CHILD_PID" > "$PID_FILE"; then
