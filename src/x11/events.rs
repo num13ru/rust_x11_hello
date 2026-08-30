@@ -4,6 +4,7 @@
 //! [`crate::ui::button::PointerEvent`] and renders logical layouts with
 //! core-X11 requests. The UI layer never sees X11 types.
 
+use crate::ui::action::action_for_button;
 use crate::ui::button::{ContactTracker, PointerEvent, PointerEventKind, handle_pointer_event};
 use crate::ui::geometry::{Point, WINDOW_HEIGHT, WINDOW_WIDTH, draw_layout};
 use anyhow::{Context, Result, anyhow};
@@ -82,7 +83,7 @@ pub fn event_loop(conn: &RustConnection, win: Window, gc: Gcontext) -> Result<Ev
                     width,
                     height,
                 ) {
-                    eprintln!("ui action=activate button={button_id}");
+                    log_activation(button_id);
                 }
             }
             Event::ButtonPress(_) => {}
@@ -101,7 +102,7 @@ pub fn event_loop(conn: &RustConnection, win: Window, gc: Gcontext) -> Result<Ev
                     width,
                     height,
                 ) {
-                    eprintln!("ui action=activate button={button_id}");
+                    log_activation(button_id);
                 }
             }
             Event::ButtonRelease(_) => {}
@@ -148,6 +149,16 @@ pub fn format_pointer_event(event_type: &str, event: &ButtonPressEvent) -> Strin
         u16::from(event.state),
         event.same_screen,
     )
+}
+/// Log one UI activation with its logical button id and semantic action id.
+fn log_activation(button_id: u8) {
+    match action_for_button(button_id) {
+        Some(action) => eprintln!(
+            "ui action=activate button={button_id} semantic={}",
+            action.id()
+        ),
+        None => eprintln!("ui action=activate button={button_id} semantic=unknown",),
+    }
 }
 
 fn geometry_update(current: (u16, u16), reported: (u16, u16)) -> GeometryUpdate {
