@@ -102,47 +102,118 @@ pub fn handle_pointer_event(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::geometry::{WINDOW_HEIGHT, WINDOW_WIDTH};
+    use crate::ui::geometry::{
+        EXIT_BAR_HEIGHT, EXIT_BAR_RECT_TOP, GRID_RECT_LEFT, GRID_RECT_TOP, GRID_ROWS_CELL_HEIGHT,
+        GRID_ROWS_CELL_WIDTH, WINDOW_HEIGHT, WINDOW_WIDTH,
+    };
+
+    /// Center point of grid cell `(row, column)` at the reference size.
+    fn cell_center(row: u16, column: u16) -> Point {
+        Point {
+            x: (GRID_RECT_LEFT + column * GRID_ROWS_CELL_WIDTH + GRID_ROWS_CELL_WIDTH / 2) as i16,
+            y: (GRID_RECT_TOP + row * GRID_ROWS_CELL_HEIGHT + GRID_ROWS_CELL_HEIGHT / 2) as i16,
+        }
+    }
+
+    /// A point inside the boundary of cell `(row, column)` at the reference size.
+    fn inside_cell(row: u16, column: u16) -> Point {
+        Point {
+            x: (GRID_RECT_LEFT + column * GRID_ROWS_CELL_WIDTH) as i16,
+            y: (GRID_RECT_TOP + row * GRID_ROWS_CELL_HEIGHT) as i16,
+        }
+    }
+
+    /// center of the exit bar at the reference size.
+    fn exit_bar_center() -> Point {
+        Point {
+            x: (WINDOW_WIDTH / 2) as i16,
+            y: (EXIT_BAR_RECT_TOP + EXIT_BAR_HEIGHT / 2) as i16,
+        }
+    }
 
     #[test]
     fn grid_hit_testing_uses_half_open_edges() {
         let buttons = button_grid(WINDOW_WIDTH, WINDOW_HEIGHT);
 
-        assert_eq!(hit_button(&buttons, Point { x: 20, y: 60 }).unwrap().id, 1);
+        // Interior points of each cell hit their cell.
+        assert_eq!(hit_button(&buttons, cell_center(0, 0)).unwrap().id, 1);
+        assert_eq!(hit_button(&buttons, cell_center(1, 2)).unwrap().id, 6);
+        // Points just inside the leading/trailing edge of a cell.
+        assert_eq!(hit_button(&buttons, inside_cell(0, 1)).unwrap().id, 2);
+        // The shared vertical edge belongs to the right-hand cell (half-open).
+        assert_eq!(hit_button(&buttons, inside_cell(0, 1)).unwrap().id, 2);
+        // The shared horizontal edge belongs to the lower cell.
         assert_eq!(
-            hit_button(&buttons, Point { x: 259, y: 187 }).unwrap().id,
-            1
+            hit_button(
+                &buttons,
+                Point {
+                    x: (GRID_RECT_LEFT + GRID_ROWS_CELL_WIDTH / 2) as i16,
+                    y: (GRID_RECT_TOP + GRID_ROWS_CELL_HEIGHT) as i16,
+                }
+            )
+            .unwrap()
+            .id,
+            4
         );
-        assert_eq!(hit_button(&buttons, Point { x: 260, y: 60 }).unwrap().id, 2);
-        assert_eq!(
-            hit_button(&buttons, Point { x: 739, y: 315 }).unwrap().id,
-            6
+        // Just outside the grid: no hit.
+        assert!(
+            hit_button(
+                &buttons,
+                Point {
+                    x: GRID_RECT_LEFT as i16 - 1,
+                    y: GRID_RECT_TOP as i16,
+                }
+            )
+            .is_none()
         );
-        assert!(hit_button(&buttons, Point { x: 19, y: 60 }).is_none());
+        // Exit bar: full width, below the grid.
+        assert_eq!(hit_button(&buttons, exit_bar_center()).unwrap().id, 7);
         assert_eq!(
-            hit_button(&buttons, Point { x: 740, y: 339 }).unwrap().id,
+            hit_button(
+                &buttons,
+                Point {
+                    x: WINDOW_WIDTH as i16 - 1,
+                    y: (EXIT_BAR_RECT_TOP + 1) as i16,
+                }
+            )
+            .unwrap()
+            .id,
             7
         );
-        // The exit bar spans the full width at the bottom (y >= 324).
-        assert_eq!(
-            hit_button(&buttons, Point { x: 739, y: 340 }).unwrap().id,
-            7
+        // Outside the window: no hit. (Negative x is a boundary sentinel.)
+        assert!(
+            hit_button(
+                &buttons,
+                Point {
+                    x: WINDOW_WIDTH as i16,
+                    y: exit_bar_center().y
+                }
+            )
+            .is_none()
         );
-        assert_eq!(hit_button(&buttons, Point { x: 5, y: 350 }).unwrap().id, 7);
-        assert!(hit_button(&buttons, Point { x: 760, y: 350 }).is_none());
-        assert!(hit_button(&buttons, Point { x: -1, y: 100 }).is_none());
+        assert!(
+            hit_button(
+                &buttons,
+                Point {
+                    x: -1,
+                    y: GRID_RECT_TOP as i16
+                }
+            )
+            .is_none()
+        );
     }
 
     #[test]
     fn primary_press_and_same_button_release_activate_once() {
         let buttons = button_grid(WINDOW_WIDTH, WINDOW_HEIGHT);
         let mut contact = ContactTracker::default();
-        let inside_button_4 = Point { x: 140, y: 270 };
+        let inside_button_4 = cell_center(1, 0);
+        let nearby_in_4 = inside_button_4;
 
         contact.press(PRIMARY_BUTTON_DETAIL, inside_button_4, &buttons);
         assert_eq!(contact.state, ContactState::Armed(4));
 
-        contact.press(9, Point { x: 150, y: 275 }, &buttons);
+        contact.press(9, nearby_in_4, &buttons);
         assert_eq!(contact.state, ContactState::Armed(4));
         assert_eq!(contact.release(9, inside_button_4, &buttons), None);
         assert_eq!(contact.state, ContactState::Armed(4));
@@ -157,12 +228,11 @@ mod tests {
             None
         );
     }
-
     #[test]
     fn primary_contact_cancels_on_mismatch_repeat_outside_or_geometry_change() {
         let buttons = button_grid(WINDOW_WIDTH, WINDOW_HEIGHT);
-        let button_1 = Point { x: 140, y: 130 };
-        let button_2 = Point { x: 380, y: 130 };
+        let button_1 = cell_center(0, 0);
+        let button_2 = cell_center(0, 1);
         let outside = Point { x: 5, y: 5 };
         let mut contact = ContactTracker::default();
 
@@ -199,7 +269,7 @@ mod tests {
     #[test]
     fn pointer_events_wire_auxiliary_details_do_not_touch_primary_state() {
         let mut contact = ContactTracker::default();
-        let inside = Point { x: 140, y: 270 };
+        let inside = cell_center(1, 0);
         let outside = Point { x: 5, y: 5 };
 
         assert_eq!(

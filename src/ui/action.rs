@@ -32,18 +32,18 @@ impl SemanticAction {
     }
 }
 
-/// Map a grid button id (`1..=7`) to its semantic action.
+/// Map a grid button id (1..=6, plus the exit bar id) to its semantic action.
 ///
-/// Returns `None` for any other id; the grid never produces one, so an
+/// Returns `None` for any other id; the grid never produces one.
 pub fn action_for_button(button_id: u8) -> Option<SemanticAction> {
     match button_id {
+        crate::ui::geometry::EXIT_BUTTON_ID => Some(SemanticAction::Exit),
         1 => Some(SemanticAction::MediaPlayPause),
         2 => Some(SemanticAction::MediaNext),
         3 => Some(SemanticAction::MediaPrevious),
         4 => Some(SemanticAction::TerminalNewWindow),
         5 => Some(SemanticAction::TmuxWork),
         6 => Some(SemanticAction::ZoomToggleMute),
-        7 => Some(SemanticAction::Exit),
         _ => None,
     }
 }
@@ -61,7 +61,11 @@ mod tests {
             (4, SemanticAction::TerminalNewWindow, "terminal.new_window"),
             (5, SemanticAction::TmuxWork, "tmux.work"),
             (6, SemanticAction::ZoomToggleMute, "zoom.toggle_mute"),
-            (7, SemanticAction::Exit, "app.exit"),
+            (
+                crate::ui::geometry::EXIT_BUTTON_ID,
+                SemanticAction::Exit,
+                "app.exit",
+            ),
         ];
 
         for (button_id, action, id) in expected {
