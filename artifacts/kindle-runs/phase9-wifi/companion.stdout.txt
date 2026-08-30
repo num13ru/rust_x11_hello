@@ -1,0 +1,2 @@
+listening on 0.0.0.0:5581, logging to /tmp/companion_wifi_run.log
+received from 127.0.0.1:65388: event action=media.next;

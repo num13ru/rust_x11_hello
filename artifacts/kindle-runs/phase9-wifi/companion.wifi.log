@@ -1,0 +1,8 @@
+error: command not found: setsid
+1788080046 127.0.0.1:65388 event action=media.next;
+1788080159 192.168.0.4:47890 event action=media.play_pause;
+1788080160 192.168.0.4:47894 event action=media.next;
+1788080160 192.168.0.4:47910 event action=media.previous;
+1788080160 192.168.0.4:47916 event action=terminal.new_window;
+1788080161 192.168.0.4:47922 event action=tmux.work;
+1788080161 192.168.0.4:47930 event action=zoom.toggle_mute;
