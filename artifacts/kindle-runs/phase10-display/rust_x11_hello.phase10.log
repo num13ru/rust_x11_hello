@@ -1,0 +1,856 @@
+========================================
+KUAL Rust X11 Hello launcher
+Date: Sun Aug 30 07:36:34 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 90s plus 5s TERM grace
+---- running Rust binary ----
+Child PID: 3862
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+connected to X11
+screen_num: 0
+root: 0x51
+width: 1272
+height: 1696
+root_depth: 8
+black_pixel: 0
+white_pixel: 255
+window mapped id=0x1c00000 x=80 y=120 width=760 height=360
+event type=MapNotify window=0x1c00000
+input type=ButtonPress detail=1 event_x=393 event_y=202 root_x=475 root_y=324 time=77075483 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=394 event_y=202 root_x=476 root_y=324 time=77075580 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=189 event_y=218 root_x=271 root_y=340 time=77078378 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=190 event_y=218 root_x=272 root_y=340 time=77078540 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=191 event_y=268 root_x=273 root_y=390 time=77079271 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=198 event_y=273 root_x=280 root_y=395 time=77079433 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=388 event_y=228 root_x=470 root_y=350 time=77081649 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=390 event_y=228 root_x=472 root_y=350 time=77081746 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=451 event_y=167 root_x=533 root_y=289 time=77081921 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=451 event_y=167 root_x=533 root_y=289 time=77082009 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=545 event_y=171 root_x=627 root_y=293 time=77082196 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=546 event_y=174 root_x=628 root_y=296 time=77082308 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=561 event_y=219 root_x=643 root_y=341 time=77082768 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=562 event_y=219 root_x=644 root_y=341 time=77082867 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=566 event_y=204 root_x=648 root_y=326 time=77083005 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=566 event_y=204 root_x=648 root_y=326 time=77083092 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=565 event_y=165 root_x=647 root_y=287 time=77083242 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=567 event_y=167 root_x=649 root_y=289 time=77083355 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=520 event_y=178 root_x=602 root_y=300 time=77089732 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=520 event_y=178 root_x=602 root_y=300 time=77089831 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=611 event_y=115 root_x=693 root_y=237 time=77090375 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=608 event_y=113 root_x=690 root_y=235 time=77090499 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=341 event_y=73 root_x=423 root_y=195 time=77090748 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=341 event_y=73 root_x=423 root_y=195 time=77090848 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=364 event_y=234 root_x=446 root_y=356 time=77091022 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=363 event_y=239 root_x=445 root_y=361 time=77091133 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=410 event_y=324 root_x=492 root_y=446 time=77091270 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=411 event_y=324 root_x=493 root_y=446 time=77091357 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=515 event_y=166 root_x=597 root_y=288 time=77091507 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=519 event_y=166 root_x=601 root_y=288 time=77091606 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=502 event_y=104 root_x=584 root_y=226 time=77091718 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=502 event_y=104 root_x=584 root_y=226 time=77091805 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=527 event_y=170 root_x=609 root_y=292 time=77092004 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=529 event_y=171 root_x=611 root_y=293 time=77092116 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=558 event_y=245 root_x=640 root_y=367 time=77092216 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=559 event_y=248 root_x=641 root_y=370 time=77092340 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=165 event_y=137 root_x=247 root_y=259 time=77093788 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=163 event_y=137 root_x=245 root_y=259 time=77093924 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=225 event_y=216 root_x=307 root_y=338 time=77094112 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=225 event_y=219 root_x=307 root_y=341 time=77094223 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=342 event_y=277 root_x=424 root_y=399 time=77094348 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=348 event_y=276 root_x=430 root_y=398 time=77094448 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=495 event_y=142 root_x=577 root_y=264 time=77104466 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=496 event_y=142 root_x=578 root_y=264 time=77104614 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=214 event_y=175 root_x=296 root_y=297 time=77105048 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=214 event_y=175 root_x=296 root_y=297 time=77105159 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=219 event_y=199 root_x=301 root_y=321 time=77106330 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=219 event_y=198 root_x=301 root_y=320 time=77106442 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=147 event_y=127 root_x=229 root_y=249 time=77106604 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=153 event_y=124 root_x=235 root_y=246 time=77106740 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=319 event_y=133 root_x=401 root_y=255 time=77106927 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=322 event_y=137 root_x=404 root_y=259 time=77107051 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=399 event_y=227 root_x=481 root_y=349 time=77107176 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=403 event_y=230 root_x=485 root_y=352 time=77107287 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+Watchdog deadline reached; sending TERM to child PID 3862
+Terminated
+
+Rust binary exit status: 143
+End reason: watchdog
+Ended: Sun Aug 30 07:38:04 GMT+3:0100 2026
+========================================
+========================================
+KUAL Rust X11 Hello launcher
+Date: Sun Aug 30 07:38:44 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 90s plus 5s TERM grace
+---- running Rust binary ----
+Child PID: 3986
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+connected to X11
+screen_num: 0
+root: 0x51
+width: 1272
+height: 1696
+root_depth: 8
+black_pixel: 0
+white_pixel: 255
+window mapped id=0x1c00000 x=80 y=120 width=760 height=360
+event type=MapNotify window=0x1c00000
+Watchdog deadline reached; sending TERM to child PID 3986
+Terminated
+
+Rust binary exit status: 143
+End reason: watchdog
+Ended: Sun Aug 30 07:40:14 GMT+3:0100 2026
+========================================
+========================================
+KUAL Rust X11 Hello launcher
+Date: Sun Aug 30 08:05:17 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 90s plus 5s TERM grace
+---- running Rust binary ----
+Child PID: 6413
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+connected to X11
+screen_num: 0
+root: 0x51
+width: 1272
+height: 1696
+root_depth: 8
+black_pixel: 0
+white_pixel: 255
+window mapped id=0x1c00000 x=80 y=120 width=760 height=360
+event type=MapNotify window=0x1c00000
+input type=ButtonPress detail=1 event_x=383 event_y=177 root_x=465 root_y=299 time=78658226 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=379 event_y=177 root_x=461 root_y=299 time=78658412 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=11 event_y=20 root_x=93 root_y=142 time=78660450 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=11 event_y=21 root_x=93 root_y=143 time=78660711 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=748 event_y=18 root_x=830 root_y=140 time=78661966 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=741 event_y=14 root_x=823 root_y=136 time=78662239 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=31 event_y=336 root_x=113 root_y=458 time=78663314 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=28 event_y=338 root_x=110 root_y=460 time=78663587 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=743 event_y=323 root_x=825 root_y=445 time=78664391 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=728 event_y=328 root_x=810 root_y=450 time=78664677 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=349 event_y=145 root_x=431 root_y=267 time=78669828 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonPress detail=9 event_x=349 event_y=169 root_x=431 root_y=291 time=78670328 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=9 event_x=349 event_y=169 root_x=431 root_y=291 time=78670328 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=1 event_x=370 event_y=175 root_x=452 root_y=297 time=78673851 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=339 event_y=172 root_x=421 root_y=294 time=78682756 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonPress detail=6 event_x=447 event_y=175 root_x=529 root_y=297 time=78683252 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=6 event_x=447 event_y=175 root_x=529 root_y=297 time=78683252 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=1 event_x=581 event_y=179 root_x=663 root_y=301 time=78684172 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=363 event_y=187 root_x=445 root_y=309 time=78688977 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=362 event_y=187 root_x=444 root_y=309 time=78689112 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=455 event_y=123 root_x=537 root_y=245 time=78689274 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=456 event_y=126 root_x=538 root_y=248 time=78689423 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=359 event_y=172 root_x=441 root_y=294 time=78689598 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=359 event_y=172 root_x=441 root_y=294 time=78689759 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=359 event_y=115 root_x=441 root_y=237 time=78689946 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=359 event_y=117 root_x=441 root_y=239 time=78690071 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=410 event_y=220 root_x=492 root_y=342 time=78690208 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=410 event_y=226 root_x=492 root_y=348 time=78690369 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=377 event_y=185 root_x=459 root_y=307 time=78690626 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=377 event_y=187 root_x=459 root_y=309 time=78690725 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+Watchdog deadline reached; sending TERM to child PID 6413
+Terminated
+
+Rust binary exit status: 143
+End reason: watchdog
+Ended: Sun Aug 30 08:06:47 GMT+3:0100 2026
+========================================
+========================================
+KUAL Rust X11 Hello launcher
+Date: Sun Aug 30 08:44:05 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 90s plus 5s TERM grace
+---- running Rust binary ----
+Child PID: 8698
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+connected to X11
+screen_num: 0
+root: 0x51
+width: 1272
+height: 1696
+root_depth: 8
+black_pixel: 0
+white_pixel: 255
+window mapped id=0x1c00000 x=80 y=120 width=760 height=360
+event type=MapNotify window=0x1c00000
+input type=ButtonPress detail=1 event_x=362 event_y=173 root_x=444 root_y=295 time=80709530 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=361 event_y=175 root_x=443 root_y=297 time=80709789 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=731 event_y=353 root_x=813 root_y=475 time=80711072 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=731 event_y=353 root_x=813 root_y=475 time=80711408 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+Watchdog deadline reached; sending TERM to child PID 8698
+Terminated
+
+Rust binary exit status: 143
+End reason: watchdog
+Ended: Sun Aug 30 08:45:35 GMT+3:0100 2026
+========================================
+========================================
+KUAL Rust X11 Hello launcher
+Date: Sun Aug 30 09:03:48 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 90s plus 5s TERM grace
+---- running Rust binary ----
+Child PID: 10306
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+connected to X11
+screen_num: 0
+root: 0x51
+width: 1272
+height: 1696
+root_depth: 8
+black_pixel: 0
+white_pixel: 255
+window mapped id=0x1c00000 x=80 y=120 width=760 height=360
+event type=MapNotify window=0x1c00000
+input type=ButtonPress detail=1 event_x=135 event_y=149 root_x=217 root_y=271 time=81898231 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=134 event_y=150 root_x=216 root_y=272 time=81898454 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=1
+input type=ButtonPress detail=1 event_x=418 event_y=124 root_x=500 root_y=246 time=81899040 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=416 event_y=125 root_x=498 root_y=247 time=81899277 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=2
+input type=ButtonPress detail=1 event_x=629 event_y=137 root_x=711 root_y=259 time=81899739 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=628 event_y=139 root_x=710 root_y=261 time=81899977 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=3
+input type=ButtonPress detail=1 event_x=167 event_y=269 root_x=249 root_y=391 time=81900625 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=162 event_y=272 root_x=244 root_y=394 time=81900875 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=4
+input type=ButtonPress detail=1 event_x=401 event_y=279 root_x=483 root_y=401 time=81901337 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=400 event_y=279 root_x=482 root_y=401 time=81901574 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=5
+input type=ButtonPress detail=1 event_x=647 event_y=268 root_x=729 root_y=390 time=81902097 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=646 event_y=271 root_x=728 root_y=393 time=81902335 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=6
+input type=ButtonPress detail=1 event_x=123 event_y=27 root_x=205 root_y=149 time=81908663 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=121 event_y=26 root_x=203 root_y=148 time=81909073 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=151 event_y=123 root_x=233 root_y=245 time=81916210 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonPress detail=6 event_x=260 event_y=141 root_x=342 root_y=263 time=81916896 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=6 event_x=260 event_y=141 root_x=342 root_y=263 time=81916896 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=1 event_x=397 event_y=136 root_x=479 root_y=258 time=81917795 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=161 event_y=264 root_x=243 root_y=386 time=81923516 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonPress detail=9 event_x=155 event_y=270 root_x=237 root_y=392 time=81924016 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=9 event_x=155 event_y=270 root_x=237 root_y=392 time=81924016 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=1 event_x=158 event_y=279 root_x=240 root_y=401 time=81927838 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=4
+Watchdog deadline reached; sending TERM to child PID 10306
+Terminated
+
+Rust binary exit status: 143
+End reason: watchdog
+Ended: Sun Aug 30 09:05:18 GMT+3:0100 2026
+========================================
+========================================
+KUAL Rust X11 Hello launcher
+Date: Sun Aug 30 09:28:49 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 90s plus 5s TERM grace
+---- running Rust binary ----
+Child PID: 11552
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+connected to X11
+screen_num: 0
+root: 0x51
+width: 1272
+height: 1696
+root_depth: 8
+black_pixel: 0
+white_pixel: 255
+window mapped id=0x1c00000 x=80 y=120 width=760 height=360
+event type=MapNotify window=0x1c00000
+input type=ButtonPress detail=1 event_x=170 event_y=152 root_x=252 root_y=274 time=83392483 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=171 event_y=154 root_x=253 root_y=276 time=83392643 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=1
+input type=ButtonPress detail=1 event_x=387 event_y=141 root_x=469 root_y=263 time=83393115 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=387 event_y=143 root_x=469 root_y=265 time=83393277 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=2
+input type=ButtonPress detail=1 event_x=635 event_y=128 root_x=717 root_y=250 time=83393687 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=633 event_y=128 root_x=715 root_y=250 time=83393849 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=3
+input type=ButtonPress detail=1 event_x=178 event_y=280 root_x=260 root_y=402 time=83394370 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=183 event_y=279 root_x=265 root_y=401 time=83394544 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=4
+input type=ButtonPress detail=1 event_x=387 event_y=262 root_x=469 root_y=384 time=83394880 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=388 event_y=264 root_x=470 root_y=386 time=83395029 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=5
+input type=ButtonPress detail=1 event_x=627 event_y=266 root_x=709 root_y=388 time=83395316 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=627 event_y=267 root_x=709 root_y=389 time=83395477 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=6
+input type=ButtonPress detail=1 event_x=146 event_y=37 root_x=228 root_y=159 time=83396591 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=143 event_y=36 root_x=225 root_y=158 time=83397002 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=164 event_y=104 root_x=246 root_y=226 time=83400829 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonPress detail=6 event_x=270 event_y=135 root_x=352 root_y=257 time=83401438 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=6 event_x=270 event_y=135 root_x=352 root_y=257 time=83401438 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=1 event_x=388 event_y=131 root_x=470 root_y=253 time=83402222 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=144 event_y=273 root_x=226 root_y=395 time=83410350 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonPress detail=9 event_x=142 event_y=276 root_x=224 root_y=398 time=83410850 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=9 event_x=142 event_y=276 root_x=224 root_y=398 time=83410850 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=1 event_x=147 event_y=281 root_x=229 root_y=403 time=83413039 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=4
+Watchdog deadline reached; sending TERM to child PID 11552
+Terminated
+
+Rust binary exit status: 143
+End reason: watchdog
+Ended: Sun Aug 30 09:30:19 GMT+3:0100 2026
+========================================
+========================================
+KUAL Rust X11 Hello launcher
+Date: Sun Aug 30 09:42:16 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 90s plus 5s TERM grace
+---- running Rust binary ----
+Child PID: 12548
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+connected to X11
+screen_num: 0
+root: 0x51
+width: 1272
+height: 1696
+root_depth: 8
+black_pixel: 0
+white_pixel: 255
+window mapped id=0x1c00000 x=80 y=120 width=760 height=360
+event type=MapNotify window=0x1c00000
+input type=ButtonPress detail=1 event_x=160 event_y=118 root_x=242 root_y=240 time=84199018 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=159 event_y=121 root_x=241 root_y=243 time=84199230 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=1 semantic=media.play_pause
+input type=ButtonPress detail=1 event_x=394 event_y=129 root_x=476 root_y=251 time=84199653 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=396 event_y=128 root_x=478 root_y=250 time=84199827 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=2 semantic=media.next
+input type=ButtonPress detail=1 event_x=654 event_y=112 root_x=736 root_y=234 time=84200275 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=656 event_y=117 root_x=738 root_y=239 time=84200524 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=3 semantic=media.previous
+input type=ButtonPress detail=1 event_x=141 event_y=265 root_x=223 root_y=387 time=84200972 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=150 event_y=268 root_x=232 root_y=390 time=84201195 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=4 semantic=terminal.new_window
+input type=ButtonPress detail=1 event_x=402 event_y=296 root_x=484 root_y=418 time=84201527 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=402 event_y=292 root_x=484 root_y=414 time=84201714 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=5 semantic=tmux.work
+input type=ButtonPress detail=1 event_x=654 event_y=288 root_x=736 root_y=410 time=84202013 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=654 event_y=290 root_x=736 root_y=412 time=84202187 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=6 semantic=zoom.toggle_mute
+input type=ButtonPress detail=1 event_x=136 event_y=15 root_x=218 root_y=137 time=84203152 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=126 event_y=31 root_x=208 root_y=153 time=84203651 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=91 event_y=137 root_x=173 root_y=259 time=84206701 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonPress detail=6 event_x=208 event_y=141 root_x=290 root_y=263 time=84207086 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=6 event_x=208 event_y=141 root_x=290 root_y=263 time=84207086 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=1 event_x=417 event_y=159 root_x=499 root_y=281 time=84207997 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=135 event_y=271 root_x=217 root_y=393 time=84208842 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonPress detail=9 event_x=131 event_y=282 root_x=213 root_y=404 time=84209343 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=9 event_x=131 event_y=282 root_x=213 root_y=404 time=84209343 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=1 event_x=135 event_y=286 root_x=217 root_y=408 time=84211671 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=4 semantic=terminal.new_window
+Watchdog deadline reached; sending TERM to child PID 12548
+Terminated
+
+Rust binary exit status: 143
+End reason: watchdog
+Ended: Sun Aug 30 09:43:46 GMT+3:0100 2026
+========================================
+========================================
+KUAL Rust X11 Hello launcher
+Date: Sun Aug 30 11:37:53 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 90s plus 5s TERM grace
+---- running Rust binary ----
+Child PID: 12766
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+connected to X11
+screen_num: 0
+root: 0x51
+width: 1272
+height: 1696
+root_depth: 8
+black_pixel: 0
+white_pixel: 255
+window mapped id=0x1c00000 x=80 y=120 width=760 height=360
+event type=MapNotify window=0x1c00000
+input type=ButtonPress detail=1 event_x=183 event_y=133 root_x=265 root_y=255 time=4202749 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=188 event_y=131 root_x=270 root_y=253 time=4202923 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=1 semantic=media.play_pause
+transport error: failed to resolve companion address: failed to lookup address information: Name does not resolve
+input type=ButtonPress detail=1 event_x=345 event_y=143 root_x=427 root_y=265 time=4203110 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=345 event_y=143 root_x=427 root_y=265 time=4203246 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=2 semantic=media.next
+transport error: failed to resolve companion address: failed to lookup address information: Name does not resolve
+input type=ButtonPress detail=1 event_x=621 event_y=130 root_x=703 root_y=252 time=4203508 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=621 event_y=131 root_x=703 root_y=253 time=4203644 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=3 semantic=media.previous
+transport error: failed to resolve companion address: failed to lookup address information: Name does not resolve
+input type=ButtonPress detail=1 event_x=134 event_y=272 root_x=216 root_y=394 time=4203980 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=143 event_y=276 root_x=225 root_y=398 time=4204117 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=4 semantic=terminal.new_window
+transport error: failed to resolve companion address: failed to lookup address information: Name does not resolve
+input type=ButtonPress detail=1 event_x=393 event_y=299 root_x=475 root_y=421 time=4204329 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=394 event_y=299 root_x=476 root_y=421 time=4204478 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=5 semantic=tmux.work
+transport error: failed to resolve companion address: failed to lookup address information: Name does not resolve
+input type=ButtonPress detail=1 event_x=672 event_y=272 root_x=754 root_y=394 time=4205379 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=671 event_y=272 root_x=753 root_y=394 time=4205565 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=6 semantic=zoom.toggle_mute
+transport error: failed to resolve companion address: failed to lookup address information: Name does not resolve
+input type=ButtonPress detail=1 event_x=158 event_y=158 root_x=240 root_y=280 time=4206454 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=158 event_y=158 root_x=240 root_y=280 time=4206566 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=1 semantic=media.play_pause
+transport error: failed to resolve companion address: failed to lookup address information: Name does not resolve
+input type=ButtonPress detail=1 event_x=365 event_y=140 root_x=447 root_y=262 time=4206716 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=366 event_y=140 root_x=448 root_y=262 time=4206840 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=2 semantic=media.next
+transport error: failed to resolve companion address: failed to lookup address information: Name does not resolve
+input type=ButtonPress detail=1 event_x=600 event_y=133 root_x=682 root_y=255 time=4207014 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=601 event_y=136 root_x=683 root_y=258 time=4207175 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=3 semantic=media.previous
+transport error: failed to resolve companion address: failed to lookup address information: Name does not resolve
+input type=ButtonPress detail=1 event_x=106 event_y=272 root_x=188 root_y=394 time=4207462 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=116 event_y=273 root_x=198 root_y=395 time=4207599 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=4 semantic=terminal.new_window
+transport error: failed to resolve companion address: failed to lookup address information: Name does not resolve
+input type=ButtonPress detail=1 event_x=386 event_y=308 root_x=468 root_y=430 time=4207711 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=391 event_y=308 root_x=473 root_y=430 time=4207847 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=5 semantic=tmux.work
+transport error: failed to resolve companion address: failed to lookup address information: Name does not resolve
+input type=ButtonPress detail=1 event_x=555 event_y=254 root_x=637 root_y=376 time=4207985 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=559 event_y=257 root_x=641 root_y=379 time=4208134 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=6 semantic=zoom.toggle_mute
+transport error: failed to resolve companion address: failed to lookup address information: Name does not resolve
+input type=ButtonPress detail=1 event_x=136 event_y=152 root_x=218 root_y=274 time=4208703 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=138 event_y=153 root_x=220 root_y=275 time=4208815 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=1 semantic=media.play_pause
+transport error: failed to resolve companion address: failed to lookup address information: Name does not resolve
+input type=ButtonPress detail=1 event_x=421 event_y=138 root_x=503 root_y=260 time=4208964 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=425 event_y=138 root_x=507 root_y=260 time=4209088 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=2 semantic=media.next
+transport error: failed to resolve companion address: failed to lookup address information: Name does not resolve
+input type=ButtonPress detail=1 event_x=625 event_y=143 root_x=707 root_y=265 time=4209263 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=626 event_y=145 root_x=708 root_y=267 time=4209399 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=3 semantic=media.previous
+transport error: failed to resolve companion address: failed to lookup address information: Name does not resolve
+input type=ButtonPress detail=1 event_x=123 event_y=263 root_x=205 root_y=385 time=4209759 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=124 event_y=263 root_x=206 root_y=385 time=4209871 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=4 semantic=terminal.new_window
+transport error: failed to resolve companion address: failed to lookup address information: Name does not resolve
+input type=ButtonPress detail=1 event_x=347 event_y=295 root_x=429 root_y=417 time=4210033 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=352 event_y=295 root_x=434 root_y=417 time=4210145 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=5 semantic=tmux.work
+transport error: failed to resolve companion address: failed to lookup address information: Name does not resolve
+input type=ButtonPress detail=1 event_x=587 event_y=280 root_x=669 root_y=402 time=4210319 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=591 event_y=281 root_x=673 root_y=403 time=4210468 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=6 semantic=zoom.toggle_mute
+transport error: failed to resolve companion address: failed to lookup address information: Name does not resolve
+input type=ButtonPress detail=1 event_x=122 event_y=142 root_x=204 root_y=264 time=4210877 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonPress detail=6 event_x=236 event_y=145 root_x=318 root_y=267 time=4211039 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=6 event_x=236 event_y=145 root_x=318 root_y=267 time=4211039 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=1 event_x=371 event_y=137 root_x=453 root_y=259 time=4211300 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=148 event_y=293 root_x=230 root_y=415 time=4211685 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonPress detail=6 event_x=255 event_y=280 root_x=337 root_y=402 time=4211909 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=6 event_x=255 event_y=280 root_x=337 root_y=402 time=4211909 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=1 event_x=400 event_y=267 root_x=482 root_y=389 time=4212245 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=639 event_y=136 root_x=721 root_y=258 time=4212838 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonPress detail=5 event_x=521 event_y=140 root_x=603 root_y=262 time=4212987 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=5 event_x=521 event_y=140 root_x=603 root_y=262 time=4212987 window=0x1c00000 root=0x51 child=0x0 state=0x1100 same_screen=true
+input type=ButtonRelease detail=1 event_x=395 event_y=134 root_x=477 root_y=256 time=4213248 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=588 event_y=295 root_x=670 root_y=417 time=4213496 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonPress detail=5 event_x=473 event_y=294 root_x=555 root_y=416 time=4213670 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=5 event_x=473 event_y=294 root_x=555 root_y=416 time=4213670 window=0x1c00000 root=0x51 child=0x0 state=0x1100 same_screen=true
+input type=ButtonRelease detail=1 event_x=399 event_y=292 root_x=481 root_y=414 time=4213819 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+Watchdog deadline reached; sending TERM to child PID 12766
+Terminated
+
+Rust binary exit status: 143
+End reason: watchdog
+Ended: Sun Aug 30 11:39:23 GMT+3:0100 2026
+========================================
+========================================
+KUAL Rust X11 Hello launcher
+Date: Sun Aug 30 11:44:38 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 90s plus 5s TERM grace
+Companion host: 192.168.0.12
+---- running Rust binary ----
+Child PID: 13397
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+connected to X11
+screen_num: 0
+root: 0x51
+width: 1272
+height: 1696
+root_depth: 8
+black_pixel: 0
+white_pixel: 255
+window mapped id=0x1c00000 x=80 y=120 width=760 height=360
+event type=MapNotify window=0x1c00000
+input type=ButtonPress detail=1 event_x=141 event_y=127 root_x=223 root_y=249 time=4609340 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=145 event_y=131 root_x=227 root_y=253 time=4609586 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=1 semantic=media.play_pause
+input type=ButtonPress detail=1 event_x=404 event_y=127 root_x=486 root_y=249 time=4610672 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=405 event_y=135 root_x=487 root_y=257 time=4610808 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=2 semantic=media.next
+input type=ButtonPress detail=1 event_x=637 event_y=145 root_x=719 root_y=267 time=4611057 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=637 event_y=148 root_x=719 root_y=270 time=4611181 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=3 semantic=media.previous
+input type=ButtonPress detail=1 event_x=138 event_y=261 root_x=220 root_y=383 time=4611553 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=147 event_y=255 root_x=229 root_y=377 time=4611652 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=4 semantic=terminal.new_window
+input type=ButtonPress detail=1 event_x=426 event_y=263 root_x=508 root_y=385 time=4611926 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=428 event_y=266 root_x=510 root_y=388 time=4612025 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=5 semantic=tmux.work
+transport error: failed to connect to companion: connection timed out
+input type=ButtonPress detail=1 event_x=640 event_y=271 root_x=722 root_y=393 time=4612248 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=640 event_y=273 root_x=722 root_y=395 time=4612347 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=6 semantic=zoom.toggle_mute
+input type=ButtonPress detail=1 event_x=113 event_y=139 root_x=195 root_y=261 time=4614708 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonPress detail=6 event_x=223 event_y=134 root_x=305 root_y=256 time=4614954 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=6 event_x=223 event_y=134 root_x=305 root_y=256 time=4614954 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=1 event_x=399 event_y=146 root_x=481 root_y=268 time=4615352 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=357 event_y=259 root_x=439 root_y=381 time=4616044 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonPress detail=6 event_x=466 event_y=259 root_x=548 root_y=381 time=4616329 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=6 event_x=466 event_y=259 root_x=548 root_y=381 time=4616329 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=1 event_x=617 event_y=269 root_x=699 root_y=391 time=4617010 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=637 event_y=113 root_x=719 root_y=235 time=4619277 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonPress detail=5 event_x=527 event_y=126 root_x=609 root_y=248 time=4619423 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=5 event_x=527 event_y=126 root_x=609 root_y=248 time=4619424 window=0x1c00000 root=0x51 child=0x0 state=0x1100 same_screen=true
+input type=ButtonRelease detail=1 event_x=350 event_y=130 root_x=432 root_y=252 time=4619708 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=171 event_y=268 root_x=253 root_y=390 time=4620999 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=169 event_y=274 root_x=251 root_y=396 time=4621135 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=4 semantic=terminal.new_window
+input type=ButtonPress detail=1 event_x=357 event_y=271 root_x=439 root_y=393 time=4621272 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=359 event_y=279 root_x=441 root_y=401 time=4621396 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=5 semantic=tmux.work
+input type=ButtonPress detail=1 event_x=624 event_y=275 root_x=706 root_y=397 time=4622575 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=624 event_y=277 root_x=706 root_y=399 time=4622687 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=6 semantic=zoom.toggle_mute
+input type=ButtonPress detail=1 event_x=137 event_y=132 root_x=219 root_y=254 time=4623168 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonPress detail=6 event_x=258 event_y=131 root_x=340 root_y=253 time=4623280 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=6 event_x=258 event_y=131 root_x=340 root_y=253 time=4623280 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonRelease detail=1 event_x=441 event_y=133 root_x=523 root_y=255 time=4623465 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=123 event_y=37 root_x=205 root_y=159 time=4623923 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=124 event_y=39 root_x=206 root_y=161 time=4624108 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=132 event_y=38 root_x=214 root_y=160 time=4624565 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=131 event_y=38 root_x=213 root_y=160 time=4624689 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=134 event_y=28 root_x=216 root_y=150 time=4624776 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=136 event_y=28 root_x=218 root_y=150 time=4624862 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=146 event_y=25 root_x=228 root_y=147 time=4624949 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=147 event_y=23 root_x=229 root_y=145 time=4625060 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=146 event_y=14 root_x=228 root_y=136 time=4625160 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=147 event_y=14 root_x=229 root_y=136 time=4625246 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=199 event_y=29 root_x=281 root_y=151 time=4625837 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=198 event_y=29 root_x=280 root_y=151 time=4625961 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=161 event_y=123 root_x=243 root_y=245 time=4626258 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=160 event_y=123 root_x=242 root_y=245 time=4626381 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=1 semantic=media.play_pause
+input type=ButtonPress detail=1 event_x=369 event_y=137 root_x=451 root_y=259 time=4626567 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=374 event_y=138 root_x=456 root_y=260 time=4626678 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=2 semantic=media.next
+input type=ButtonPress detail=1 event_x=597 event_y=130 root_x=679 root_y=252 time=4626938 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=598 event_y=130 root_x=680 root_y=252 time=4627049 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=3 semantic=media.previous
+input type=ButtonPress detail=1 event_x=143 event_y=257 root_x=225 root_y=379 time=4627959 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=150 event_y=259 root_x=232 root_y=381 time=4628095 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=4 semantic=terminal.new_window
+input type=ButtonPress detail=1 event_x=397 event_y=262 root_x=479 root_y=384 time=4628257 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=397 event_y=263 root_x=479 root_y=385 time=4628368 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=5 semantic=tmux.work
+input type=ButtonPress detail=1 event_x=644 event_y=262 root_x=726 root_y=384 time=4628566 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=645 event_y=264 root_x=727 root_y=386 time=4628665 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=6 semantic=zoom.toggle_mute
+input type=ButtonPress detail=1 event_x=383 event_y=139 root_x=465 root_y=261 time=4656102 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=383 event_y=143 root_x=465 root_y=265 time=4656223 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=2 semantic=media.next
+input type=ButtonPress detail=1 event_x=387 event_y=128 root_x=469 root_y=250 time=4656347 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=397 event_y=133 root_x=479 root_y=255 time=4656508 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=2 semantic=media.next
+input type=ButtonPress detail=1 event_x=403 event_y=148 root_x=485 root_y=270 time=4656731 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=404 event_y=153 root_x=486 root_y=275 time=4656830 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=2 semantic=media.next
+input type=ButtonPress detail=1 event_x=445 event_y=186 root_x=527 root_y=308 time=4657114 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=445 event_y=189 root_x=527 root_y=311 time=4657238 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=2 semantic=media.next
+input type=ButtonPress detail=1 event_x=414 event_y=269 root_x=496 root_y=391 time=4657572 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=418 event_y=272 root_x=500 root_y=394 time=4657683 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=5 semantic=tmux.work
+input type=ButtonPress detail=1 event_x=331 event_y=234 root_x=413 root_y=356 time=4658041 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=336 event_y=240 root_x=418 root_y=362 time=4658165 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=5 semantic=tmux.work
+input type=ButtonPress detail=1 event_x=137 event_y=263 root_x=219 root_y=385 time=4658558 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=140 event_y=267 root_x=222 root_y=389 time=4658682 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=4 semantic=terminal.new_window
+input type=ButtonPress detail=1 event_x=253 event_y=108 root_x=335 root_y=230 time=4659052 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=253 event_y=120 root_x=335 root_y=242 time=4659163 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=1 semantic=media.play_pause
+input type=ButtonPress detail=1 event_x=422 event_y=118 root_x=504 root_y=240 time=4659485 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=423 event_y=120 root_x=505 root_y=242 time=4659584 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=2 semantic=media.next
+transport error: failed to connect to companion: connection timed out
+Watchdog deadline reached; sending TERM to child PID 13397
+Terminated
+
+Rust binary exit status: 143
+End reason: watchdog
+Ended: Sun Aug 30 11:46:08 GMT+3:0100 2026
+========================================
+========================================
+KUAL Rust X11 Hello launcher
+Date: Sun Aug 30 11:49:59 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 90s plus 5s TERM grace
+Companion host: 192.168.0.12
+---- running Rust binary ----
+Child PID: 14632
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+connected to X11
+screen_num: 0
+root: 0x51
+width: 1272
+height: 1696
+root_depth: 8
+black_pixel: 0
+white_pixel: 255
+window mapped id=0x1c00000 x=80 y=120 width=760 height=360
+event type=MapNotify window=0x1c00000
+input type=ButtonPress detail=1 event_x=152 event_y=116 root_x=234 root_y=238 time=4935316 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=156 event_y=126 root_x=238 root_y=248 time=4935588 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=1 semantic=media.play_pause
+transport error: failed to connect to companion: Connection refused (os error 111)
+input type=ButtonPress detail=1 event_x=369 event_y=137 root_x=451 root_y=259 time=4936011 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=372 event_y=139 root_x=454 root_y=261 time=4936285 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=2 semantic=media.next
+transport error: failed to connect to companion: Connection refused (os error 111)
+input type=ButtonPress detail=1 event_x=643 event_y=130 root_x=725 root_y=252 time=4936719 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=640 event_y=134 root_x=722 root_y=256 time=4937017 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=3 semantic=media.previous
+transport error: failed to connect to companion: Connection refused (os error 111)
+input type=ButtonPress detail=1 event_x=162 event_y=300 root_x=244 root_y=422 time=4937526 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=165 event_y=296 root_x=247 root_y=418 time=4937837 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=4 semantic=terminal.new_window
+transport error: failed to connect to companion: Connection refused (os error 111)
+input type=ButtonPress detail=1 event_x=400 event_y=273 root_x=482 root_y=395 time=4938235 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=405 event_y=277 root_x=487 root_y=399 time=4938572 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=5 semantic=tmux.work
+transport error: failed to connect to companion: Connection refused (os error 111)
+input type=ButtonPress detail=1 event_x=638 event_y=270 root_x=720 root_y=392 time=4939019 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=641 event_y=272 root_x=723 root_y=394 time=4939330 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=6 semantic=zoom.toggle_mute
+transport error: failed to connect to companion: Connection refused (os error 111)
+Watchdog deadline reached; sending TERM to child PID 14632
+Terminated
+
+Rust binary exit status: 143
+End reason: watchdog
+Ended: Sun Aug 30 11:51:29 GMT+3:0100 2026
+========================================
+========================================
+KUAL Rust X11 Hello launcher
+Date: Sun Aug 30 11:52:33 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 90s plus 5s TERM grace
+Companion host: 192.168.0.12
+---- running Rust binary ----
+Child PID: 15247
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+connected to X11
+screen_num: 0
+root: 0x51
+width: 1272
+height: 1696
+root_depth: 8
+black_pixel: 0
+white_pixel: 255
+window mapped id=0x1c00000 x=80 y=120 width=760 height=360
+event type=MapNotify window=0x1c00000
+input type=ButtonPress detail=1 event_x=151 event_y=135 root_x=233 root_y=257 time=5083475 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=154 event_y=135 root_x=236 root_y=257 time=5083649 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=1 semantic=media.play_pause
+transport error: failed to connect to companion: connection timed out
+input type=ButtonPress detail=1 event_x=392 event_y=124 root_x=474 root_y=246 time=5083930 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=394 event_y=126 root_x=476 root_y=248 time=5084116 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=2 semantic=media.next
+transport error: failed to connect to companion: connection timed out
+input type=ButtonPress detail=1 event_x=613 event_y=148 root_x=695 root_y=270 time=5084352 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=611 event_y=150 root_x=693 root_y=272 time=5084514 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=3 semantic=media.previous
+transport error: failed to connect to companion: connection timed out
+input type=ButtonPress detail=1 event_x=139 event_y=273 root_x=221 root_y=395 time=5085033 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=143 event_y=273 root_x=225 root_y=395 time=5085182 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=4 semantic=terminal.new_window
+transport error: failed to connect to companion: connection timed out
+input type=ButtonPress detail=1 event_x=373 event_y=270 root_x=455 root_y=392 time=5085393 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=376 event_y=274 root_x=458 root_y=396 time=5085554 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=5 semantic=tmux.work
+input type=ButtonPress detail=1 event_x=612 event_y=266 root_x=694 root_y=388 time=5085753 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=612 event_y=271 root_x=694 root_y=393 time=5085914 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=6 semantic=zoom.toggle_mute
+Watchdog deadline reached; sending TERM to child PID 15247
+Terminated
+
+Rust binary exit status: 143
+End reason: watchdog
+Ended: Sun Aug 30 11:54:04 GMT+3:0100 2026
+========================================
+========================================
+KUAL Rust X11 Hello launcher
+Date: Sun Aug 30 11:58:51 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 90s plus 5s TERM grace
+Companion host: 192.168.0.12
+---- running Rust binary ----
+Child PID: 15480
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+connected to X11
+screen_num: 0
+root: 0x51
+width: 1272
+height: 1696
+root_depth: 8
+black_pixel: 0
+white_pixel: 255
+window mapped id=0x1c00000 x=80 y=120 width=760 height=360
+event type=MapNotify window=0x1c00000
+input type=ButtonPress detail=1 event_x=149 event_y=132 root_x=231 root_y=254 time=5460744 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=153 event_y=129 root_x=235 root_y=251 time=5460893 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=1 semantic=media.play_pause
+input type=ButtonPress detail=1 event_x=395 event_y=105 root_x=477 root_y=227 time=5461243 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=399 event_y=107 root_x=481 root_y=229 time=5461392 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=2 semantic=media.next
+input type=ButtonPress detail=1 event_x=634 event_y=115 root_x=716 root_y=237 time=5461753 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=634 event_y=116 root_x=716 root_y=238 time=5461890 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=3 semantic=media.previous
+input type=ButtonPress detail=1 event_x=144 event_y=277 root_x=226 root_y=399 time=5462240 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=154 event_y=275 root_x=236 root_y=397 time=5462364 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=4 semantic=terminal.new_window
+input type=ButtonPress detail=1 event_x=441 event_y=256 root_x=523 root_y=378 time=5462639 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=444 event_y=256 root_x=526 root_y=378 time=5462764 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=5 semantic=tmux.work
+input type=ButtonPress detail=1 event_x=650 event_y=260 root_x=732 root_y=382 time=5463051 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=651 event_y=260 root_x=733 root_y=382 time=5463163 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=6 semantic=zoom.toggle_mute
+Watchdog deadline reached; sending TERM to child PID 15480
+Terminated
+
+Rust binary exit status: 143
+End reason: watchdog
+Ended: Sun Aug 30 12:00:21 GMT+3:0100 2026
+========================================
+========================================
+KUAL Rust X11 Hello launcher
+Date: Sun Aug 30 12:18:28 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 90s plus 5s TERM grace
+Companion host: 192.168.0.12
+---- running Rust binary ----
+Child PID: 17488
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+connected to X11
+screen_num: 0
+root: 0x51
+width: 1272
+height: 1696
+root_depth: 8
+black_pixel: 0
+white_pixel: 255
+window mapped id=0x1c00000 x=80 y=120 width=760 height=360
+transport: connected to companion
+event type=MapNotify window=0x1c00000
+input type=ButtonPress detail=1 event_x=146 event_y=119 root_x=228 root_y=241 time=6662697 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=149 event_y=123 root_x=231 root_y=245 time=6662883 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=1 semantic=media.play_pause
+input type=ButtonPress detail=1 event_x=388 event_y=150 root_x=470 root_y=272 time=6663357 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=395 event_y=153 root_x=477 root_y=275 time=6663557 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=2 semantic=media.next
+input type=ButtonPress detail=1 event_x=613 event_y=131 root_x=695 root_y=253 time=6664068 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=617 event_y=135 root_x=699 root_y=257 time=6664306 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=3 semantic=media.previous
+input type=ButtonPress detail=1 event_x=158 event_y=251 root_x=240 root_y=373 time=6665288 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=159 event_y=250 root_x=241 root_y=372 time=6665488 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=4 semantic=terminal.new_window
+input type=ButtonPress detail=1 event_x=399 event_y=272 root_x=481 root_y=394 time=6666048 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=399 event_y=273 root_x=481 root_y=395 time=6666273 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=5 semantic=tmux.work
+input type=ButtonPress detail=1 event_x=642 event_y=266 root_x=724 root_y=388 time=6667390 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=643 event_y=271 root_x=725 root_y=393 time=6667577 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=6 semantic=zoom.toggle_mute
+Watchdog deadline reached; sending TERM to child PID 17488
+Terminated
+
+Rust binary exit status: 143
+End reason: watchdog
+Ended: Sun Aug 30 12:19:58 GMT+3:0100 2026
+========================================
