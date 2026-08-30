@@ -11,6 +11,8 @@ use x11rb::rust_connection::RustConnection;
 use x11::display;
 use x11::events::{EventLoopExit, event_loop};
 
+mod net;
+mod proto;
 mod ui;
 mod x11;
 

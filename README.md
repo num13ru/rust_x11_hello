@@ -42,9 +42,39 @@ Every activation also emits its stable semantic action id. The current grid maps
 | 5 | `tmux.work` |
 | 6 | `zoom.toggle_mute` |
 
-These dotted ids are the wire units of the planned semantic protocol; no transport exists yet, so this milestone has no network or external side effect.
+These dotted ids are the wire units of the semantic protocol; the USBNetwork
+transport that carries them is described below.
 
-Presses outside the grid, releases in another button or outside the grid, repeated primary presses, geometry changes, and window unmapping cancel the contact. Unmatched releases do nothing. Auxiliary details such as the observed Kindle `detail=6` and `detail=9` pairs retain their raw diagnostic lines but neither activate nor cancel the armed primary contact. Pointer motion remains unlogged, and this milestone has no network or external side effect.
+Presses outside the grid, releases in another button or outside the grid, repeated primary presses, geometry changes, and window unmapping cancel the contact. Unmatched releases do nothing. Auxiliary details such as the observed Kindle `detail=6` and `detail=9` pairs retain their raw diagnostic lines but neither activate nor cancel the armed primary contact. Pointer motion remains unlogged.
+
+## USBNetwork semantic transport
+
+Each activation also sends one newline-terminated protocol line over TCP to the
+companion host:
+
+```text
+event action=<semantic-id>;
+```
+
+The Kindle connects to `192.168.15.201:5581` (the USBNetwork static host) with
+a 150 ms connect timeout, writes the line, and disconnects. A companion that is
+down or unreachable costs a bounded 150 ms per activation and is logged as
+`transport error: ...` on the device; it never breaks the X11 event loop or the
+on-device activation log. This milestone still opens no listening socket of its
+own and carries no network payload other than the action id.
+
+The companion receiver is:
+
+```sh
+python3 tools/companion_listen.py
+```
+
+It listens on `0.0.0.0:5581` on the Mac, prints each received line, and
+validates the id against the six known semantic actions. The Mac must have the
+USBNetwork interface up with this host at `192.168.15.201` (Kindle at
+`.200`); MTP mode and USBNetwork cannot run over the same USB link at once, so
+deploy the binary over MTP first, then switch the device to USBNetwork for the
+run.
 
 ## Host checks and Kindle build
 

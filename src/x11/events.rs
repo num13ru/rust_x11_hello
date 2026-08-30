@@ -4,6 +4,7 @@
 //! [`crate::ui::button::PointerEvent`] and renders logical layouts with
 //! core-X11 requests. The UI layer never sees X11 types.
 
+use crate::net::send_semantic_action;
 use crate::ui::action::action_for_button;
 use crate::ui::button::{ContactTracker, PointerEvent, PointerEventKind, handle_pointer_event};
 use crate::ui::geometry::{Point, WINDOW_HEIGHT, WINDOW_WIDTH, draw_layout};
@@ -150,17 +151,21 @@ pub fn format_pointer_event(event_type: &str, event: &ButtonPressEvent) -> Strin
         event.same_screen,
     )
 }
-/// Log one UI activation with its logical button id and semantic action id.
+/// Log one activation and send its semantic action over the transport.
 fn log_activation(button_id: u8) {
     match action_for_button(button_id) {
-        Some(action) => eprintln!(
-            "ui action=activate button={button_id} semantic={}",
-            action.id()
-        ),
+        Some(action) => {
+            eprintln!(
+                "ui action=activate button={button_id} semantic={}",
+                action.id()
+            );
+            if let Err(error) = send_semantic_action(action.id()) {
+                eprintln!("transport error: {error:#}");
+            }
+        }
         None => eprintln!("ui action=activate button={button_id} semantic=unknown",),
     }
 }
-
 fn geometry_update(current: (u16, u16), reported: (u16, u16)) -> GeometryUpdate {
     if reported.0 == 0 || reported.1 == 0 {
         GeometryUpdate::IgnoredZero
