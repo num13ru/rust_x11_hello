@@ -172,4 +172,32 @@ mod tests {
         assert_eq!(overridden, "10.0.0.99");
         assert_eq!(default, COMPANION_HOST);
     }
+
+    #[test]
+    fn reader_thread_delivers_display_commands() {
+        use std::io::Write;
+        use std::net::TcpListener;
+        use std::time::Duration;
+
+        // SAFETY: tests run serially; the override is removed before returning.
+        unsafe { std::env::set_var(COMPANION_HOST_ENV, "127.0.0.1") };
+        let listener = TcpListener::bind(("127.0.0.1", COMPANION_PORT)).expect("bind 5581");
+        let (tx, rx) = std::sync::mpsc::channel::<Result<()>>();
+        std::thread::spawn(move || {
+            let result = (|| -> Result<()> {
+                let companion = Companion::connect()?;
+                std::thread::sleep(Duration::from_millis(100));
+                let display = companion.poll_display();
+                assert_eq!(display.as_deref(), Some("hello"), "display not delivered");
+                Ok(())
+            })();
+            let _ = tx.send(result);
+        });
+
+        let (mut conn, _) = listener.accept().expect("accept");
+        writeln!(conn, "display hello").expect("write display");
+        rx.recv_timeout(Duration::from_secs(2))
+            .expect("reader test timed out")
+            .expect("reader test failed");
+    }
 }

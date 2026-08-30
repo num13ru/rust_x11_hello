@@ -46,6 +46,7 @@ pub fn event_loop(
     loop {
         // Drain any companion command received since the last X11 event.
         if let Some(text) = companion.poll_display() {
+            eprintln!("display: {text}");
             status_text = Some(text);
             draw(conn, win, gc, width, height, status_text.as_deref())
                 .context("failed to redraw status after companion command")?;
