@@ -64,19 +64,40 @@ write_status() {
 }
 
 release_lock() {
-    if [ "$LOCK_HELD" -ne 1 ]; then
-        return
-    fi
-
-    LOCK_OWNER="$(sed -n '1p' "$LOCK_OWNER_FILE" 2>/dev/null | tr -d ' \t\r\n')"
-    if [ "$LOCK_OWNER" = "$$" ]; then
+    if [ "$LOCK_HELD" = "1" ]; then
         rm -f "$LOCK_OWNER_FILE"
         rmdir "$LOCK_DIR" 2>/dev/null || true
-    else
-        echo "WARNING: launcher lock owner changed; leaving lock untouched" >> "$LOG"
+        LOCK_HELD=0
     fi
-    LOCK_HELD=0
 }
+
+# ---- PaperPad discovery firewall permission ----
+# The Kindle INPUT policy is restrictive; the PaperSpoon unicast UDP
+# discovery response (from :5580 to :5582 on wlan0) must be explicitly
+# accepted for the bounded KUAL run. A dedicated iptables chain keeps this
+# experiment from touching unrelated firewall rules.
+DISCOVERY_CHAIN="PAPERPAD_DISCOVERY"
+DISCOVERY_RULE="-i wlan0 -p udp --sport 5580 --dport 5582 -j ACCEPT"
+
+install_discovery_rule() {
+    iptables -N "$DISCOVERY_CHAIN" 2>/dev/null || true
+    iptables -C INPUT -j "$DISCOVERY_CHAIN" 2>/dev/null || \
+        iptables -I INPUT 1 -j "$DISCOVERY_CHAIN" 2>/dev/null || true
+    iptables -A "$DISCOVERY_CHAIN" $DISCOVERY_RULE 2>> "$LOG" || true
+    if iptables -C "$DISCOVERY_CHAIN" $DISCOVERY_RULE 2>/dev/null; then
+        echo "Discovery firewall rule installed: $DISCOVERY_RULE" >> "$LOG"
+    else
+        echo "WARNING: discovery firewall rule not verified" >> "$LOG"
+    fi
+}
+
+remove_discovery_rule() {
+    iptables -D INPUT -j "$DISCOVERY_CHAIN" 2>/dev/null || true
+    iptables -F "$DISCOVERY_CHAIN" 2>/dev/null || true
+    iptables -X "$DISCOVERY_CHAIN" 2>/dev/null || true
+    echo "Discovery firewall rule removed" >> "$LOG"
+}
+
 
 acquire_lock() {
     if mkdir "$LOCK_DIR" 2>/dev/null; then
@@ -209,6 +230,11 @@ fi
 
 rm -f "$WATCHDOG_MARKER"
 
+# Discovery permission: remove a stale rule from a previous failed run,
+# then install the fresh one before starting PaperPad.
+remove_discovery_rule
+install_discovery_rule
+
 if ! chmod +x "$BIN" 2>> "$LOG"; then
     echo "WARNING: chmod +x failed; attempting launch with existing mode" >> "$LOG"
 fi
@@ -288,6 +314,7 @@ rm -f "$WATCHDOG_MARKER"
 } >> "$LOG" 2>&1
 
 write_status "STOPPED status=$CHILD_STATUS reason=$END_REASON"
+remove_discovery_rule
 show_status "Stopped: $CHILD_STATUS ($END_REASON)"
 release_lock
 exit 0

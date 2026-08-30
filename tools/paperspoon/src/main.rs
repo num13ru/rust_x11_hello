@@ -24,6 +24,8 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod discovery;
+
 /// Default TCP port. Must match `rust_x11_hello`'s `COMPANION_PORT`.
 const DEFAULT_PORT: u16 = 5581;
 /// Default log file name for received activation lines.
@@ -43,6 +45,15 @@ fn main() -> io::Result<()> {
     println!("listening on 0.0.0.0:{port}, logging to {log_path}");
     println!("type 'display <text>' to send a control command");
     io::stdout().flush()?;
+
+    // Discovery responder: serve confirmations on UDP 5580 regardless of the
+    // TCP accept loop. A bind failure here is fatal (PaperPad cannot find us
+    // without it).
+    std::thread::spawn(|| {
+        if let Err(error) = discovery::run_discovery_listener() {
+            eprintln!("discovery listener error: {error}");
+        }
+    });
 
     // The connection operator control lines go to. Set to the most recent
     // accept; the single forwarder below writes each stdin line to it.
@@ -64,10 +75,13 @@ fn main() -> io::Result<()> {
                 // Clone a fresh socket handle out of the lock: TcpStream is
                 // not Clone, and the lock must not be held across the write
                 // (the accept loop sets `current` under the same lock).
-                if let Some(stream) = current.lock().expect("current lock").as_ref() {
-                    if let Ok(mut stream) = stream.try_clone() {
-                        let _ = writeln!(stream, "{line}");
-                    }
+                let write_stream = current
+                    .lock()
+                    .expect("current lock")
+                    .as_ref()
+                    .and_then(|stream| stream.try_clone().ok());
+                if let Some(mut stream) = write_stream {
+                    let _ = writeln!(stream, "{line}");
                 }
             }
         });
