@@ -110,12 +110,12 @@ mod tests {
 
         assert_eq!(hit_button(&buttons, Point { x: 20, y: 60 }).unwrap().id, 1);
         assert_eq!(
-            hit_button(&buttons, Point { x: 259, y: 199 }).unwrap().id,
+            hit_button(&buttons, Point { x: 259, y: 187 }).unwrap().id,
             1
         );
         assert_eq!(hit_button(&buttons, Point { x: 260, y: 60 }).unwrap().id, 2);
         assert_eq!(
-            hit_button(&buttons, Point { x: 739, y: 339 }).unwrap().id,
+            hit_button(&buttons, Point { x: 739, y: 315 }).unwrap().id,
             6
         );
         assert!(hit_button(&buttons, Point { x: 19, y: 60 }).is_none());

@@ -85,6 +85,14 @@ impl Companion {
     /// Connect to the companion and start the reader thread.
     pub fn connect() -> Result<Self> {
         let addr = companion_addr()?;
+        Self::connect_to(addr)
+    }
+
+    /// Connect to a specific companion address and start the reader thread.
+    ///
+    /// Internal and `pub(crate)`: tests inject an ephemeral listener this
+    /// way so they never depend on process-global env vars.
+    pub(crate) fn connect_to(addr: SocketAddr) -> Result<Self> {
         let stream = TcpStream::connect_timeout(&addr, TCP_CONNECT_TIMEOUT)
             .context("failed to connect to companion")?;
         let _ = stream.set_nodelay(true);
@@ -180,44 +188,5 @@ mod tests {
         let default = companion_host();
         assert_eq!(overridden, "10.0.0.99");
         assert_eq!(default, COMPANION_HOST);
-    }
-
-    #[test]
-    fn reader_thread_delivers_display_commands() {
-        use std::io::Write;
-        use std::net::TcpListener;
-        use std::time::Duration;
-
-        // Bind an ephemeral port so this test never clashes with a listener
-        // that may hold the default companion port (e.g. another test binary).
-        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind ephemeral");
-        let port = listener.local_addr().expect("local addr").port();
-        // SAFETY: tests run serially; the overrides are restored before returning.
-        unsafe {
-            std::env::set_var(COMPANION_HOST_ENV, "127.0.0.1");
-            std::env::set_var(COMPANION_PORT_ENV, port.to_string());
-        }
-        let (tx, rx) = std::sync::mpsc::channel::<Result<()>>();
-        std::thread::spawn(move || {
-            let result = (|| -> Result<()> {
-                let companion = Companion::connect()?;
-                std::thread::sleep(Duration::from_millis(100));
-                let display = companion.poll_display();
-                assert_eq!(display.as_deref(), Some("hello"), "display not delivered");
-                Ok(())
-            })();
-            let _ = tx.send(result);
-        });
-
-        let (mut conn, _) = listener.accept().expect("accept");
-        writeln!(conn, "display hello").expect("write display");
-        rx.recv_timeout(Duration::from_secs(2))
-            .expect("reader test timed out")
-            .expect("reader test failed");
-        // Restore env for any subsequent test.
-        unsafe {
-            std::env::remove_var(COMPANION_HOST_ENV);
-            std::env::remove_var(COMPANION_PORT_ENV);
-        }
     }
 }

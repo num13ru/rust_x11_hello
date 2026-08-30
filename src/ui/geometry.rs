@@ -12,9 +12,11 @@ pub const GRID_COLUMNS: u16 = 3;
 pub const GRID_ROWS: u16 = 2;
 pub const GRID_LEFT_INSET: u16 = 20;
 pub const GRID_RIGHT_INSET: u16 = 20;
+/// Vertical space above the grid: title baseline plus top margin.
 pub const GRID_TOP_INSET: u16 = 60;
-pub const GRID_BOTTOM_INSET: u16 = 20;
-/// Height of the full-width exit bar below the button grid.
+/// Vertical gap between the grid's bottom row and the top of the exit bar.
+pub const EXIT_BAR_GAP: u16 = 8;
+/// Height of the full-width exit bar at the very bottom of the window.
 pub const EXIT_BAR_HEIGHT: u16 = 36;
 pub const TITLE_X: u16 = 20;
 pub const TITLE_BASELINE: u16 = 40;
@@ -109,7 +111,33 @@ fn partition_offset(extent: u16, index: u16, parts: u16) -> u16 {
     ((u32::from(extent) * u32::from(index)) / u32::from(parts)) as u16
 }
 
+/// Reference-size vertical budget: top inset + grid + gap + exit bar must
+/// exactly equal [`WINDOW_HEIGHT`]. A change to any constant that breaks the
+/// sum is caught by [`layout_fits_reference`] before the build ships.
+pub const fn reference_vertical_budget() -> u32 {
+    GRID_TOP_INSET as u32
+        + EXIT_BAR_GAP as u32
+        + EXIT_BAR_HEIGHT as u32
+        + GRID_ROWS as u32 * GRID_ROWS_CELL_HEIGHT as u32
+}
+
+/// Height of one grid row at the reference window size.
+pub const GRID_ROWS_CELL_HEIGHT: u16 = 128;
+
+/// True when the reference geometry consumes the full window height exactly.
+///
+/// Evaluated at compile time so a constant that breaks the vertical budget
+/// fails the build immediately, not just in tests.
+pub const fn layout_fits_reference() -> bool {
+    reference_vertical_budget() == WINDOW_HEIGHT as u32
+}
+
+const _: () = assert!(layout_fits_reference());
 /// Build the 2×3 logical button grid for a window extent.
+///
+/// Layout is a closed vertical stack: top inset, grid, gap, exit bar. The
+/// grid occupies `top..grid_bottom`, the bar `bar_top..height`; the two never
+/// overlap because `bar_top = grid_bottom + gap`.
 ///
 /// Returns an empty grid when the extent cannot host `GRID_ROWS` full-height
 /// and `GRID_COLUMNS` full-width cells, so hit testing then finds nothing.
@@ -125,17 +153,24 @@ pub fn button_grid(width: u16, height: u16) -> Vec<LogicalButton> {
         GRID_RIGHT_INSET,
         WINDOW_WIDTH,
     );
-    let (top, bottom) = bounded_insets(
-        height,
-        GRID_ROWS,
-        GRID_TOP_INSET,
-        GRID_BOTTOM_INSET,
-        WINDOW_HEIGHT,
-    );
-    let grid_width = width - left - right;
-    let grid_height = height - top - bottom;
-    let mut buttons = Vec::with_capacity(usize::from(GRID_COLUMNS * GRID_ROWS) + 1);
+    let top = scale_u16(GRID_TOP_INSET, height, WINDOW_HEIGHT).min(height);
+    let bar_height = scale_u16(EXIT_BAR_HEIGHT, height, WINDOW_HEIGHT).min(height);
+    let gap = scale_u16(EXIT_BAR_GAP, height, WINDOW_HEIGHT)
+        .min(height.saturating_sub(top).saturating_sub(bar_height));
+    let grid_bottom = height.saturating_sub(bar_height + gap);
+    let bar_top = grid_bottom.saturating_add(gap);
 
+    let grid_height = grid_bottom.saturating_sub(top);
+    if grid_height < GRID_ROWS {
+        return Vec::new();
+    }
+
+    let grid_width = width.saturating_sub(left + right);
+    if grid_width < GRID_COLUMNS {
+        return Vec::new();
+    }
+
+    let mut buttons = Vec::with_capacity(usize::from(GRID_COLUMNS * GRID_ROWS) + 1);
     for row in 0..GRID_ROWS {
         let row_start = partition_offset(grid_height, row, GRID_ROWS);
         let row_end = partition_offset(grid_height, row + 1, GRID_ROWS);
@@ -153,28 +188,21 @@ pub fn button_grid(width: u16, height: u16) -> Vec<LogicalButton> {
             });
         }
     }
-
-    // Full-width exit bar at the bottom, above the bottom inset.
-    let exit_bar = if height >= EXIT_BAR_HEIGHT {
-        let y = height - EXIT_BAR_HEIGHT;
-        Some(LogicalButton {
+    if bar_height > 0 && height >= bar_top + bar_height {
+        buttons.push(LogicalButton {
             id: 7,
             bounds: LogicalRect {
                 x: 0,
-                y,
+                y: bar_top,
                 width,
-                height: EXIT_BAR_HEIGHT,
+                height: bar_height,
             },
-        })
-    } else {
-        None
-    };
-    if let Some(button) = exit_bar {
-        buttons.push(button);
+        });
     }
 
     buttons
 }
+
 fn logical_coordinate(value: u32) -> i16 {
     value.min(i16::MAX as u32) as i16
 }
@@ -261,17 +289,17 @@ mod tests {
         let layout = draw_layout(WINDOW_WIDTH, WINDOW_HEIGHT).expect("nonzero geometry");
 
         assert_eq!(layout.rectangles.len(), 7);
-        assert_rectangle(&layout.rectangles[0], 20, 60, 240, 140);
-        assert_rectangle(&layout.rectangles[1], 260, 60, 240, 140);
-        assert_rectangle(&layout.rectangles[2], 500, 60, 240, 140);
-        assert_rectangle(&layout.rectangles[3], 20, 200, 240, 140);
-        assert_rectangle(&layout.rectangles[4], 260, 200, 240, 140);
-        assert_rectangle(&layout.rectangles[5], 500, 200, 240, 140);
+        assert_rectangle(&layout.rectangles[0], 20, 60, 240, 128);
+        assert_rectangle(&layout.rectangles[1], 260, 60, 240, 128);
+        assert_rectangle(&layout.rectangles[2], 500, 60, 240, 128);
+        assert_rectangle(&layout.rectangles[3], 20, 188, 240, 128);
+        assert_rectangle(&layout.rectangles[4], 260, 188, 240, 128);
+        assert_rectangle(&layout.rectangles[5], 500, 188, 240, 128);
         assert_rectangle(&layout.rectangles[6], 0, 324, 760, 36);
         assert_eq!(layout.text.len(), 8);
         assert_text(&layout.text[0], 20, 40, TITLE_TEXT);
-        assert_text(&layout.text[1], 137, 135, b"1");
-        assert_text(&layout.text[6], 617, 275, b"6");
+        assert_text(&layout.text[1], 137, 129, b"1");
+        assert_text(&layout.text[6], 617, 257, b"6");
         assert_text(&layout.text[7], 362, 347, b"EXIT");
     }
 
@@ -280,14 +308,14 @@ mod tests {
         let layout = draw_layout(380, 180).expect("nonzero geometry");
 
         assert_eq!(layout.rectangles.len(), 7);
-        assert_rectangle(&layout.rectangles[0], 10, 30, 120, 70);
-        assert_rectangle(&layout.rectangles[1], 130, 30, 120, 70);
-        assert_rectangle(&layout.rectangles[5], 250, 100, 120, 70);
-        assert_rectangle(&layout.rectangles[6], 0, 144, 380, 36);
+        assert_rectangle(&layout.rectangles[0], 10, 30, 120, 64);
+        assert_rectangle(&layout.rectangles[1], 130, 30, 120, 64);
+        assert_rectangle(&layout.rectangles[5], 250, 94, 120, 64);
+        assert_rectangle(&layout.rectangles[6], 0, 162, 380, 18);
         assert_text(&layout.text[0], 10, 20, TITLE_TEXT);
-        assert_text(&layout.text[1], 67, 67, b"1");
-        assert_text(&layout.text[6], 307, 137, b"6");
-        assert_text(&layout.text[7], 172, 164, b"EXIT");
+        assert_text(&layout.text[1], 67, 64, b"1");
+        assert_text(&layout.text[6], 307, 128, b"6");
+        assert_text(&layout.text[7], 172, 173, b"EXIT");
     }
 
     #[test]
@@ -315,5 +343,46 @@ mod tests {
             assert!(placement.x >= 0);
             assert!(placement.y >= 0);
         }
+    }
+}
+
+#[cfg(test)]
+mod fit_tests {
+    use super::*;
+
+    #[test]
+    fn reference_layout_consumes_full_height() {
+        assert!(
+            layout_fits_reference(),
+            "vertical budget {} != WINDOW_HEIGHT {}",
+            reference_vertical_budget(),
+            WINDOW_HEIGHT
+        );
+    }
+
+    #[test]
+    fn grid_and_exit_bar_never_overlap_at_reference_size() {
+        let buttons = button_grid(WINDOW_WIDTH, WINDOW_HEIGHT);
+        let grid_bottom = buttons
+            .iter()
+            .filter(|b| b.id != 7)
+            .map(|b| u32::from(b.bounds.y) + u32::from(b.bounds.height))
+            .max()
+            .expect("grid has buttons");
+        let exit = buttons
+            .iter()
+            .find(|b| b.id == 7)
+            .expect("exit bar present");
+        assert!(
+            u32::from(exit.bounds.y) >= grid_bottom,
+            "exit bar y {} overlaps grid bottom {}",
+            exit.bounds.y,
+            grid_bottom
+        );
+        // And the bar sits at the very bottom, leaving no dangling gap.
+        assert_eq!(
+            u32::from(exit.bounds.y) + u32::from(exit.bounds.height),
+            u32::from(WINDOW_HEIGHT)
+        );
     }
 }
