@@ -18,6 +18,19 @@ steps an agent should follow, especially around physical-device work.
 
 - macOS listener: `cd tools/paperspoon && cargo build --release && ./target/release/paperspoon 5581 /tmp/paperspoon.log`
 
+## PaperSpoon operator discipline
+
+- The PaperSpoon macOS listener runs **only** as an operator-run foreground
+  process in a terminal the user controls.
+- Never start PaperSpoon automatically: no background process, no `&`, no
+  agent/session launch, no `nohup`/detached runner, no hub-started process.
+- When a run needs the listener, hand the exact command to the user and wait
+  for them to run it and report back; never assume it is up.
+- The user's terminal holds stdin, so they can type `display <text>` control
+  commands; a background/agent-started process cannot.
+- Log retrieval (`mtp-rs get …rust_x11_hello.log`) is safe for the agent;
+  starting the listener is not.
+
 ## Device deployment (MTP)
 
 Prerequisites:

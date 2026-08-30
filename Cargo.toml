@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 anyhow = "1"
 x11rb = "0.13"
+mdns-sd = { version = "0.21", default-features = false }
