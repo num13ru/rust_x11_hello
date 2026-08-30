@@ -1,0 +1,116 @@
+========================================
+KUAL Rust X11 Hello launcher
+Date: Sun Aug 30 07:36:34 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 90s plus 5s TERM grace
+---- running Rust binary ----
+Child PID: 3862
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+connected to X11
+screen_num: 0
+root: 0x51
+width: 1272
+height: 1696
+root_depth: 8
+black_pixel: 0
+white_pixel: 255
+window mapped id=0x1c00000 x=80 y=120 width=760 height=360
+event type=MapNotify window=0x1c00000
+input type=ButtonPress detail=1 event_x=393 event_y=202 root_x=475 root_y=324 time=77075483 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=394 event_y=202 root_x=476 root_y=324 time=77075580 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=189 event_y=218 root_x=271 root_y=340 time=77078378 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=190 event_y=218 root_x=272 root_y=340 time=77078540 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=191 event_y=268 root_x=273 root_y=390 time=77079271 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=198 event_y=273 root_x=280 root_y=395 time=77079433 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=388 event_y=228 root_x=470 root_y=350 time=77081649 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=390 event_y=228 root_x=472 root_y=350 time=77081746 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=451 event_y=167 root_x=533 root_y=289 time=77081921 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=451 event_y=167 root_x=533 root_y=289 time=77082009 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=545 event_y=171 root_x=627 root_y=293 time=77082196 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=546 event_y=174 root_x=628 root_y=296 time=77082308 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=561 event_y=219 root_x=643 root_y=341 time=77082768 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=562 event_y=219 root_x=644 root_y=341 time=77082867 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=566 event_y=204 root_x=648 root_y=326 time=77083005 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=566 event_y=204 root_x=648 root_y=326 time=77083092 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=565 event_y=165 root_x=647 root_y=287 time=77083242 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=567 event_y=167 root_x=649 root_y=289 time=77083355 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=520 event_y=178 root_x=602 root_y=300 time=77089732 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=520 event_y=178 root_x=602 root_y=300 time=77089831 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=611 event_y=115 root_x=693 root_y=237 time=77090375 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=608 event_y=113 root_x=690 root_y=235 time=77090499 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=341 event_y=73 root_x=423 root_y=195 time=77090748 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=341 event_y=73 root_x=423 root_y=195 time=77090848 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=364 event_y=234 root_x=446 root_y=356 time=77091022 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=363 event_y=239 root_x=445 root_y=361 time=77091133 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=410 event_y=324 root_x=492 root_y=446 time=77091270 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=411 event_y=324 root_x=493 root_y=446 time=77091357 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=515 event_y=166 root_x=597 root_y=288 time=77091507 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=519 event_y=166 root_x=601 root_y=288 time=77091606 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=502 event_y=104 root_x=584 root_y=226 time=77091718 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=502 event_y=104 root_x=584 root_y=226 time=77091805 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=527 event_y=170 root_x=609 root_y=292 time=77092004 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=529 event_y=171 root_x=611 root_y=293 time=77092116 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=558 event_y=245 root_x=640 root_y=367 time=77092216 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=559 event_y=248 root_x=641 root_y=370 time=77092340 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=165 event_y=137 root_x=247 root_y=259 time=77093788 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=163 event_y=137 root_x=245 root_y=259 time=77093924 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=225 event_y=216 root_x=307 root_y=338 time=77094112 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=225 event_y=219 root_x=307 root_y=341 time=77094223 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=342 event_y=277 root_x=424 root_y=399 time=77094348 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=348 event_y=276 root_x=430 root_y=398 time=77094448 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=495 event_y=142 root_x=577 root_y=264 time=77104466 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=496 event_y=142 root_x=578 root_y=264 time=77104614 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=214 event_y=175 root_x=296 root_y=297 time=77105048 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=214 event_y=175 root_x=296 root_y=297 time=77105159 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=219 event_y=199 root_x=301 root_y=321 time=77106330 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=219 event_y=198 root_x=301 root_y=320 time=77106442 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=147 event_y=127 root_x=229 root_y=249 time=77106604 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=153 event_y=124 root_x=235 root_y=246 time=77106740 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=319 event_y=133 root_x=401 root_y=255 time=77106927 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=322 event_y=137 root_x=404 root_y=259 time=77107051 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=399 event_y=227 root_x=481 root_y=349 time=77107176 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=403 event_y=230 root_x=485 root_y=352 time=77107287 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+Watchdog deadline reached; sending TERM to child PID 3862
+Terminated
+
+Rust binary exit status: 143
+End reason: watchdog
+Ended: Sun Aug 30 07:38:04 GMT+3:0100 2026
+========================================
+========================================
+KUAL Rust X11 Hello launcher
+Date: Sun Aug 30 07:38:44 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 90s plus 5s TERM grace
+---- running Rust binary ----
+Child PID: 3986
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+connected to X11
+screen_num: 0
+root: 0x51
+width: 1272
+height: 1696
+root_depth: 8
+black_pixel: 0
+white_pixel: 255
+window mapped id=0x1c00000 x=80 y=120 width=760 height=360
+event type=MapNotify window=0x1c00000
+Watchdog deadline reached; sending TERM to child PID 3986
+Terminated
+
+Rust binary exit status: 143
+End reason: watchdog
+Ended: Sun Aug 30 07:40:14 GMT+3:0100 2026
+========================================
