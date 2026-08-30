@@ -17,7 +17,7 @@ The retrieved file therefore preserves the earlier evidence byte-for-byte and ap
 
 - Model: Amazon Kindle Paperwhite (MTP-reported; serial intentionally omitted)
 - Firmware: `Kindle 5.17.1.0.4 (435197 007)`
-- Physical orientation: not recorded
+- Physical orientation: portrait (tester-confirmed after the run)
 - X11 screen: `1272 x 1696`, root `0x51`, depth `8`
 - Window: `0x1c00000`, position `(80,120)`, size `760 x 360`, border `2`
 - Launcher start: `Sun Aug 30 08:05:17 GMT+3:0100 2026`
@@ -47,4 +47,4 @@ The final read-only MTP inventory contains the package directory, log, status, a
 
 Core-X11 touch translation after relaunch is verified on this Kindle Paperwhite, firmware build, X11 server, fixed window geometry, and exact binary checksum. It works when the KUAL launcher can access `DISPLAY=:0.0`, the installed extension remains unchanged, touches land inside the mapped window, and the 90-second watchdog is allowed to finish.
 
-This evidence does not establish behavior on another Kindle model or firmware, in another physical orientation, outside the app window, for multitouch, or after package replacement. The full Phase 3 metadata gate remains pending because physical orientation was not explicitly recorded; the six-versus-five T5 discrepancy is preserved rather than attributed without evidence.
+This evidence does not establish behavior on another Kindle model or firmware, in landscape orientation, outside the app window, for multitouch, or after package replacement. With the tester's portrait-orientation confirmation, the Phase 3 evidence and metadata gates are complete. The six-versus-five T5 discrepancy remains preserved rather than attributed without evidence.

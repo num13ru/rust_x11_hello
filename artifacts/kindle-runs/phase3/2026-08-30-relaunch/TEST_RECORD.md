@@ -4,8 +4,8 @@
 
 - Device: Amazon Kindle Paperwhite (serial omitted)
 - Firmware: `Kindle 5.17.1.0.4 (435197 007)`
-- Physical orientation: **NOT RECORDED**
-- X11 geometry: `1272 x 1696` (portrait geometry only; not proof of physical orientation)
+- Physical orientation: **PORTRAIT** (tester-confirmed after the run)
+- X11 geometry: `1272 x 1696`
 - App window: `(80,120)`, `760 x 360`, border `2`
 - Binary SHA-256: `873550a9518940c308e392d85811c7d5ae54f1124c9c905bbd4df3760c858d5d`
 - MTP extension: `/extensions/rust_x11_hello`
@@ -56,5 +56,5 @@ The tester reported the sequence complete. The action-to-event mapping below is 
 - Position-dependent core-X11 `ButtonPress`/`ButtonRelease`: **VERIFIED**
 - Watchdog termination and transient-file cleanup: **PASS**
 - Exact requested T5 cardinality: **DISCREPANCY RECORDED**
-- Complete device metadata: **PENDING** because physical orientation was not supplied
-- Overall Phase 3 milestone: **PENDING METADATA COMPLETION**; the core-X11 touch proof itself is verified for this tested configuration.
+- Complete device metadata: **PASS**
+- Overall Phase 3 milestone: **VERIFIED ON PHYSICAL KINDLE**, with the exact T5 cardinality discrepancy retained above.
