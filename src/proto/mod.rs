@@ -1,13 +1,13 @@
-//! Wire protocol for semantic activation events and companion control.
+//! Wire protocol for semantic activation events and PaperSpoon control.
 //!
 //! Each activation is one newline-terminated text line sent from the Kindle
-//! to the companion listener:
+//! to the PaperSpoon listener:
 //!
 //! ```text
 //! event action=<semantic-id>;
 //! ```
 //!
-//! The companion can send one control command back:
+//! The PaperSpoon can send one control command back:
 //!
 //! ```text
 //! display <text>
@@ -17,11 +17,11 @@
 //! the stable dotted [`crate::ui::action`] ids and the display text; no
 //! device, button, or coordinate state leaves the Kindle.
 
-/// Prefix of every Kindle→companion activation line.
+/// Prefix of every Kindle→PaperSpoon activation line.
 pub const EVENT_PREFIX: &str = "event action=";
 /// Terminator of every activation line, before the trailing newline.
 pub const ACTION_TERMINATOR: &str = ";";
-/// Prefix of the companion→Kindle display control command.
+/// Prefix of the PaperSpoon→Kindle display control command.
 pub const DISPLAY_PREFIX: &str = "display";
 
 /// `/` suffix form of the display command, tolerated for manual terminal use.
@@ -34,7 +34,7 @@ pub fn format_action_line(semantic_id: &str) -> String {
     format!("{EVENT_PREFIX}{semantic_id}{ACTION_TERMINATOR}\n")
 }
 
-/// Parse a companion `display <text>` command into the text payload.
+/// Parse a PaperSpoon `display <text>` command into the text payload.
 ///
 /// Accepts both `display <text>` and `display: <text>` (the `:` variant is
 /// tolerated for manual terminal use). Returns `None` for any other line,

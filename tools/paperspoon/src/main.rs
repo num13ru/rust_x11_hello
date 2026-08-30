@@ -1,14 +1,14 @@
-//! Minimal TCP companion for Kindle semantic activations.
+//! Minimal TCP PaperSpoon listener for Kindle semantic activations.
 //!
 //! Listens on `0.0.0.0:<port>` (default 5581). For each accepted connection:
 //!
 //! - lines from the Kindle (`event action=<semantic-id>;`) are printed to
 //!   stdout and appended with a unix timestamp and peer address to a log
-//!   file (default `companion.log`);
+//!   file (default `paperspoon.log`);
 //! - lines typed on stdin are forwarded to the Kindle as control commands
 //!   (`display <text>`).
 //!
-//! Usage: `companion [port] [log-file]`
+//! Usage: `paperspoon [port] [log-file]`
 //!
 //! Only the most recently accepted connection receives stdin control lines.
 //! The Kindle reconnects across runs, and each accepted socket would get its
@@ -24,11 +24,10 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-
 /// Default TCP port. Must match `rust_x11_hello`'s `COMPANION_PORT`.
 const DEFAULT_PORT: u16 = 5581;
 /// Default log file name for received activation lines.
-const DEFAULT_LOG_FILE: &str = "companion.log";
+const DEFAULT_LOG_FILE: &str = "paperspoon.log";
 fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().collect();
     let port: u16 = args
