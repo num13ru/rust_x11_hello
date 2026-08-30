@@ -22,6 +22,36 @@ pub const TITLE_X: u16 = 20;
 pub const TITLE_BASELINE: u16 = 40;
 pub const TITLE_TEXT: &[u8] = b"Core X11 button grid: tap 1-6";
 pub const BUTTON_LABELS: [&[u8]; 6] = [b"1", b"2", b"3", b"4", b"5", b"6"];
+/// Grid cell width at the reference window size: `(760 - 20 - 20) / 3`.
+pub const GRID_ROWS_CELL_WIDTH: u16 = 240;
+
+/// Grid top edge at the reference window size.
+pub const GRID_RECT_TOP: u16 = GRID_TOP_INSET;
+/// Grid left edge at the reference window size.
+pub const GRID_RECT_LEFT: u16 = GRID_LEFT_INSET;
+/// Grid width at the reference window size: `WINDOW_WIDTH - 2 * inset`.
+pub const GRID_RECT_WIDTH: u16 = GRID_COLUMNS * GRID_ROWS_CELL_WIDTH;
+/// Grid height at the reference window size: `GRID_ROWS * cell height`.
+pub const GRID_RECT_HEIGHT: u16 = GRID_ROWS * GRID_ROWS_CELL_HEIGHT;
+/// Exit-bar left edge: the bar spans the full window width.
+pub const EXIT_BAR_RECT_LEFT: u16 = 0;
+/// Exit-bar width: the bar spans the full window width.
+pub const EXIT_BAR_RECT_WIDTH: u16 = WINDOW_WIDTH;
+/// Exit-bar top edge at the reference window size, below the grid and gap.
+pub const EXIT_BAR_RECT_TOP: u16 = GRID_RECT_TOP + GRID_RECT_HEIGHT + EXIT_BAR_GAP;
+/// Scale factor applied to the default X11 font's glyph advance when centering
+/// a one-character button label (`i16` cast clamps).
+pub const LABEL_TEXT_X_OFFSET: u16 = 3;
+/// Scale factor naming "five pixels below center" when centering a label.
+pub const LABEL_TEXT_Y_OFFSET: u16 = 5;
+/// Left inset of the EXIT label relative to the bar's center.
+pub const EXIT_TEXT_X_OFFSET: u16 = 18;
+
+/// Logical button id of the full-width exit bar.
+pub const EXIT_BUTTON_ID: u8 = 7;
+/// Label drawn centered in the exit bar.
+pub const EXIT_TEXT: &[u8] = b"EXIT";
+
 /// Integer 2-D point in window-relative coordinates.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Point {
@@ -69,7 +99,7 @@ pub struct LayoutRect {
 }
 
 /// A text run to draw at a position.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TextPlacement {
     pub x: i16,
     pub y: i16,
@@ -132,7 +162,14 @@ pub const fn layout_fits_reference() -> bool {
     reference_vertical_budget() == WINDOW_HEIGHT as u32
 }
 
-const _: () = assert!(layout_fits_reference());
+const _: () = {
+    assert!(layout_fits_reference());
+    // Reference grid tiles the full width: insets + 3 cells.
+    assert!(GRID_RECT_LEFT + GRID_RECT_WIDTH + GRID_RIGHT_INSET == WINDOW_WIDTH);
+    // Exit bar spans the full reference width and ends at the bottom edge.
+    assert!(EXIT_BAR_RECT_LEFT + EXIT_BAR_RECT_WIDTH == WINDOW_WIDTH);
+    assert!(EXIT_BAR_RECT_TOP + EXIT_BAR_HEIGHT == WINDOW_HEIGHT);
+};
 /// Build the 2×3 logical button grid for a window extent.
 ///
 /// Layout is a closed vertical stack: top inset, grid, gap, exit bar. The
@@ -190,9 +227,9 @@ pub fn button_grid(width: u16, height: u16) -> Vec<LogicalButton> {
     }
     if bar_height > 0 && height >= bar_top + bar_height {
         buttons.push(LogicalButton {
-            id: 7,
+            id: EXIT_BUTTON_ID,
             bounds: LogicalRect {
-                x: 0,
+                x: EXIT_BAR_RECT_LEFT,
                 y: bar_top,
                 width,
                 height: bar_height,
@@ -229,25 +266,26 @@ pub fn draw_layout(width: u16, height: u16) -> Option<DrawLayout> {
         y: scale_i16(TITLE_BASELINE, height, WINDOW_HEIGHT),
         text: TITLE_TEXT,
     });
-    let baseline_offset = u32::from(scale_u16(5, height, WINDOW_HEIGHT).max(1));
+    let baseline_offset = u32::from(scale_u16(LABEL_TEXT_Y_OFFSET, height, WINDOW_HEIGHT).max(1));
     for (button, label) in buttons.iter().zip(BUTTON_LABELS) {
         let center_x = u32::from(button.bounds.x) + u32::from(button.bounds.width) / 2;
         let center_y = u32::from(button.bounds.y) + u32::from(button.bounds.height) / 2;
         text.push(TextPlacement {
-            x: logical_coordinate(center_x.saturating_sub(3)),
+            x: logical_coordinate(center_x.saturating_sub(u32::from(LABEL_TEXT_X_OFFSET))),
             y: logical_coordinate(center_y + baseline_offset),
             text: label,
         });
     }
 
-    // Label the exit bar (button 7), which is not in BUTTON_LABELS.
-    if let Some(exit) = buttons.iter().find(|button| button.id == 7) {
+    // Label the exit bar, which is not in BUTTON_LABELS.
+
+    if let Some(exit) = buttons.iter().find(|button| button.id == EXIT_BUTTON_ID) {
         let center_x = u32::from(exit.bounds.x) + u32::from(exit.bounds.width) / 2;
         let center_y = u32::from(exit.bounds.y) + u32::from(exit.bounds.height) / 2;
         text.push(TextPlacement {
-            x: logical_coordinate(center_x.saturating_sub(18)),
+            x: logical_coordinate(center_x.saturating_sub(u32::from(EXIT_TEXT_X_OFFSET))),
             y: logical_coordinate(center_y + baseline_offset),
-            text: b"EXIT",
+            text: EXIT_TEXT,
         });
     }
 
@@ -257,13 +295,6 @@ pub fn draw_layout(width: u16, height: u16) -> Option<DrawLayout> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn assert_rectangle(rectangle: &LayoutRect, x: i16, y: i16, width: u16, height: u16) {
-        assert_eq!(rectangle.x, x);
-        assert_eq!(rectangle.y, y);
-        assert_eq!(rectangle.width, width);
-        assert_eq!(rectangle.height, height);
-    }
 
     fn assert_rectangles_within(rectangles: &[LayoutRect], width: u16, height: u16) {
         for rectangle in rectangles {
@@ -284,38 +315,116 @@ mod tests {
         assert_eq!(placement.text, text);
     }
 
+    /// Reference-size rect of grid cell `(row, column)`.
+    fn reference_cell_rect(row: u16, column: u16) -> LayoutRect {
+        LayoutRect {
+            x: (GRID_RECT_LEFT + column * GRID_ROWS_CELL_WIDTH) as i16,
+            y: (GRID_RECT_TOP + row * GRID_ROWS_CELL_HEIGHT) as i16,
+            width: GRID_ROWS_CELL_WIDTH,
+            height: GRID_ROWS_CELL_HEIGHT,
+        }
+    }
+
+    /// Reference-size rect of the exit bar.
+    fn reference_exit_rect() -> LayoutRect {
+        LayoutRect {
+            x: EXIT_BAR_RECT_LEFT as i16,
+            y: EXIT_BAR_RECT_TOP as i16,
+            width: EXIT_BAR_RECT_WIDTH,
+            height: EXIT_BAR_HEIGHT,
+        }
+    }
+
+    /// Label placement centered on a rect with the named text offsets.
+    fn label_placement(
+        rect: LayoutRect,
+        text_x_offset: u16,
+        baseline_offset: u16,
+        text: &'static [u8],
+    ) -> TextPlacement {
+        TextPlacement {
+            x: rect.x + rect.width as i16 / 2 - text_x_offset as i16,
+            y: rect.y + rect.height as i16 / 2 + baseline_offset as i16,
+            text,
+        }
+    }
+
     #[test]
     fn default_layout_draws_the_six_button_grid() {
         let layout = draw_layout(WINDOW_WIDTH, WINDOW_HEIGHT).expect("nonzero geometry");
 
-        assert_eq!(layout.rectangles.len(), 7);
-        assert_rectangle(&layout.rectangles[0], 20, 60, 240, 128);
-        assert_rectangle(&layout.rectangles[1], 260, 60, 240, 128);
-        assert_rectangle(&layout.rectangles[2], 500, 60, 240, 128);
-        assert_rectangle(&layout.rectangles[3], 20, 188, 240, 128);
-        assert_rectangle(&layout.rectangles[4], 260, 188, 240, 128);
-        assert_rectangle(&layout.rectangles[5], 500, 188, 240, 128);
-        assert_rectangle(&layout.rectangles[6], 0, 324, 760, 36);
-        assert_eq!(layout.text.len(), 8);
-        assert_text(&layout.text[0], 20, 40, TITLE_TEXT);
-        assert_text(&layout.text[1], 137, 129, b"1");
-        assert_text(&layout.text[6], 617, 257, b"6");
-        assert_text(&layout.text[7], 362, 347, b"EXIT");
+        let expected_rectangles: Vec<LayoutRect> = (0..GRID_ROWS)
+            .flat_map(|row| (0..GRID_COLUMNS).map(move |column| reference_cell_rect(row, column)))
+            .chain(std::iter::once(reference_exit_rect()))
+            .collect();
+        assert_eq!(layout.rectangles, expected_rectangles);
+
+        let expected_text: Vec<TextPlacement> = std::iter::once(TextPlacement {
+            x: TITLE_X as i16,
+            y: TITLE_BASELINE as i16,
+            text: TITLE_TEXT,
+        })
+        .chain(
+            expected_rectangles[..6]
+                .iter()
+                .zip(BUTTON_LABELS)
+                .map(|(rect, label)| {
+                    label_placement(*rect, LABEL_TEXT_X_OFFSET, LABEL_TEXT_Y_OFFSET, label)
+                }),
+        )
+        .chain(std::iter::once(label_placement(
+            expected_rectangles[6],
+            EXIT_TEXT_X_OFFSET,
+            LABEL_TEXT_Y_OFFSET,
+            EXIT_TEXT,
+        )))
+        .collect();
+        assert_eq!(layout.text, expected_text);
     }
 
     #[test]
-    fn half_size_layout_scales_the_grid_and_labels() {
-        let layout = draw_layout(380, 180).expect("nonzero geometry");
+    fn half_size_layout_scales_every_rect_and_label_by_two() {
+        let layout = draw_layout(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2).expect("nonzero geometry");
+        let reference = draw_layout(WINDOW_WIDTH, WINDOW_HEIGHT).expect("nonzero geometry");
 
-        assert_eq!(layout.rectangles.len(), 7);
-        assert_rectangle(&layout.rectangles[0], 10, 30, 120, 64);
-        assert_rectangle(&layout.rectangles[1], 130, 30, 120, 64);
-        assert_rectangle(&layout.rectangles[5], 250, 94, 120, 64);
-        assert_rectangle(&layout.rectangles[6], 0, 162, 380, 18);
-        assert_text(&layout.text[0], 10, 20, TITLE_TEXT);
-        assert_text(&layout.text[1], 67, 64, b"1");
-        assert_text(&layout.text[6], 307, 128, b"6");
-        assert_text(&layout.text[7], 172, 173, b"EXIT");
+        assert_eq!(layout.rectangles.len(), reference.rectangles.len());
+        for (actual, expected) in layout.rectangles.iter().zip(&reference.rectangles) {
+            assert_eq!(actual.x, expected.x / 2);
+            assert_eq!(actual.y, expected.y / 2);
+            assert_eq!(actual.width, expected.width / 2);
+            assert_eq!(actual.height, expected.height / 2);
+        }
+
+        let half_title_baseline = scale_i16(TITLE_BASELINE, WINDOW_HEIGHT / 2, WINDOW_HEIGHT);
+        assert_text(
+            &layout.text[0],
+            scale_i16(TITLE_X, WINDOW_WIDTH / 2, WINDOW_WIDTH),
+            half_title_baseline,
+            TITLE_TEXT,
+        );
+        let half_baseline_offset =
+            scale_u16(LABEL_TEXT_Y_OFFSET, WINDOW_HEIGHT / 2, WINDOW_HEIGHT).max(1);
+        // Six grid buttons: label centered on each half-size cell.
+        for (placement, rect) in layout.text[1..7].iter().zip(&layout.rectangles[..6]) {
+            assert_eq!(
+                placement.x,
+                rect.x + rect.width as i16 / 2 - LABEL_TEXT_X_OFFSET as i16
+            );
+            assert_eq!(
+                placement.y,
+                rect.y + rect.height as i16 / 2 + half_baseline_offset as i16
+            );
+        }
+        // The exit label is centered on the bar with its own x offset.
+        let exit_rect = layout.rectangles[6];
+        assert_eq!(
+            layout.text[7].x,
+            exit_rect.x + exit_rect.width as i16 / 2 - EXIT_TEXT_X_OFFSET as i16
+        );
+        assert_eq!(
+            layout.text[7].y,
+            exit_rect.y + exit_rect.height as i16 / 2 + half_baseline_offset as i16
+        );
     }
 
     #[test]
@@ -330,14 +439,17 @@ mod tests {
         assert!(button_grid(1, 1).is_empty());
 
         let minimum = button_grid(GRID_COLUMNS, GRID_ROWS);
-        assert_eq!(minimum.len(), 6);
+        assert_eq!(minimum.len(), usize::from(GRID_COLUMNS * GRID_ROWS));
         for button in &minimum {
             assert_eq!(button.bounds.width, 1);
             assert_eq!(button.bounds.height, 1);
         }
 
         let maximum = draw_layout(u16::MAX, u16::MAX).expect("maximum geometry");
-        assert_eq!(maximum.rectangles.len(), 7);
+        assert_eq!(
+            maximum.rectangles.len(),
+            usize::from(GRID_COLUMNS * GRID_ROWS) + 1
+        );
         assert_rectangles_within(&maximum.rectangles, u16::MAX, u16::MAX);
         for placement in maximum.text {
             assert!(placement.x >= 0);
@@ -365,13 +477,13 @@ mod fit_tests {
         let buttons = button_grid(WINDOW_WIDTH, WINDOW_HEIGHT);
         let grid_bottom = buttons
             .iter()
-            .filter(|b| b.id != 7)
+            .filter(|b| b.id != EXIT_BUTTON_ID)
             .map(|b| u32::from(b.bounds.y) + u32::from(b.bounds.height))
             .max()
             .expect("grid has buttons");
         let exit = buttons
             .iter()
-            .find(|b| b.id == 7)
+            .find(|b| b.id == EXIT_BUTTON_ID)
             .expect("exit bar present");
         assert!(
             u32::from(exit.bounds.y) >= grid_bottom,

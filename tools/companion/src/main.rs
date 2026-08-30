@@ -16,13 +16,21 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpListener};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+
+/// Default TCP port. Must match `rust_x11_hello`'s `COMPANION_PORT`.
+const DEFAULT_PORT: u16 = 5581;
+/// Default log file name for received activation lines.
+const DEFAULT_LOG_FILE: &str = "companion.log";
 fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().collect();
-    let port: u16 = args.get(1).and_then(|s| s.parse().ok()).unwrap_or(5581);
+    let port: u16 = args
+        .get(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_PORT);
     let log_path = args
         .get(2)
         .cloned()
-        .unwrap_or_else(|| "companion.log".to_string());
+        .unwrap_or_else(|| DEFAULT_LOG_FILE.to_string());
 
     let listener = TcpListener::bind(("0.0.0.0", port))?;
     println!("listening on 0.0.0.0:{port}, logging to {log_path}");

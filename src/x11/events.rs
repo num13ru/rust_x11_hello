@@ -25,6 +25,10 @@ enum GeometryUpdate {
     Unchanged,
     Changed { width: u16, height: u16 },
 }
+/// Left inset of the status text drawn below the grid.
+const STATUS_TEXT_X: u16 = 20;
+/// Vertical distance from the window's bottom edge to the status baseline.
+const STATUS_TEXT_BOTTOM_MARGIN: u16 = 10;
 
 /// Run the event loop until the window is destroyed or the connection fails.
 pub fn event_loop(
@@ -263,8 +267,17 @@ fn draw(
 
     if let Some(text) = status_text {
         // Below the grid's bottom inset: the last 20 reference px are clear.
-        let status_y = height.saturating_sub(10).min(i16::MAX as u16) as i16;
-        draw_text(conn, win, gc, 20, status_y, text.as_bytes())?;
+        let status_y = height
+            .saturating_sub(STATUS_TEXT_BOTTOM_MARGIN)
+            .min(i16::MAX as u16) as i16;
+        draw_text(
+            conn,
+            win,
+            gc,
+            STATUS_TEXT_X as i16,
+            status_y,
+            text.as_bytes(),
+        )?;
     }
 
     conn.flush().context("failed to flush draw requests")?;
@@ -330,10 +343,13 @@ mod tests {
             GeometryUpdate::Unchanged
         );
         assert_eq!(
-            geometry_update((WINDOW_WIDTH, WINDOW_HEIGHT), (380, 180)),
+            geometry_update(
+                (WINDOW_WIDTH, WINDOW_HEIGHT),
+                (WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2)
+            ),
             GeometryUpdate::Changed {
-                width: 380,
-                height: 180,
+                width: WINDOW_WIDTH / 2,
+                height: WINDOW_HEIGHT / 2,
             }
         );
     }
@@ -344,13 +360,21 @@ mod tests {
         let mut contact = ContactTracker::default();
 
         // Primary press inside button 1, release inside button 2: no activation.
+        let button_1 = Point {
+            x: (GRID_RECT_LEFT + GRID_ROWS_CELL_WIDTH / 2) as i16,
+            y: (GRID_RECT_TOP + GRID_ROWS_CELL_HEIGHT / 2) as i16,
+        };
+        let button_2 = Point {
+            x: (GRID_RECT_LEFT + GRID_ROWS_CELL_WIDTH + GRID_ROWS_CELL_WIDTH / 2) as i16,
+            y: (GRID_RECT_TOP + GRID_ROWS_CELL_HEIGHT / 2) as i16,
+        };
         assert_eq!(
             handle_pointer_event(
                 &mut contact,
                 PointerEvent {
                     kind: PointerEventKind::Press,
                     detail: 1,
-                    point: Point { x: 140, y: 130 },
+                    point: button_1,
                 },
                 width,
                 height,
@@ -363,7 +387,7 @@ mod tests {
                 PointerEvent {
                     kind: PointerEventKind::Release,
                     detail: 1,
-                    point: Point { x: 380, y: 130 },
+                    point: button_2,
                 },
                 width,
                 height,
@@ -372,13 +396,14 @@ mod tests {
         );
 
         // Press outside the grid: no activation.
+        let outside = Point { x: 5, y: 5 };
         assert_eq!(
             handle_pointer_event(
                 &mut contact,
                 PointerEvent {
                     kind: PointerEventKind::Press,
                     detail: 1,
-                    point: Point { x: 5, y: 5 },
+                    point: outside,
                 },
                 width,
                 height,
@@ -391,7 +416,7 @@ mod tests {
                 PointerEvent {
                     kind: PointerEventKind::Release,
                     detail: 1,
-                    point: Point { x: 5, y: 5 },
+                    point: outside,
                 },
                 width,
                 height,
@@ -400,7 +425,10 @@ mod tests {
         );
 
         // Same-button press/release in button 4: exactly one activation.
-        let inside_4 = Point { x: 140, y: 270 };
+        let inside_4 = Point {
+            x: (GRID_RECT_LEFT + GRID_ROWS_CELL_WIDTH / 2) as i16,
+            y: (GRID_RECT_TOP + GRID_ROWS_CELL_HEIGHT + GRID_ROWS_CELL_HEIGHT / 2) as i16,
+        };
         assert_eq!(
             handle_pointer_event(
                 &mut contact,
@@ -429,5 +457,7 @@ mod tests {
         );
     }
 
-    use crate::ui::geometry::Point;
+    use crate::ui::geometry::{
+        GRID_RECT_LEFT, GRID_RECT_TOP, GRID_ROWS_CELL_HEIGHT, GRID_ROWS_CELL_WIDTH, Point,
+    };
 }

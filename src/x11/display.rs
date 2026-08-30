@@ -12,6 +12,10 @@ use crate::ui::geometry::{WINDOW_HEIGHT, WINDOW_WIDTH};
 
 pub const WINDOW_X: i16 = 80;
 pub const WINDOW_Y: i16 = 120;
+/// Border width of the test window, in pixels.
+pub const WINDOW_BORDER_WIDTH: u16 = 2;
+/// X11 wire value meaning "inherit from parent" for the window visual.
+pub const VISUAL_COPY_FROM_PARENT: u32 = 0;
 
 /// Event mask selecting the core events the touch prototype consumes.
 pub fn touch_event_mask() -> EventMask {
@@ -39,9 +43,9 @@ pub fn setup_window(conn: &RustConnection) -> Result<(Window, Gcontext)> {
         WINDOW_Y,
         WINDOW_WIDTH,
         WINDOW_HEIGHT,
-        2,
+        WINDOW_BORDER_WIDTH,
         WindowClass::INPUT_OUTPUT,
-        0,
+        VISUAL_COPY_FROM_PARENT,
         &CreateWindowAux::new()
             .background_pixel(screen.white_pixel)
             .border_pixel(screen.black_pixel)
