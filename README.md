@@ -13,6 +13,16 @@ The current milestone opens a persistent override-redirect X11 window, redraws f
 - The canonical extension is installed as `/extensions/rust_x11_hello`. Do not keep the legacy `/extensions/rust_hello` entry alongside it.
 - Physical-device logs are authoritative for touch support. Host compilation or desktop pointer events cannot prove Kindle touchscreen translation.
 
+## Geometry-aware rendering
+
+- The initial Kindle window remains `(80,120)` at `760 x 360`; that verified geometry produces the same two rectangles and four text baselines as before.
+- The final event in each `Expose` batch clears and redraws the current window extent.
+- A size-changing `ConfigureNotify` updates the active geometry and redraws immediately. Duplicate geometry is ignored, and a defensive zero-width/zero-height report is logged without replacing the last valid extent.
+- Rectangle insets and text origins scale from the verified `760 x 360` reference layout. Arithmetic is bounded for tiny windows and the full core-X11 `u16` extent; text coordinates saturate at the protocol's signed-coordinate limit.
+- This milestone does not interpret touches or change rendering in response to input. Logical hit testing remains the next step.
+
+Host tests verify layout and geometry decisions at default, half, one-pixel, zero, and maximum dimensions. The ARM/static gates verify deployability, but runtime resize/redraw behavior still requires observation on an X server that actually sends resize events; no such event was part of the fixed-geometry Kindle evidence run.
+
 ## Host checks and Kindle build
 
 ```sh
