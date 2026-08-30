@@ -1,0 +1,38 @@
+========================================
+KUAL Rust X11 Hello launcher
+Date: Sun Aug 30 22:05:57 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 30s plus 5s TERM grace
+PaperSpoon host: 192.168.15.201
+---- running Rust binary ----
+Child PID: 19139
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+discovery bonjour browse-start service=_paperspoon._tcp.local. timeout_ms=30000
+discovery bonjour search-started service=_paperspoon._tcp.local. on 2 interfaces [wlan0 (10), lo (1)]
+discovery bonjour search-started service=_paperspoon._tcp.local. on 2 interfaces [wlan0 (10), lo (1)]
+discovery bonjour search-started service=_paperspoon._tcp.local. on 2 interfaces [wlan0 (10), lo (1)]
+discovery bonjour search-started service=_paperspoon._tcp.local. on 2 interfaces [wlan0 (10), lo (1)]
+discovery bonjour search-started service=_paperspoon._tcp.local. on 2 interfaces [wlan0 (10), lo (1)]
+discovery bonjour search-started service=_paperspoon._tcp.local. on 2 interfaces [wlan0 (10), lo (1)]
+========================================
+KUAL Rust X11 Hello launcher
+Date: Sun Aug 30 22:06:26 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 30s plus 5s TERM grace
+ERROR: launcher already active with PID 19130
+========================================
+discovery bonjour timeout
+Error: bonjour diagnostic: no usable _paperspoon service found
+
+Rust binary exit status: 1
+End reason: process_exit
+Ended: Sun Aug 30 22:06:27 GMT+3:0100 2026
+========================================

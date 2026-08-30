@@ -31,15 +31,18 @@ fn print_environment() {
 }
 fn run() -> Result<()> {
     // Diagnostic-only Bonjour browse: when requested, run a bounded browse
-    // of `_paperspoon._tcp.local.` and exit without touching X11. This is
-    // the Phase 3 device probe; the normal path below is unchanged.
+    // of `_paperspoon._tcp.local.` (or the overridden service type) and exit
+    // without touching X11. This is the Phase 3 device probe; the normal
+    // path below is unchanged.
     if env::var("RUST_X11_HELLO_BONJOUR_DIAGNOSTIC").is_ok() {
+        let service_type = env::var("RUST_X11_HELLO_BONJOUR_SERVICE")
+            .unwrap_or_else(|_| bonjour::SERVICE_TYPE.to_string());
         let timeout = env::var("RUST_X11_HELLO_BONJOUR_TIMEOUT_MS")
             .ok()
             .and_then(|value| value.parse::<u64>().ok())
             .map(std::time::Duration::from_millis)
             .unwrap_or(bonjour::DEFAULT_BROWSE_TIMEOUT);
-        let result = bonjour::browse_bonjour(timeout)?;
+        let result = bonjour::browse_bonjour(&service_type, timeout)?;
         match result {
             Some(candidate) => {
                 eprintln!(
@@ -52,7 +55,7 @@ fn run() -> Result<()> {
             }
             None => {
                 return Err(anyhow::anyhow!(
-                    "bonjour diagnostic: no usable _paperspoon service found"
+                    "bonjour diagnostic: no usable {service_type} service found"
                 ));
             }
         }

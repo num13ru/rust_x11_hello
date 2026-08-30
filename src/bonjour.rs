@@ -19,16 +19,15 @@
 //! discovery bonjour timeout
 //! ```
 //!
-//! Nothing here contacts the network; a [`Candidate`] is produced only from
-//! a resolved service's own IPv4 addresses + TXT port, so callers can test
-//! selection purely from resolver output.
-
+/// DNS-SD service type this project advertises/browses.
+pub const SERVICE_TYPE: &str = "_paperspoon._tcp.local.";
+/// Meta-service type that returns every mDNS service on the LAN; used to
+/// discriminate "no multicast at all" from "our advert missing".
+pub const SERVICES_TYPE: &str = "_services._dns-sd._udp.local.";
 use mdns_sd::{ServiceDaemon, ServiceEvent};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
-/// DNS-SD service type this project advertises/browses.
-pub const SERVICE_TYPE: &str = "_paperspoon._tcp.local.";
 /// Bound on how long a single diagnostic browse waits for a resolution.
 pub const DEFAULT_BROWSE_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -45,17 +44,17 @@ pub struct Candidate {
 /// Logs every mdns-sd event and returns `Ok(Some(Candidate))` only when a
 /// service instance resolved to a usable IPv4 endpoint; `Ok(None)` on
 /// timeout/removal, `Err` on initialization failures.
-pub fn browse_bonjour(timeout: Duration) -> anyhow::Result<Option<Candidate>> {
+pub fn browse_bonjour(service_type: &str, timeout: Duration) -> anyhow::Result<Option<Candidate>> {
     let daemon = ServiceDaemon::new()
         .map_err(|error| anyhow::anyhow!("bonjour daemon init failed: {error}"))?;
     eprintln!(
-        "discovery bonjour browse-start service={SERVICE_TYPE} timeout_ms={}",
+        "discovery bonjour browse-start service={service_type} timeout_ms={}",
         timeout.as_millis()
     );
+    debug_assert_ne!(service_type, SERVICES_TYPE);
     let receiver = daemon
-        .browse(SERVICE_TYPE)
+        .browse(service_type)
         .map_err(|error| anyhow::anyhow!("bonjour browse failed: {error}"))?;
-
     let deadline = std::time::Instant::now() + timeout;
     let mut found: Vec<(String, String)> = Vec::new();
     let mut selected: Option<Candidate> = None;
@@ -81,7 +80,7 @@ pub fn browse_bonjour(timeout: Duration) -> anyhow::Result<Option<Candidate>> {
                 eprintln!("discovery bonjour service-found type={service_type} name={full_name}");
                 found.push((service_type, full_name));
             }
-            ServiceEvent::ServiceResolved(resolved) => match resolved_address(&resolved, &found) {
+            ServiceEvent::ServiceResolved(resolved) => match resolved_address(&resolved) {
                 Some(candidate) => {
                     eprintln!(
                         "discovery bonjour service-resolved name={} address={} port={}",
@@ -113,22 +112,15 @@ pub fn browse_bonjour(timeout: Duration) -> anyhow::Result<Option<Candidate>> {
 }
 
 /// Build the single candidate from a resolved service, preferring an IPv4
-/// address over IPv6 and the TXT-provided port over the service port.
-fn resolved_address(
-    resolved: &mdns_sd::ResolvedService,
-    _found: &[(String, String)],
-) -> Option<Candidate> {
-    let txt_port = resolved
-        .get_properties()
-        .get("port")
-        .and_then(|value| value.val_str().parse::<u16>().ok());
+/// address and the SRV-advertised port. TXT metadata stays advisory (the TCP
+/// handshake remains authoritative) and is not used for the port.
+fn resolved_address(resolved: &mdns_sd::ResolvedService) -> Option<Candidate> {
     let mut addresses: Vec<Ipv4Addr> = resolved.get_addresses_v4().into_iter().collect();
     addresses.sort();
     let address = addresses.first().copied()?;
-    let port = txt_port.unwrap_or_else(|| resolved.get_port());
     Some(Candidate {
         instance: resolved.get_fullname().to_string(),
-        addr: SocketAddr::new(std::net::IpAddr::V4(address), port),
+        addr: SocketAddr::new(std::net::IpAddr::V4(address), resolved.get_port()),
     })
 }
 
@@ -142,21 +134,23 @@ mod tests {
     }
 
     #[test]
-    fn candidate_uses_txt_port_when_present() {
-        // A resolved service with a TXT "port" override wins over the SRV port.
-        assert_eq!(
-            tx_port_choice(5590, Some("5591")),
-            5591,
-            "TXT port must take precedence over the SRV-advertised port"
-        );
+    fn services_browsing_type_is_stable() {
+        assert_eq!(SERVICES_TYPE, "_services._dns-sd._udp.local.");
+    }
+
+    #[test]
+    fn candidate_uses_srv_port() {
+        // The SRV-advertised port is observed; TXT "port" metadata is
+        // advisory and must not override it (handshake stays authoritative).
+        assert_eq!(srv_port_choice(5590, Some("5591")), 5590);
     }
 
     #[test]
     fn candidate_falls_back_to_service_port() {
-        assert_eq!(tx_port_choice(5581, None), 5581);
+        assert_eq!(srv_port_choice(5581, None), 5581);
     }
 
-    fn tx_port_choice(srv_port: u16, txt: Option<&str>) -> u16 {
-        txt.and_then(|v| v.parse::<u16>().ok()).unwrap_or(srv_port)
+    fn srv_port_choice(srv_port: u16, _txt: Option<&str>) -> u16 {
+        srv_port
     }
 }
