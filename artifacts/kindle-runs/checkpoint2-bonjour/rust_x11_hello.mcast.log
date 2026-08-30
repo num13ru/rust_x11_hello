@@ -1,0 +1,25 @@
+========================================
+KUAL Rust X11 Hello launcher
+Date: Sun Aug 30 22:27:24 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 30s plus 5s TERM grace
+PaperSpoon host: 192.168.15.201
+---- running Rust binary ----
+Child PID: 20930
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+multicast probe start group=224.0.0.251 port=5353 timeout_ms=25000
+multicast probe join default-interface ok
+multicast probe sent-marker bytes=30
+multicast probe timeout
+Error: multicast probe: no multicast received
+
+Rust binary exit status: 1
+End reason: process_exit
+Ended: Sun Aug 30 22:27:49 GMT+3:0100 2026
+========================================
