@@ -269,7 +269,7 @@ Conditions:
   device (see `docs/usbnetwork-pw2-report.md`), so this
   milestone is proven over the device's Wi-Fi instead.
 - The Mac brings up the USB network interface at `192.168.15.201` and runs the
-  companion listener (`tools/companion_listen.py`), which prints and validates
+  companion listener, which prints and validates
   each received action id. Wi-Fi uses the Mac's LAN address instead; the IPv4
   link-local static pair applies only to a device that can run USBNetwork.
 - Deploy the binary over MTP first, then switch the device to USBNetwork for

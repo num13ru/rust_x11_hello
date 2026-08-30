@@ -12,7 +12,11 @@ steps an agent should follow, especially around physical-device work.
 - KUAL actions: **Run Rust X11 Hello (90s)**, **Run Rust X11 Hello (WiFi)**, **Stop Rust X11 Hello**, **Show Last Result**.
 - Physical device: Kindle Paperwhite 6 (Sangria / Bellatrix4), serial `GN433X11518401E8`, FW 5.17.1.0.4.
   USBNetwork is NOT available on this device (no maintained package accepts it; see
-  `docs/usbnetwork-pw2-report.md`); transport is Wi-Fi via `RUST_X11_HELLO_COMPANION`.
+  `docs/usbnetwork-pw2-report.md`); transport is Wi-Fi and the macOS peer is
+  PaperSpoon (`tools/paperspoon`), addressed via the compatibility variable
+  `RUST_X11_HELLO_COMPANION` (legacy name; `RUST_X11_HELLO_PAPERSPOON` may arrive later).
+
+- macOS listener: `cd tools/paperspoon && cargo build --release && ./target/release/paperspoon 5581 /tmp/paperspoon.log`
 
 ## Device deployment (MTP)
 
