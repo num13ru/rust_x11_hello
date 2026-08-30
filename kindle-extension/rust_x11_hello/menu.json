@@ -9,6 +9,10 @@
       "action": "sh bin/run.sh"
     },
     {
+      "name": "Run Bonjour Diagnostic (30s)",
+      "action": "sh -c 'RUST_X11_HELLO_BONJOUR_DIAGNOSTIC=1 RUST_X11_HELLO_BONJOUR_TIMEOUT_MS=30000 RUST_X11_HELLO_WATCHDOG_SECONDS=30 sh bin/run.sh'"
+    },
+    {
       "name": "Stop Rust X11 Hello",
       "action": "sh bin/stop.sh"
     },
