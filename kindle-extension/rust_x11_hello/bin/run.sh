@@ -13,7 +13,7 @@ WATCHDOG_TERM_GRACE_SECONDS="${RUST_X11_HELLO_WATCHDOG_TERM_GRACE_SECONDS:-5}"
 # Default is the legacy USBNetwork static host; this PW6 cannot run USBNetwork
 # (see docs/usbnetwork-pw2-report.md), so KUAL sets
 # RUST_X11_HELLO_COMPANION to the Mac's LAN address over Wi-Fi.
-COMPANION_HOST="${RUST_X11_HELLO_COMPANION:-192.168.15.201}"
+COMPANION_HOST="${RUST_X11_HELLO_COMPANION:-}"
 
 CHILD_PID=""
 WATCHDOG_PID=""
@@ -238,9 +238,13 @@ install_discovery_rule
 if ! chmod +x "$BIN" 2>> "$LOG"; then
     echo "WARNING: chmod +x failed; attempting launch with existing mode" >> "$LOG"
 fi
-echo "PaperSpoon host: $COMPANION_HOST" >> "$LOG"
-echo "---- running Rust binary ----" >> "$LOG"
-RUST_X11_HELLO_COMPANION="$COMPANION_HOST" "$BIN" >> "$LOG" 2>&1 &
+if [ -n "$COMPANION_HOST" ]; then
+    echo "PaperSpoon host: $COMPANION_HOST" >> "$LOG"
+    RUST_X11_HELLO_COMPANION="$COMPANION_HOST" "$BIN" >> "$LOG" 2>&1 &
+else
+    echo "PaperSpoon host: (unset, discovery)" >> "$LOG"
+    "$BIN" >> "$LOG" 2>&1 &
+fi
 CHILD_PID=$!
 
 if ! printf '%s\n' "$CHILD_PID" > "$PID_FILE"; then

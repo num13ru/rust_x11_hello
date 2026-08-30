@@ -71,12 +71,14 @@ pub struct Paperspoon {
 ///   result).
 fn paperspoon_addr() -> Result<SocketAddr> {
     match std::env::var(COMPANION_HOST_ENV) {
-        Ok(host) => (host, paperspoon_port())
+        // An explicit, non-empty override resolves directly; empty or
+        // missing falls through to discovery.
+        Ok(host) if !host.trim().is_empty() => (host, paperspoon_port())
             .to_socket_addrs()
             .context("failed to resolve PaperSpoon address")?
             .next()
             .context("PaperSpoon address resolved to nothing"),
-        Err(_) => crate::net::discover::discover_paperspoon(),
+        _ => crate::net::discover::discover_paperspoon(),
     }
 }
 
