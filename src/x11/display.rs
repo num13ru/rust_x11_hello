@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use x11rb::COPY_DEPTH_FROM_PARENT;
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::{
-    ConnectionExt, CreateGCAux, CreateWindowAux, EventMask, Gcontext, Window, WindowClass,
+    ConnectionExt, CreateGCAux, CreateWindowAux, EventMask, Font, Gcontext, Window, WindowClass,
 };
 use x11rb::rust_connection::RustConnection;
 
@@ -21,12 +21,15 @@ pub fn touch_event_mask() -> EventMask {
         | EventMask::BUTTON_RELEASE
         | EventMask::POINTER_MOTION
 }
-
 /// Connect to the X server and create, map, and publish the test window.
 ///
-/// Returns the connection, window, and GC; the caller owns their lifecycle.
-pub fn setup_window(conn: &RustConnection) -> Result<(Window, Gcontext)> {
+/// Opens the largest available fixed font, sets it on the GC, and returns
+/// `(window, gc, font)`; `font` is `None` when the server exposes no
+/// candidate font, in which case the GC uses the server default.
+pub fn setup_window(conn: &RustConnection) -> Result<(Window, Gcontext, Option<Font>)> {
     let screen = &conn.setup().roots[0];
+
+    let font = open_large_font(conn)?;
 
     let win = conn.generate_id().context("failed to generate window id")?;
     let gc = conn.generate_id().context("failed to generate GC id")?;
@@ -53,16 +56,16 @@ pub fn setup_window(conn: &RustConnection) -> Result<(Window, Gcontext)> {
     .check()
     .context("X11 server rejected create-window request")?;
 
-    conn.create_gc(
-        gc,
-        win,
-        &CreateGCAux::new()
-            .foreground(screen.black_pixel)
-            .background(screen.white_pixel),
-    )
-    .context("failed to send create-GC request")?
-    .check()
-    .context("X11 server rejected create-GC request")?;
+    let mut gc_aux = CreateGCAux::new()
+        .foreground(screen.black_pixel)
+        .background(screen.white_pixel);
+    if let Some(font_id) = font {
+        gc_aux = gc_aux.font(font_id);
+    }
+    conn.create_gc(gc, win, &gc_aux)
+        .context("failed to send create-GC request")?
+        .check()
+        .context("X11 server rejected create-GC request")?;
 
     conn.map_window(win)
         .context("failed to send map-window request")?
@@ -70,7 +73,26 @@ pub fn setup_window(conn: &RustConnection) -> Result<(Window, Gcontext)> {
         .context("X11 server rejected map-window request")?;
     conn.flush().context("failed to flush map request")?;
 
-    Ok((win, gc))
+    Ok((win, gc, font))
+}
+
+/// Largest fixed fonts most X servers (including the Kindle's) expose, in
+/// preference order. Returns the first that opens, or `None` if none do.
+#[allow(clippy::collapsible_if)]
+fn open_large_font(conn: &RustConnection) -> Result<Option<Font>> {
+    const CANDIDATES: &[&str] = &[
+        "-misc-fixed-medium-r-normal--20-200-75-75-c-100-iso10646-1",
+        "-misc-fixed-medium-r-normal--18-180-75-75-c-90-iso10646-1",
+        "-misc-fixed-medium-r-normal--14-130-75-75-c-70-iso10646-1",
+    ];
+    for name in CANDIDATES {
+        if let Ok(font_id) = conn.generate_id() {
+            if conn.open_font(font_id, name.as_bytes()).is_ok() {
+                return Ok(Some(font_id));
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// Release the window and GC, destroying the window unless it is already gone.
@@ -78,10 +100,23 @@ pub fn cleanup(
     conn: &RustConnection,
     win: Window,
     gc: Gcontext,
+    font: Option<Font>,
     destroy_window: bool,
 ) -> Result<()> {
     let mut first_error = None;
 
+    if let Some(font_id) = font {
+        record_cleanup_error(
+            &mut first_error,
+            conn.close_font(font_id)
+                .context("failed to send close-font request")
+                .and_then(|cookie| {
+                    cookie
+                        .check()
+                        .context("X11 server rejected close-font request")
+                }),
+        );
+    }
     record_cleanup_error(
         &mut first_error,
         conn.free_gc(gc)

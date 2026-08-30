@@ -5,7 +5,7 @@
 //! core-X11 requests. The UI layer never sees X11 types.
 
 use crate::net::Companion;
-use crate::ui::action::action_for_button;
+use crate::ui::action::{SemanticAction, action_for_button};
 use crate::ui::button::{ContactTracker, PointerEvent, PointerEventKind, handle_pointer_event};
 use crate::ui::geometry::{Point, WINDOW_HEIGHT, WINDOW_WIDTH, draw_layout};
 use anyhow::{Context, Result, anyhow};
@@ -89,7 +89,7 @@ pub fn event_loop(
             Event::ConfigureNotify(_) => {}
             Event::ButtonPress(event) if event.event == win => {
                 eprintln!("{}", format_pointer_event("ButtonPress", &event));
-                if let Some(button_id) = handle_pointer_event(
+                let Some(button_id) = handle_pointer_event(
                     &mut contact,
                     PointerEvent {
                         kind: PointerEventKind::Press,
@@ -101,14 +101,20 @@ pub fn event_loop(
                     },
                     width,
                     height,
-                ) {
-                    log_activation(button_id, companion);
+                ) else {
+                    continue;
+                };
+                if log_activation(button_id, companion) {
+                    conn.destroy_window(win)
+                        .context("failed to destroy window after exit")?
+                        .check()
+                        .context("X11 server rejected destroy-window")?;
                 }
             }
             Event::ButtonPress(_) => {}
             Event::ButtonRelease(event) if event.event == win => {
                 eprintln!("{}", format_pointer_event("ButtonRelease", &event));
-                if let Some(button_id) = handle_pointer_event(
+                let Some(button_id) = handle_pointer_event(
                     &mut contact,
                     PointerEvent {
                         kind: PointerEventKind::Release,
@@ -120,8 +126,14 @@ pub fn event_loop(
                     },
                     width,
                     height,
-                ) {
-                    log_activation(button_id, companion);
+                ) else {
+                    continue;
+                };
+                if log_activation(button_id, companion) {
+                    conn.destroy_window(win)
+                        .context("failed to destroy window after exit")?
+                        .check()
+                        .context("X11 server rejected destroy-window")?;
                 }
             }
             Event::ButtonRelease(_) => {}
@@ -169,19 +181,31 @@ pub fn format_pointer_event(event_type: &str, event: &ButtonPressEvent) -> Strin
         event.same_screen,
     )
 }
+
 /// Log one activation and send its semantic action over the transport.
-fn log_activation(button_id: u8, companion: &mut Companion) {
+///
+/// Returns `true` when the activated action requests window teardown
+/// (the exit button). The caller then destroys the window to end the loop
+/// cleanly instead of waiting for the watchdog.
+fn log_activation(button_id: u8, companion: &mut Companion) -> bool {
     match action_for_button(button_id) {
         Some(action) => {
             eprintln!(
                 "ui action=activate button={button_id} semantic={}",
                 action.id()
             );
+            if action == SemanticAction::Exit {
+                return true;
+            }
             if let Err(error) = companion.send_action(action.id()) {
                 eprintln!("transport error: {error:#}");
             }
+            false
         }
-        None => eprintln!("ui action=activate button={button_id} semantic=unknown",),
+        None => {
+            eprintln!("ui action=activate button={button_id} semantic=unknown");
+            false
+        }
     }
 }
 fn geometry_update(current: (u16, u16), reported: (u16, u16)) -> GeometryUpdate {

@@ -34,7 +34,7 @@ fn run() -> Result<()> {
         .context("failed to connect to X11 display; check DISPLAY and /tmp/.X11-unix/X0")?;
 
     display::print_screen_info(&conn, screen_num);
-    let (win, gc) = display::setup_window(&conn)?;
+    let (win, gc, font) = display::setup_window(&conn)?;
 
     eprintln!(
         "window mapped id=0x{win:x} x={} y={} width={} height={}",
@@ -62,7 +62,7 @@ fn run() -> Result<()> {
         Ok(EventLoopExit::WindowDestroyed) => false,
         Err(_) => true,
     };
-    let cleanup_result = display::cleanup(&conn, win, gc, destroy_window);
+    let cleanup_result = display::cleanup(&conn, win, gc, font, destroy_window);
 
     match (event_result, cleanup_result) {
         (Err(primary), Err(cleanup_error)) => {
