@@ -117,7 +117,9 @@ name = "rust_x11_hello"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "if-addrs",
  "mdns-sd",
+ "socket2",
  "x11rb",
 ]
 

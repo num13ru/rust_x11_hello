@@ -1,73 +1,187 @@
 //! Raw multicast reachability probe for the Kindle Wi-Fi path.
 //!
-//! Phase 5B discriminator: while the Mac floods a multicast group with a
-//! known marker, this joins `224.0.0.251:5353` and reports whether ANY
-//! packet arrives. This separates "multicast is blocked on the WLAN path"
-//! from "mDNS/Bonjour specifically fails".
+//! Phase 5B discriminator: while the Mac floods a multicast group, this binds
+//! and joins `224.0.0.251:5353` on the named interface and reports whether any
+//! externally generated packet arrives. This separates "multicast is blocked
+//! on the WLAN path" from "mDNS/Bonjour specifically fails".
 //!
-//! Uses only `std::net` — no crate needed. Joining with `0.0.0.0` selects
-//! the system's default-route interface (on the Kindle: `wlan0`, the exact
-//! interface under test). The marker is also sent to the group so a joined
-//! interface that receives its own send proves RX.
+//! A distinct local marker checks socket loopback but never counts as external
+//! reception because multicast loopback does not traverse the access point.
 
+use if_addrs::IfAddr;
+use socket2::{Domain, Protocol, Socket, Type};
 use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// mDNS multicast group and port (RFC 6762).
 pub const MDNS_GROUP: Ipv4Addr = Ipv4Addr::new(224, 0, 0, 251);
 pub const MDNS_PORT: u16 = 5353;
-/// Marker sent to the group and matched in received data.
+/// Default Kindle Wi-Fi interface.
+pub const DEFAULT_INTERFACE: &str = "wlan0";
+/// Marker the external sender can use; any non-local-marker packet also counts.
 pub const PROBE_MARKER: &[u8] = b"rust-x11-hello-multicast-probe";
+const LOCAL_LOOPBACK_MARKER: &[u8] = b"rust-x11-hello-local-loopback";
 /// Bound on how long the probe listens.
 pub const DEFAULT_PROBE_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Run one bounded multicast RX probe on the mDNS group.
 ///
-/// Returns `true` when at least one packet was received, `false` otherwise.
-pub fn probe_multicast(timeout: Duration) -> anyhow::Result<bool> {
-    let socket = UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0)))
-        .map_err(|error| anyhow::anyhow!("multicast probe bind failed: {error}"))?;
+/// Returns `true` when at least one externally generated packet was received,
+/// `false` when only local loopback (or nothing) was observed.
+pub fn probe_multicast(interface_name: &str, timeout: Duration) -> anyhow::Result<bool> {
+    if timeout.is_zero() {
+        return Err(anyhow::anyhow!("multicast probe timeout must be non-zero"));
+    }
+
+    let interface_ip = interface_ipv4(interface_name)?;
+    let bind_addr = probe_bind_addr();
+    let socket = bind_probe_socket(bind_addr, interface_ip, interface_name)?;
     socket
-        .set_read_timeout(Some(timeout))
-        .map_err(|error| anyhow::anyhow!("multicast probe read timeout failed: {error}"))?;
+        .set_multicast_loop_v4(true)
+        .map_err(|error| anyhow::anyhow!("multicast probe enable loopback failed: {error}"))?;
     eprintln!(
-        "multicast probe start group={MDNS_GROUP} port={MDNS_PORT} timeout_ms={}",
+        "multicast probe start interface={interface_name} address={interface_ip} bind={bind_addr} group={MDNS_GROUP} port={MDNS_PORT} timeout_ms={}",
         timeout.as_millis()
     );
 
-    // Join on the default-route interface (0.0.0.0). On the Kindle this is
-    // wlan0 — the exact link under test.
-    match socket.join_multicast_v4(&MDNS_GROUP, &Ipv4Addr::UNSPECIFIED) {
-        Ok(()) => eprintln!("multicast probe join default-interface ok"),
-        Err(error) => eprintln!("multicast probe join failed: {error}"),
-    }
+    socket
+        .join_multicast_v4(&MDNS_GROUP, &interface_ip)
+        .map_err(|error| {
+            anyhow::anyhow!("multicast probe join {MDNS_GROUP} on {interface_name}: {error}")
+        })?;
+    eprintln!("multicast probe join interface={interface_name} address={interface_ip} ok");
 
-    // Send the marker so a joined interface receiving its own send proves RX.
-    match socket.send_to(PROBE_MARKER, (MDNS_GROUP, MDNS_PORT)) {
-        Ok(n) => eprintln!("multicast probe sent-marker bytes={n}"),
-        Err(error) => eprintln!("multicast probe send-marker failed: {error}"),
-    }
+    let sent = socket
+        .send_to(LOCAL_LOOPBACK_MARKER, (MDNS_GROUP, MDNS_PORT))
+        .map_err(|error| anyhow::anyhow!("multicast probe send local marker failed: {error}"))?;
+    eprintln!("multicast probe sent-local-marker bytes={sent}");
 
     let mut buffer = [0u8; 512];
-    let mut received = false;
+    let mut local_loopback_received = false;
+    let mut external_received = false;
+    let deadline = Instant::now()
+        .checked_add(timeout)
+        .ok_or_else(|| anyhow::anyhow!("multicast probe timeout is too large"))?;
+
     loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        socket
+            .set_read_timeout(Some(remaining))
+            .map_err(|error| anyhow::anyhow!("multicast probe read timeout failed: {error}"))?;
+
         match socket.recv_from(&mut buffer) {
             Ok((count, source)) => {
-                received = true;
+                let packet = &buffer[..count];
+                let kind = if packet == LOCAL_LOOPBACK_MARKER {
+                    local_loopback_received = true;
+                    "local-loopback"
+                } else if packet == PROBE_MARKER {
+                    external_received = true;
+                    "external-marker"
+                } else {
+                    external_received = true;
+                    "external-other"
+                };
+                let prefix = escaped_prefix(packet, 32);
                 eprintln!(
-                    "multicast probe received from={source} bytes={count} prefix={}",
-                    String::from_utf8_lossy(&buffer[..count.min(32)])
+                    "multicast probe received kind={kind} from={source} bytes={count} prefix={prefix}"
                 );
             }
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                eprintln!("multicast probe timeout");
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
                 break;
             }
             Err(error) => {
-                eprintln!("multicast probe error: {error}");
-                break;
+                return Err(anyhow::anyhow!("multicast probe receive failed: {error}"));
             }
         }
     }
-    Ok(received)
+
+    eprintln!(
+        "multicast probe complete local_loopback={local_loopback_received} external={external_received}"
+    );
+    Ok(external_received)
+}
+
+fn probe_bind_addr() -> SocketAddr {
+    SocketAddr::from(([0, 0, 0, 0], MDNS_PORT))
+}
+
+fn escaped_prefix(packet: &[u8], limit: usize) -> String {
+    packet
+        .iter()
+        .take(limit)
+        .flat_map(|byte| std::ascii::escape_default(*byte))
+        .map(char::from)
+        .collect()
+}
+
+fn bind_probe_socket(
+    bind_addr: SocketAddr,
+    interface_ip: Ipv4Addr,
+    interface_name: &str,
+) -> anyhow::Result<UdpSocket> {
+    let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))
+        .map_err(|error| anyhow::anyhow!("multicast probe socket failed: {error}"))?;
+    socket
+        .set_reuse_address(true)
+        .map_err(|error| anyhow::anyhow!("multicast probe SO_REUSEADDR failed: {error}"))?;
+    #[cfg(target_vendor = "apple")]
+    socket
+        .set_reuse_port(true)
+        .map_err(|error| anyhow::anyhow!("multicast probe SO_REUSEPORT failed: {error}"))?;
+    socket
+        .set_multicast_if_v4(&interface_ip)
+        .map_err(|error| anyhow::anyhow!("multicast probe select {interface_name}: {error}"))?;
+    socket
+        .bind(&bind_addr.into())
+        .map_err(|error| anyhow::anyhow!("multicast probe bind {bind_addr} failed: {error}"))?;
+    Ok(socket.into())
+}
+
+fn interface_ipv4(interface_name: &str) -> anyhow::Result<Ipv4Addr> {
+    let mut addresses: Vec<Ipv4Addr> = if_addrs::get_if_addrs()
+        .map_err(|error| anyhow::anyhow!("multicast probe list interfaces failed: {error}"))?
+        .into_iter()
+        .filter_map(|interface| {
+            if interface.name != interface_name || !interface.is_oper_up() {
+                return None;
+            }
+            match interface.addr {
+                IfAddr::V4(address) if !address.ip.is_loopback() => Some(address.ip),
+                _ => None,
+            }
+        })
+        .collect();
+    addresses.sort_by_key(|address| (address.is_link_local(), *address));
+    addresses.first().copied().ok_or_else(|| {
+        anyhow::anyhow!("multicast probe interface {interface_name} has no active IPv4 address")
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn receiver_binds_the_multicast_destination_port() {
+        assert_eq!(probe_bind_addr(), SocketAddr::from(([0, 0, 0, 0], 5353)));
+    }
+
+    #[test]
+    fn local_and_external_markers_are_distinct() {
+        assert_ne!(LOCAL_LOOPBACK_MARKER, PROBE_MARKER);
+    }
+
+    #[test]
+    fn binary_packet_prefix_is_log_safe() {
+        assert_eq!(escaped_prefix(&[0, b'A', b'\n', 0xff], 4), "\\x00A\\n\\xff");
+    }
 }

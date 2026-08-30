@@ -34,12 +34,14 @@ fn run() -> Result<()> {
     // Diagnostic-only multicast probe: bounded listen on 224.0.0.251:5353
     // while the operator floods the group from the Mac. Exits without X11.
     if env::var("RUST_X11_HELLO_MCAST_PROBE").is_ok() {
+        let interface = env::var("RUST_X11_HELLO_MCAST_INTERFACE")
+            .unwrap_or_else(|_| mcast::DEFAULT_INTERFACE.to_string());
         let timeout = env::var("RUST_X11_HELLO_MCAST_TIMEOUT_MS")
             .ok()
             .and_then(|value| value.parse::<u64>().ok())
             .map(std::time::Duration::from_millis)
             .unwrap_or(mcast::DEFAULT_PROBE_TIMEOUT);
-        let received = mcast::probe_multicast(timeout)?;
+        let received = mcast::probe_multicast(&interface, timeout)?;
         return if received {
             eprintln!("multicast probe result=received");
             Ok(())
