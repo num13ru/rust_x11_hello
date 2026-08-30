@@ -27,10 +27,22 @@ Host tests verify layout and geometry decisions at default, half, one-pixel, zer
 The window contains six logical buttons in a 2×3 grid. Their geometry is independent of X11 event structures and uses half-open bounds, so every shared edge belongs to exactly one button.
 
 Only core-X11 `detail=1` participates in UI activation. A primary press arms the button under the initial coordinate; a matching primary release activates only when it remains inside that same button and emits:
-
 ```text
-ui action=activate button=4
+ui action=activate button=4 semantic=terminal.new_window
 ```
+
+Every activation also emits its stable semantic action id. The current grid maps buttons 1-6 to:
+
+| Button | Semantic action id |
+| ------ | ------------------ |
+| 1 | `media.play_pause` |
+| 2 | `media.next` |
+| 3 | `media.previous` |
+| 4 | `terminal.new_window` |
+| 5 | `tmux.work` |
+| 6 | `zoom.toggle_mute` |
+
+These dotted ids are the wire units of the planned semantic protocol; no transport exists yet, so this milestone has no network or external side effect.
 
 Presses outside the grid, releases in another button or outside the grid, repeated primary presses, geometry changes, and window unmapping cancel the contact. Unmatched releases do nothing. Auxiliary details such as the observed Kindle `detail=6` and `detail=9` pairs retain their raw diagnostic lines but neither activate nor cancel the armed primary contact. Pointer motion remains unlogged, and this milestone has no network or external side effect.
 

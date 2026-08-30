@@ -1,0 +1,91 @@
+//! Semantic action IDs for the six-button grid.
+//!
+//! This is the wire-independent unit of the small semantic protocol: a button
+//! activation maps to a stable dotted action id that later transports (TCP
+//! over Wi-Fi/USBNetwork) will carry verbatim to a macOS companion. No
+//! transport exists yet; this module only defines the mapping and the IDs.
+
+/// A semantic action assignable to a grid button.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SemanticAction {
+    MediaPlayPause,
+    MediaNext,
+    MediaPrevious,
+    TerminalNewWindow,
+    TmuxWork,
+    ZoomToggleMute,
+}
+
+impl SemanticAction {
+    /// Stable dotted wire identifier for the action.
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::MediaPlayPause => "media.play_pause",
+            Self::MediaNext => "media.next",
+            Self::MediaPrevious => "media.previous",
+            Self::TerminalNewWindow => "terminal.new_window",
+            Self::TmuxWork => "tmux.work",
+            Self::ZoomToggleMute => "zoom.toggle_mute",
+        }
+    }
+}
+
+/// Map a grid button id (`1..=6`) to its semantic action.
+///
+/// Returns `None` for any other id; the grid never produces one, so an
+/// out-of-range activation would be surfaced rather than silently remapped.
+pub fn action_for_button(button_id: u8) -> Option<SemanticAction> {
+    match button_id {
+        1 => Some(SemanticAction::MediaPlayPause),
+        2 => Some(SemanticAction::MediaNext),
+        3 => Some(SemanticAction::MediaPrevious),
+        4 => Some(SemanticAction::TerminalNewWindow),
+        5 => Some(SemanticAction::TmuxWork),
+        6 => Some(SemanticAction::ZoomToggleMute),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_grid_button_maps_to_a_documented_semantic_action() {
+        let expected = [
+            (1, SemanticAction::MediaPlayPause, "media.play_pause"),
+            (2, SemanticAction::MediaNext, "media.next"),
+            (3, SemanticAction::MediaPrevious, "media.previous"),
+            (4, SemanticAction::TerminalNewWindow, "terminal.new_window"),
+            (5, SemanticAction::TmuxWork, "tmux.work"),
+            (6, SemanticAction::ZoomToggleMute, "zoom.toggle_mute"),
+        ];
+
+        for (button_id, action, id) in expected {
+            assert_eq!(action_for_button(button_id), Some(action));
+            assert_eq!(action.id(), id);
+        }
+    }
+
+    #[test]
+    fn out_of_range_button_ids_have_no_semantic_action() {
+        assert_eq!(action_for_button(0), None);
+        assert_eq!(action_for_button(7), None);
+        assert_eq!(action_for_button(u8::MAX), None);
+    }
+
+    #[test]
+    fn action_ids_are_stable_and_unique() {
+        let mut ids = vec![
+            SemanticAction::MediaPlayPause.id(),
+            SemanticAction::MediaNext.id(),
+            SemanticAction::MediaPrevious.id(),
+            SemanticAction::TerminalNewWindow.id(),
+            SemanticAction::TmuxWork.id(),
+            SemanticAction::ZoomToggleMute.id(),
+        ];
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), 6);
+    }
+}
