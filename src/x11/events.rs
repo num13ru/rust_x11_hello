@@ -4,7 +4,7 @@
 //! [`crate::ui::button::PointerEvent`] and renders logical layouts with
 //! core-X11 requests. The UI layer never sees X11 types.
 
-use crate::net::Companion;
+use crate::net::Paperspoon;
 use crate::ui::action::{SemanticAction, action_for_button};
 use crate::ui::button::{ContactTracker, PointerEvent, PointerEventKind, handle_pointer_event};
 use crate::ui::geometry::{Point, STATUS_BAR_HEIGHT, WINDOW_HEIGHT, WINDOW_WIDTH, draw_layout};
@@ -43,25 +43,25 @@ pub fn event_loop(
     conn: &RustConnection,
     win: Window,
     gc: Gcontext,
-    companion: &mut Companion,
+    paperspoon: &mut Paperspoon,
 ) -> Result<EventLoopExit> {
     let mut width = WINDOW_WIDTH;
     let mut height = WINDOW_HEIGHT;
     let mut contact = ContactTracker::default();
     let mut status_text: Option<String> = None;
 
-    if let Some(text) = companion.poll_display() {
+    if let Some(text) = paperspoon.poll_display() {
         status_text = Some(text);
         draw(conn, win, gc, width, height, status_text.as_deref())
-            .context("failed to redraw status after companion command")?;
+            .context("failed to redraw status after PaperSpoon command")?;
     }
     loop {
-        // Drain any companion command received since the last X11 event.
-        if let Some(text) = companion.poll_display() {
+        // Drain any PaperSpoon command received since the last X11 event.
+        if let Some(text) = paperspoon.poll_display() {
             eprintln!("display: {text}");
             status_text = Some(text);
             draw(conn, win, gc, width, height, status_text.as_deref())
-                .context("failed to redraw status after companion command")?;
+                .context("failed to redraw status after PaperSpoon command")?;
         }
         let event = conn
             .wait_for_event()
@@ -116,7 +116,7 @@ pub fn event_loop(
                 ) else {
                     continue;
                 };
-                if log_activation(button_id, companion) {
+                if log_activation(button_id, paperspoon) {
                     conn.destroy_window(win)
                         .context("failed to destroy window after exit")?
                         .check()
@@ -141,7 +141,7 @@ pub fn event_loop(
                 ) else {
                     continue;
                 };
-                if log_activation(button_id, companion) {
+                if log_activation(button_id, paperspoon) {
                     conn.destroy_window(win)
                         .context("failed to destroy window after exit")?
                         .check()
@@ -199,7 +199,7 @@ pub fn format_pointer_event(event_type: &str, event: &ButtonPressEvent) -> Strin
 /// Returns `true` when the activated action requests window teardown
 /// (the exit button). The caller then destroys the window to end the loop
 /// cleanly instead of waiting for the watchdog.
-fn log_activation(button_id: u8, companion: &mut Companion) -> bool {
+fn log_activation(button_id: u8, paperspoon: &mut Paperspoon) -> bool {
     match action_for_button(button_id) {
         Some(action) => {
             eprintln!(
@@ -209,7 +209,7 @@ fn log_activation(button_id: u8, companion: &mut Companion) -> bool {
             if action == SemanticAction::Exit {
                 return true;
             }
-            if let Err(error) = companion.send_action(action.id()) {
+            if let Err(error) = paperspoon.send_action(action.id()) {
                 eprintln!("transport error: {error:#}");
             }
             false

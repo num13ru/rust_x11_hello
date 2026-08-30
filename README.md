@@ -18,7 +18,7 @@ The current milestone opens a persistent override-redirect X11 window, redraws f
 - The initial Kindle window remains `(80,120)` at `760 x 400`; the 2×3 button grid, exit bar, and status strip scale from that reference geometry.
 - The final event in each `Expose` batch clears and redraws the current window extent.
 - A size-changing `ConfigureNotify` updates the active geometry and redraws immediately. Duplicate geometry is ignored, and a defensive zero-width/zero-height report is logged without replacing the last valid extent.
-- Grid bounds and text origins scale from the verified `760 x 400` reference layout (grid + exit bar above a 40px status strip where companion `display` text renders). Arithmetic is bounded for tiny windows and the full core-X11 `u16` extent; text coordinates saturate at the protocol's signed-coordinate limit.
+- Grid bounds and text origins scale from the verified `760 x 400` reference layout (grid + exit bar above a 40px status strip where PaperSpoon `display` text renders). Arithmetic is bounded for tiny windows and the full core-X11 `u16` extent; text coordinates saturate at the protocol's signed-coordinate limit.
 
 Host tests verify layout and geometry decisions at default, half, one-pixel, zero, and maximum dimensions. The ARM/static gates verify deployability, but runtime resize/redraw behavior still requires observation on an X server that actually sends resize events; no such event was part of the fixed-geometry Kindle evidence run.
 
@@ -52,7 +52,7 @@ Presses outside the grid, releases in another button or outside the grid, repeat
 
 ## TCP transport (Wi-Fi)
 
-The Kindle opens one persistent TCP connection to the companion on launch.
+The Kindle opens one persistent TCP connection to PaperSpoon on launch.
 Each activation sends one newline-terminated protocol line over that
 connection:
 
@@ -60,7 +60,7 @@ connection:
 event action=<semantic-id>;
 ```
 
-The companion (a std-only Rust listener, `tools/companion`) prints each
+PaperSpoon (a std-only Rust listener, `tools/paperspoon`) prints each
 received line and appends it to a log file. It also forwards lines typed on
 its stdin to the Kindle as control commands:
 
@@ -79,26 +79,26 @@ and can be overridden per run with the
 the Mac is at `192.168.0.12`:
 
 ```sh
-cd tools/companion && cargo build --release && \
-  ./target/release/companion 5581 /tmp/companion.log
+cd tools/paperspoon && cargo build --release && \
+  ./target/release/paperspoon 5581 /tmp/paperspoon.log
 ```
 
 On the device, export the same variable in the KUAL launch environment so the
-binary targets the Mac over Wi-Fi. A companion that is down or unreachable costs a bounded 150 ms
+binary targets the Mac over Wi-Fi. A PaperSpoon that is down or unreachable costs a bounded 150 ms
 connect timeout and is logged as `transport error: ...` on the device; it
 never breaks the X11 event loop or the on-device activation log, and the
 Kindle retries the connection on the next activation. The Kindle opens no
 listening socket; only the action id leaves the device, and only `display`
 commands enter it.
 
-### Running the companion
+### Running PaperSpoon
 
 Build and run the Rust listener (on the Mac):
 
 ```sh
-cd tools/companion
+cd tools/paperspoon
 cargo build --release
-./target/release/companion 5581 /tmp/companion.log
+./target/release/paperspoon 5581 /tmp/paperspoon.log
 ```
 
 Then type a display command at its stdin:
