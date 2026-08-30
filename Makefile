@@ -1,6 +1,19 @@
 IMAGE := rust-kindle-armv7hf-builder
 WORKDIR := /work
 
+.PHONY: check
+
+check:
+	cargo fmt --check
+	cargo check
+	cargo clippy --all-targets -- -D warnings
+	cargo test
+	sh -n kindle-extension/rust_x11_hello/bin/run.sh
+	sh -n kindle-extension/rust_x11_hello/bin/show.sh
+	sh -n kindle-extension/rust_x11_hello/bin/stop.sh
+	bash -n scripts/deploy-kindle-mtp.sh
+	jq empty kindle-extension/rust_x11_hello/menu.json
+
 .PHONY: image build verify shell clean clean-gnu clean-target
 
 image:

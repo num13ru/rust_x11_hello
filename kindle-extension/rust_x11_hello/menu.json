@@ -1,8 +1,12 @@
 {
   "items": [
     {
-      "name": "Run Rust X11 Hello",
+      "name": "Run Rust X11 Hello (90s)",
       "action": "sh bin/run.sh"
+    },
+    {
+      "name": "Stop Rust X11 Hello",
+      "action": "sh bin/stop.sh"
     },
     {
       "name": "Show Last Result",
