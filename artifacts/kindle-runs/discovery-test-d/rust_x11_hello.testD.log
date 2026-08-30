@@ -1,0 +1,307 @@
+========================================
+KUAL Rust X11 Hello launcher
+Date: Mon Aug 31 00:41:55 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 90s plus 5s TERM grace
+Discovery firewall rule removed
+Discovery firewall rule installed: -i wlan0 -p udp --sport 5580 --dport 5582 -j ACCEPT
+PaperSpoon host: (unset, discovery)
+Child PID: 32709
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+connected to X11
+screen_num: 0
+root: 0x51
+width: 1272
+height: 1696
+root_depth: 8
+black_pixel: 0
+white_pixel: 255
+window mapped id=0x1c00000 x=80 y=120 width=760 height=400
+discovery bind address=0.0.0.0:5582
+discovery probe attempt=1 destination=255.255.255.255:5580 nonce=18d0b33a886000167fc5
+discovery response from=192.168.0.12:5580 bytes=42
+discovery response valid endpoint=192.168.0.12:5581
+discovery result endpoint=192.168.0.12:5581
+transport: connected to PaperSpoon
+event type=MapNotify window=0x1c00000
+input type=ButtonPress detail=1 event_x=175 event_y=108 root_x=257 root_y=230 time=33646411 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=176 event_y=111 root_x=258 root_y=233 time=33646572 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=1 semantic=media.play_pause
+input type=ButtonPress detail=1 event_x=375 event_y=108 root_x=457 root_y=230 time=33646859 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=384 event_y=110 root_x=466 root_y=232 time=33647059 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=2 semantic=media.next
+input type=ButtonPress detail=1 event_x=639 event_y=118 root_x=721 root_y=240 time=33647322 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=644 event_y=119 root_x=726 root_y=241 time=33647497 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=3 semantic=media.previous
+input type=ButtonPress detail=1 event_x=476 event_y=348 root_x=558 root_y=470 time=33687876 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=476 event_y=350 root_x=558 root_y=472 time=33688048 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=7 semantic=app.exit
+event type=UnmapNotify window=0x1c00000
+event type=DestroyNotify window=0x1c00000
+
+Rust binary exit status: 0
+End reason: process_exit
+Ended: Mon Aug 31 00:42:48 GMT+3:0100 2026
+========================================
+Discovery firewall rule removed
+========================================
+KUAL Rust X11 Hello launcher
+Date: Mon Aug 31 00:44:40 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 90s plus 5s TERM grace
+Discovery firewall rule removed
+Discovery firewall rule installed: -i wlan0 -p udp --sport 5580 --dport 5582 -j ACCEPT
+PaperSpoon host: (unset, discovery)
+Child PID: 759
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+connected to X11
+screen_num: 0
+root: 0x51
+width: 1272
+height: 1696
+root_depth: 8
+black_pixel: 0
+white_pixel: 255
+window mapped id=0x1c00000 x=80 y=120 width=760 height=400
+discovery bind address=0.0.0.0:5582
+discovery probe attempt=1 destination=255.255.255.255:5580 nonce=18d0b360d09553722f7
+discovery response from=192.168.0.12:5580 bytes=41
+discovery response valid endpoint=192.168.0.12:5581
+discovery result endpoint=192.168.0.12:5581
+transport: connected to PaperSpoon
+event type=MapNotify window=0x1c00000
+input type=ButtonPress detail=1 event_x=195 event_y=115 root_x=277 root_y=237 time=33804985 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=201 event_y=117 root_x=283 root_y=239 time=33805120 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=1 semantic=media.play_pause
+input type=ButtonPress detail=1 event_x=398 event_y=128 root_x=480 root_y=250 time=33805308 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=400 event_y=129 root_x=482 root_y=251 time=33805420 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=2 semantic=media.next
+input type=ButtonPress detail=1 event_x=633 event_y=106 root_x=715 root_y=228 time=33805682 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=635 event_y=106 root_x=717 root_y=228 time=33805782 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=3 semantic=media.previous
+input type=ButtonPress detail=1 event_x=458 event_y=343 root_x=540 root_y=465 time=33806542 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=458 event_y=343 root_x=540 root_y=465 time=33806691 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=7 semantic=app.exit
+event type=UnmapNotify window=0x1c00000
+event type=DestroyNotify window=0x1c00000
+
+Rust binary exit status: 0
+End reason: process_exit
+Ended: Mon Aug 31 00:44:47 GMT+3:0100 2026
+========================================
+Discovery firewall rule removed
+========================================
+KUAL Rust X11 Hello launcher
+Date: Mon Aug 31 00:44:57 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 90s plus 5s TERM grace
+Discovery firewall rule removed
+Discovery firewall rule installed: -i wlan0 -p udp --sport 5580 --dport 5582 -j ACCEPT
+PaperSpoon host: (unset, discovery)
+Child PID: 831
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+connected to X11
+screen_num: 0
+root: 0x51
+width: 1272
+height: 1696
+root_depth: 8
+black_pixel: 0
+white_pixel: 255
+window mapped id=0x1c00000 x=80 y=120 width=760 height=400
+discovery bind address=0.0.0.0:5582
+discovery probe attempt=1 destination=255.255.255.255:5580 nonce=18d0b364d056f41633f
+discovery response from=192.168.0.12:5580 bytes=41
+discovery response valid endpoint=192.168.0.12:5581
+discovery result endpoint=192.168.0.12:5581
+transport: connected to PaperSpoon
+event type=MapNotify window=0x1c00000
+input type=ButtonPress detail=1 event_x=136 event_y=251 root_x=218 root_y=373 time=33822887 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=136 event_y=253 root_x=218 root_y=375 time=33823073 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=4 semantic=terminal.new_window
+input type=ButtonPress detail=1 event_x=316 event_y=261 root_x=398 root_y=383 time=33823323 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=320 event_y=263 root_x=402 root_y=385 time=33823497 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=5 semantic=tmux.work
+input type=ButtonPress detail=1 event_x=611 event_y=253 root_x=693 root_y=375 time=33823883 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=612 event_y=254 root_x=694 root_y=376 time=33824032 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=6 semantic=zoom.toggle_mute
+input type=ButtonPress detail=1 event_x=472 event_y=351 root_x=554 root_y=473 time=33825110 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=472 event_y=354 root_x=554 root_y=476 time=33825285 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=7 semantic=app.exit
+event type=UnmapNotify window=0x1c00000
+event type=DestroyNotify window=0x1c00000
+
+Rust binary exit status: 0
+End reason: process_exit
+Ended: Mon Aug 31 00:45:05 GMT+3:0100 2026
+========================================
+Discovery firewall rule removed
+========================================
+KUAL Rust X11 Hello launcher
+Date: Mon Aug 31 00:46:39 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 90s plus 5s TERM grace
+Discovery firewall rule removed
+Discovery firewall rule installed: -i wlan0 -p udp --sport 5580 --dport 5582 -j ACCEPT
+PaperSpoon host: (unset, discovery)
+Child PID: 2107
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+connected to X11
+screen_num: 0
+root: 0x51
+width: 1272
+height: 1696
+root_depth: 8
+black_pixel: 0
+white_pixel: 255
+window mapped id=0x1c00000 x=80 y=120 width=760 height=400
+discovery bind address=0.0.0.0:5582
+discovery probe attempt=1 destination=255.255.255.255:5580 nonce=18d0b37ca91226e083b
+discovery probe window elapsed attempt=1
+discovery probe attempt=2 destination=255.255.255.255:5580 nonce=18d0b37ca91226e083b
+discovery probe window elapsed attempt=2
+discovery probe attempt=3 destination=255.255.255.255:5580 nonce=18d0b37ca91226e083b
+discovery probe window elapsed attempt=3
+transport error at startup: discovery failed: no valid response received
+event type=MapNotify window=0x1c00000
+input type=ButtonPress detail=1 event_x=614 event_y=247 root_x=696 root_y=369 time=33923486 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=612 event_y=252 root_x=694 root_y=374 time=33923671 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=6 semantic=zoom.toggle_mute
+discovery bind address=0.0.0.0:5582
+discovery probe attempt=1 destination=255.255.255.255:5580 nonce=18d0b37d9ac1a93f83b
+discovery probe window elapsed attempt=1
+discovery probe attempt=2 destination=255.255.255.255:5580 nonce=18d0b37d9ac1a93f83b
+discovery probe window elapsed attempt=2
+discovery probe attempt=3 destination=255.255.255.255:5580 nonce=18d0b37d9ac1a93f83b
+discovery probe window elapsed attempt=3
+transport error: discovery failed: no valid response received
+input type=ButtonPress detail=1 event_x=389 event_y=245 root_x=471 root_y=367 time=33923922 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=385 event_y=245 root_x=467 root_y=367 time=33924084 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=5 semantic=tmux.work
+discovery bind address=0.0.0.0:5582
+discovery probe attempt=1 destination=255.255.255.255:5580 nonce=18d0b37df5e451fc83b
+discovery probe window elapsed attempt=1
+discovery probe attempt=2 destination=255.255.255.255:5580 nonce=18d0b37df5e451fc83b
+discovery probe window elapsed attempt=2
+discovery probe attempt=3 destination=255.255.255.255:5580 nonce=18d0b37df5e451fc83b
+discovery probe window elapsed attempt=3
+transport error: discovery failed: no valid response received
+input type=ButtonPress detail=1 event_x=113 event_y=254 root_x=195 root_y=376 time=33924309 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=114 event_y=255 root_x=196 root_y=377 time=33924434 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=4 semantic=terminal.new_window
+discovery bind address=0.0.0.0:5582
+discovery probe attempt=1 destination=255.255.255.255:5580 nonce=18d0b37e51a08b8683b
+discovery probe window elapsed attempt=1
+discovery probe attempt=2 destination=255.255.255.255:5580 nonce=18d0b37e51a08b8683b
+discovery probe window elapsed attempt=2
+discovery probe attempt=3 destination=255.255.255.255:5580 nonce=18d0b37e51a08b8683b
+discovery probe window elapsed attempt=3
+transport error: discovery failed: no valid response received
+input type=ButtonPress detail=1 event_x=635 event_y=92 root_x=717 root_y=214 time=33927335 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=635 event_y=93 root_x=717 root_y=215 time=33927483 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=3 semantic=media.previous
+discovery bind address=0.0.0.0:5582
+discovery probe attempt=1 destination=255.255.255.255:5580 nonce=18d0b37ead7c73a483b
+discovery probe window elapsed attempt=1
+discovery probe attempt=2 destination=255.255.255.255:5580 nonce=18d0b37ead7c73a483b
+discovery probe window elapsed attempt=2
+discovery probe attempt=3 destination=255.255.255.255:5580 nonce=18d0b37ead7c73a483b
+discovery probe window elapsed attempt=3
+transport error: discovery failed: no valid response received
+input type=ButtonPress detail=1 event_x=424 event_y=106 root_x=506 root_y=228 time=33927658 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=419 event_y=106 root_x=501 root_y=228 time=33927796 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=2 semantic=media.next
+discovery bind address=0.0.0.0:5582
+discovery probe attempt=1 destination=255.255.255.255:5580 nonce=18d0b37f08b3267c83b
+discovery probe window elapsed attempt=1
+discovery probe attempt=2 destination=255.255.255.255:5580 nonce=18d0b37f08b3267c83b
+discovery probe window elapsed attempt=2
+discovery probe attempt=3 destination=255.255.255.255:5580 nonce=18d0b37f08b3267c83b
+discovery probe window elapsed attempt=3
+transport error: discovery failed: no valid response received
+input type=ButtonPress detail=1 event_x=113 event_y=128 root_x=195 root_y=250 time=33927996 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=115 event_y=125 root_x=197 root_y=247 time=33928109 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=1 semantic=media.play_pause
+discovery bind address=0.0.0.0:5582
+discovery probe attempt=1 destination=255.255.255.255:5580 nonce=18d0b37f66b36fd183b
+discovery probe window elapsed attempt=1
+discovery probe attempt=2 destination=255.255.255.255:5580 nonce=18d0b37f66b36fd183b
+discovery probe window elapsed attempt=2
+discovery probe attempt=3 destination=255.255.255.255:5580 nonce=18d0b37f66b36fd183b
+discovery probe window elapsed attempt=3
+transport error: discovery failed: no valid response received
+input type=ButtonPress detail=1 event_x=447 event_y=375 root_x=529 root_y=497 time=33947056 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=459 event_y=367 root_x=541 root_y=489 time=33947317 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+input type=ButtonPress detail=1 event_x=463 event_y=348 root_x=545 root_y=470 time=33947741 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=461 event_y=346 root_x=543 root_y=468 time=33947903 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=7 semantic=app.exit
+event type=UnmapNotify window=0x1c00000
+event type=DestroyNotify window=0x1c00000
+
+Rust binary exit status: 0
+End reason: process_exit
+Ended: Mon Aug 31 00:47:08 GMT+3:0100 2026
+========================================
+Discovery firewall rule removed
+========================================
+KUAL Rust X11 Hello launcher
+Date: Mon Aug 31 01:11:38 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 90s plus 5s TERM grace
+Discovery firewall rule removed
+Discovery firewall rule installed: -i wlan0 -p udp --sport 5580 --dport 5582 -j ACCEPT
+PaperSpoon host: (unset, discovery)
+Child PID: 3640
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+connected to X11
+screen_num: 0
+root: 0x51
+width: 1272
+height: 1696
+root_depth: 8
+black_pixel: 0
+white_pixel: 255
+window mapped id=0x1c00000 x=80 y=120 width=760 height=400
+discovery bind address=0.0.0.0:5582
+discovery probe attempt=1 destination=255.255.255.255:5580 nonce=18d0b4d9a8a57aa0e38
+discovery response from=192.168.0.50:5580 bytes=41
+discovery response valid endpoint=192.168.0.50:5581
+discovery result endpoint=192.168.0.50:5581
+transport: connected to PaperSpoon
+event type=MapNotify window=0x1c00000
+input type=ButtonPress detail=1 event_x=159 event_y=119 root_x=241 root_y=241 time=35421400 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=162 event_y=121 root_x=244 root_y=243 time=35421562 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=1 semantic=media.play_pause
+input type=ButtonPress detail=1 event_x=588 event_y=251 root_x=670 root_y=373 time=35422259 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=592 event_y=253 root_x=674 root_y=375 time=35422409 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=6 semantic=zoom.toggle_mute
