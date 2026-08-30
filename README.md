@@ -71,25 +71,67 @@ display <text>
 which renders `<text>` in the window's status strip (below the exit bar)
 and is logged on the device as `display: <text>`.
 
-The connection target defaults to the USBNetwork static host
-`192.168.15.201:5581` (kept only as a compatibility default; USBNetwork is
-unavailable on this PW6, see `docs/usbnetwork-pw2-report.md`)
-and can be overridden per run with the
-`RUST_X11_HELLO_COMPANION` environment variable, e.g. for a Wi-Fi run where
-the Mac is at `192.168.0.12`:
+### Zero-config discovery (verified on this Paperwhite 6)
 
-```sh
-cd tools/paperspoon && cargo build --release && \
-  ./target/release/paperspoon 5581 /tmp/paperspoon.log
+By default PaperPad locates PaperSpoon with a minimal custom UDP
+zero-config discovery exchange:
+
+```text
+PaperPad binds UDP 0.0.0.0:5582
+        |
+        | DISCOVER <nonce>  -> 255.255.255.255:5580
+        |
+PaperSpoon (UDP 5580) replies with a unicast HERE <nonce> <tcp-port>
+        |
+existing TCP connect
 ```
 
-On the device, export the same variable in the KUAL launch environment so the
-binary targets the Mac over Wi-Fi. A PaperSpoon that is down or unreachable costs a bounded 150 ms
-connect timeout and is logged as `transport error: ...` on the device; it
-never breaks the X11 event loop or the on-device activation log, and the
-Kindle retries the connection on the next activation. The Kindle opens no
-listening socket; only the action id leaves the device, and only `display`
-commands enter it.
+- Fixed ports: **UDP 5580** (PaperSpoon discovery listener), **UDP 5582**
+  (PaperPad discovery client), **TCP 5581** (existing listener).
+- The wire format is newline-terminated ASCII: `PAPERPAD DISCOVER <nonce>`
+  and `PAPERSPOON HERE <nonce> <tcp-port>`. The nonce distinguishes the
+  current attempt from stale/unrelated datagrams; the response must echo it.
+- The response is **unicast** to the request's source; no broadcast
+  responses, no multicast.
+- The response payload never contains an IP address; the UDP source address
+  is the discovered PaperSpoon address.
+- Discovery is bounded (3 probes, 500 ms window each) and the UI remains
+  usable even when PaperSpoon cannot be found.
+
+On the Kindle the firewall INPUT policy is restrictive, so the launcher
+installs a narrow temporary ACCEPT rule for the discovery response before
+starting PaperPad and removes it on cleanup:
+
+```text
+-i wlan0 -p udp --sport 5580 --dport 5582 -j ACCEPT
+```
+
+in a dedicated `PAPERPAD_DISCOVERY` iptables chain. The rule exists only for
+the bounded run and never flushes unrelated firewall tables.
+
+### Explicit host override
+
+Setting `RUST_X11_HELLO_COMPANION` (e.g. to a Wi-Fi run where the Mac is at
+`192.168.0.12`) bypasses discovery and connects directly:
+
+```sh
+RUST_X11_HELLO_COMPANION=192.168.0.12
+```
+
+This remains the deterministic control path and debugging/recovery override.
+When unset, discovery runs and there is **no** fallback to a hard-coded IP.
+
+Verified on the physical Paperwhite 6 (evidence under
+`artifacts/kindle-runs/discovery-test-*`): explicit control (Test A), full
+discovery chain (Test B), PaperPad restart (Test C), Mac DHCP address change
+`192.168.0.12 -> 192.168.0.50` with no configuration edit (Test D), and
+bounded failure with the UI alive when PaperSpoon is absent (Test E).
+
+A PaperSpoon that is unreachable costs bounded time and is logged as
+`transport error: ...` on the device; it never breaks the X11 event loop or
+the on-device activation log, and the Kindle retries on the next activation.
+The Kindle opens no listening TCP socket; only the action id leaves the
+device, and only `display` commands enter it.
 
 ### Running PaperSpoon
 
@@ -107,17 +149,14 @@ Then type a display command at its stdin:
 display hello
 ```
 
-For a Wi-Fi run, the listener binds `0.0.0.0` and the Kindle targets the Mac's
-LAN address via `RUST_X11_HELLO_COMPANION`; Wi-Fi and MTP can coexist over
-the USB link. USBNetwork is not available on this Paperwhite 6 — no
-maintained USBNetwork package accepts the device (see
-`docs/usbnetwork-pw2-report.md`) — so the USBNetwork
-interface setup and MTP/USBNetwork exclusivity rules below do not apply:
-
-For the default USBNetwork path, the Mac must have the USBNetwork interface
-up with this host at `192.168.15.201` (Kindle at `.200`); MTP mode and
-USBNetwork cannot run over the same USB link at once, so deploy the binary
-over MTP first, then switch the device to USBNetwork for the run.
+For a Wi-Fi run, the listener binds `0.0.0.0` on TCP 5581 **and** starts the
+UDP discovery responder on `0.0.0.0:5580` (you should see both the TCP
+banner and `discovery listening address=0.0.0.0:5580`). With no
+`RUST_X11_HELLO_COMPANION`, the Kindle discovers PaperSpoon automatically
+over the LAN. Wi-Fi and MTP can coexist over the USB link. USBNetwork is not
+available on this Paperwhite 6 — no maintained USBNetwork package accepts
+the device (see `docs/usbnetwork-pw2-report.md`) — so the USBNetwork
+interface setup and MTP/USBNetwork exclusivity rules do not apply.
 
 ## Host checks and Kindle build
 
