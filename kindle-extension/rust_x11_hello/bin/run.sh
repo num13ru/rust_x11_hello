@@ -10,6 +10,7 @@ LOCK_DIR="$EXT_DIR/rust_x11_hello.lock"
 LOCK_OWNER_FILE="$LOCK_DIR/launcher.pid"
 WATCHDOG_SECONDS="${RUST_X11_HELLO_WATCHDOG_SECONDS:-90}"
 WATCHDOG_TERM_GRACE_SECONDS="${RUST_X11_HELLO_WATCHDOG_TERM_GRACE_SECONDS:-5}"
+COMPANION_HOST="${RUST_X11_HELLO_COMPANION:-192.168.15.201}"
 
 CHILD_PID=""
 WATCHDOG_PID=""
@@ -208,11 +209,9 @@ rm -f "$WATCHDOG_MARKER"
 if ! chmod +x "$BIN" 2>> "$LOG"; then
     echo "WARNING: chmod +x failed; attempting launch with existing mode" >> "$LOG"
 fi
-if [ -n "$RUST_X11_HELLO_COMPANION" ]; then
-    echo "Companion host override: $RUST_X11_HELLO_COMPANION" >> "$LOG"
-fi
+echo "Companion host: $COMPANION_HOST" >> "$LOG"
 echo "---- running Rust binary ----" >> "$LOG"
-RUST_X11_HELLO_COMPANION="${RUST_X11_HELLO_COMPANION:-}" "$BIN" >> "$LOG" 2>&1 &
+RUST_X11_HELLO_COMPANION="$COMPANION_HOST" "$BIN" >> "$LOG" 2>&1 &
 CHILD_PID=$!
 
 if ! printf '%s\n' "$CHILD_PID" > "$PID_FILE"; then
