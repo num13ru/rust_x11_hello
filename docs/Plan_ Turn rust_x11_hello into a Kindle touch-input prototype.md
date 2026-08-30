@@ -433,3 +433,76 @@ zoom.toggle_mute
 rather than hard-coded keyboard shortcuts.
 
 That future architecture should not influence the scope of the current touch-input milestone beyond keeping the UI/input boundary clean.
+
+## Phase 10 - Persistent connection and Mac-to-Kindle display commands
+
+Once the single-shot direction (Phase 9) is proven on the physical Kindle, add
+the first bidirectional step: a **persistent TCP connection** from the Kindle
+to the companion, over which the companion can send **display commands** back
+to the Kindle.
+
+### Scope
+
+Do not add retries, queues, heartbeats, acknowledgements, or a bidirectional
+protocol in this phase beyond what is needed to prove the control direction.
+The next milestone can add richer Mac-to-Kindle control once this direction is
+proven.
+
+### Protocol
+
+One newline-terminated text line per message, in both directions:
+
+```text
+Kindle -> companion: event action=<semantic-id>;
+companion -> Kindle: display <text>
+```
+
+`display <text>` renders the text on the Kindle's X11 window (in a fixed
+status area), proving Mac-to-Kindle control. Companion sends only display
+commands in this phase.
+
+### Transport
+
+- Kindle opens one TCP connection to the companion address on launch
+  (same `RUST_X11_HELLO_COMPANION` override; default USBNetwork static host).
+- The connection stays open for the run; each activation writes one
+  `event action=<id>;` line over it.
+- The companion reads with a short nonblocking poll so the X11 event loop is
+  never blocked for long; a disconnected companion (or one that never sends)
+  must not stall the X11 event loop or drain performance.
+- If the connection drops, the Kindle logs it and keeps running; the next
+  activation retries the connect. No queueing of lost messages.
+
+### Kindle-side rendering of display commands
+
+- `display <text>` sets a status line drawn in the window (below the button
+  grid), visible to the operator, and logs the received command.
+- The status area is a bounded region; long text truncates or wraps safely.
+- The rendering layer stays in `x11/events.rs`/`x11/display.rs`; the network
+  layer never calls X11 directly.
+
+### Realm of the persistent socket
+
+- The Kindle still opens no listening socket; it connects out. The companion
+  keeps listening on `0.0.0.0:5581`.
+- The device sends only `event action=<id>;`. Only the companion's display
+  command enters the Kindle, and only into the status area.
+
+### Acceptance
+
+1. A persistent connection is established at launch and remains for the run.
+2. Each activation produces an `event action=<id>;` line on the connection
+   (regression of Phase 9).
+3. A `display hello` line sent from the companion renders on the Kindle
+   window and is logged as `display: hello`.
+4. The X11 event loop keeps processing presses while the connection is idle
+   and while a display command arrives.
+5. A dropped connection logs `transport` state and never breaks the loop.
+6. Static ARM build and host checks still pass.
+
+### Suggested commits
+
+```text
+feat: persistent companion session with display command
+test: add Kindle phase 10 display-command evidence
+```

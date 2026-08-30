@@ -4,7 +4,7 @@
 //! [`crate::ui::button::PointerEvent`] and renders logical layouts with
 //! core-X11 requests. The UI layer never sees X11 types.
 
-use crate::net::send_semantic_action;
+use crate::net::Companion;
 use crate::ui::action::action_for_button;
 use crate::ui::button::{ContactTracker, PointerEvent, PointerEventKind, handle_pointer_event};
 use crate::ui::geometry::{Point, WINDOW_HEIGHT, WINDOW_WIDTH, draw_layout};
@@ -27,19 +27,36 @@ enum GeometryUpdate {
 }
 
 /// Run the event loop until the window is destroyed or the connection fails.
-pub fn event_loop(conn: &RustConnection, win: Window, gc: Gcontext) -> Result<EventLoopExit> {
+pub fn event_loop(
+    conn: &RustConnection,
+    win: Window,
+    gc: Gcontext,
+    companion: &mut Companion,
+) -> Result<EventLoopExit> {
     let mut width = WINDOW_WIDTH;
     let mut height = WINDOW_HEIGHT;
     let mut contact = ContactTracker::default();
+    let mut status_text: Option<String> = None;
 
+    if let Some(text) = companion.poll_display() {
+        status_text = Some(text);
+        draw(conn, win, gc, width, height, status_text.as_deref())
+            .context("failed to redraw status after companion command")?;
+    }
     loop {
+        // Drain any companion command received since the last X11 event.
+        if let Some(text) = companion.poll_display() {
+            status_text = Some(text);
+            draw(conn, win, gc, width, height, status_text.as_deref())
+                .context("failed to redraw status after companion command")?;
+        }
         let event = conn
             .wait_for_event()
             .context("X11 connection failed while waiting for an event")?;
 
         match event {
             Event::Expose(event) if event.window == win && event.count == 0 => {
-                draw(conn, win, gc, width, height)
+                draw(conn, win, gc, width, height, status_text.as_deref())
                     .context("failed to redraw final Expose batch")?;
             }
             Event::Expose(_) => {}
@@ -63,7 +80,7 @@ pub fn event_loop(conn: &RustConnection, win: Window, gc: Gcontext) -> Result<Ev
                             "event type=ConfigureNotify x={} y={} width={width} height={height} window=0x{:x}",
                             event.x, event.y, event.window
                         );
-                        draw(conn, win, gc, width, height)
+                        draw(conn, win, gc, width, height, status_text.as_deref())
                             .context("failed to redraw after ConfigureNotify")?;
                     }
                 }
@@ -84,7 +101,7 @@ pub fn event_loop(conn: &RustConnection, win: Window, gc: Gcontext) -> Result<Ev
                     width,
                     height,
                 ) {
-                    log_activation(button_id);
+                    log_activation(button_id, companion);
                 }
             }
             Event::ButtonPress(_) => {}
@@ -103,7 +120,7 @@ pub fn event_loop(conn: &RustConnection, win: Window, gc: Gcontext) -> Result<Ev
                     width,
                     height,
                 ) {
-                    log_activation(button_id);
+                    log_activation(button_id, companion);
                 }
             }
             Event::ButtonRelease(_) => {}
@@ -152,14 +169,14 @@ pub fn format_pointer_event(event_type: &str, event: &ButtonPressEvent) -> Strin
     )
 }
 /// Log one activation and send its semantic action over the transport.
-fn log_activation(button_id: u8) {
+fn log_activation(button_id: u8, companion: &mut Companion) {
     match action_for_button(button_id) {
         Some(action) => {
             eprintln!(
                 "ui action=activate button={button_id} semantic={}",
                 action.id()
             );
-            if let Err(error) = send_semantic_action(action.id()) {
+            if let Err(error) = companion.send_action(action.id()) {
                 eprintln!("transport error: {error:#}");
             }
         }
@@ -179,7 +196,14 @@ fn geometry_update(current: (u16, u16), reported: (u16, u16)) -> GeometryUpdate 
     }
 }
 
-fn draw(conn: &RustConnection, win: Window, gc: Gcontext, width: u16, height: u16) -> Result<()> {
+fn draw(
+    conn: &RustConnection,
+    win: Window,
+    gc: Gcontext,
+    width: u16,
+    height: u16,
+    status_text: Option<&str>,
+) -> Result<()> {
     let Some(layout) = draw_layout(width, height) else {
         return Ok(());
     };
@@ -210,6 +234,12 @@ fn draw(conn: &RustConnection, win: Window, gc: Gcontext, width: u16, height: u1
         if placement.y > 0 {
             draw_text(conn, win, gc, placement.x, placement.y, placement.text)?;
         }
+    }
+
+    if let Some(text) = status_text {
+        // Below the grid's bottom inset: the last 20 reference px are clear.
+        let status_y = height.saturating_sub(10).min(i16::MAX as u16) as i16;
+        draw_text(conn, win, gc, 20, status_y, text.as_bytes())?;
     }
 
     conn.flush().context("failed to flush draw requests")?;
