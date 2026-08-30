@@ -15,10 +15,10 @@ The current milestone opens a persistent override-redirect X11 window, redraws f
 
 ## Geometry-aware rendering
 
-- The initial Kindle window remains `(80,120)` at `760 x 360`; the 2×3 button grid and labels scale from that reference geometry.
+- The initial Kindle window remains `(80,120)` at `760 x 400`; the 2×3 button grid, exit bar, and status strip scale from that reference geometry.
 - The final event in each `Expose` batch clears and redraws the current window extent.
 - A size-changing `ConfigureNotify` updates the active geometry and redraws immediately. Duplicate geometry is ignored, and a defensive zero-width/zero-height report is logged without replacing the last valid extent.
-- Grid bounds and text origins scale from the verified `760 x 360` reference layout. Arithmetic is bounded for tiny windows and the full core-X11 `u16` extent; text coordinates saturate at the protocol's signed-coordinate limit.
+- Grid bounds and text origins scale from the verified `760 x 400` reference layout (grid + exit bar above a 40px status strip where companion `display` text renders). Arithmetic is bounded for tiny windows and the full core-X11 `u16` extent; text coordinates saturate at the protocol's signed-coordinate limit.
 
 Host tests verify layout and geometry decisions at default, half, one-pixel, zero, and maximum dimensions. The ARM/static gates verify deployability, but runtime resize/redraw behavior still requires observation on an X server that actually sends resize events; no such event was part of the fixed-geometry Kindle evidence run.
 
@@ -68,7 +68,7 @@ its stdin to the Kindle as control commands:
 display <text>
 ```
 
-which renders `<text>` in the window's status area (below the button grid)
+which renders `<text>` in the window's status strip (below the exit bar)
 and is logged on the device as `display: <text>`.
 
 The connection target defaults to the USBNetwork static host
