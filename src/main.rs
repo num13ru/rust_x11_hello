@@ -36,17 +36,40 @@ fn run() -> Result<()> {
     if env::var("RUST_X11_HELLO_MCAST_PROBE").is_ok() {
         let interface = env::var("RUST_X11_HELLO_MCAST_INTERFACE")
             .unwrap_or_else(|_| mcast::DEFAULT_INTERFACE.to_string());
+        let port = env::var("RUST_X11_HELLO_MCAST_PORT")
+            .ok()
+            .and_then(|value| value.parse::<u16>().ok())
+            .unwrap_or(mcast::MDNS_PORT);
+        let temporary_firewall_source = env::var("RUST_X11_HELLO_MCAST_TEMP_FIREWALL_SOURCE")
+            .ok()
+            .map(|value| {
+                value.parse::<std::net::Ipv4Addr>().map_err(|error| {
+                    anyhow::anyhow!(
+                        "invalid RUST_X11_HELLO_MCAST_TEMP_FIREWALL_SOURCE={value}: {error}"
+                    )
+                })
+            })
+            .transpose()?;
+        let temporary_promiscuous = env::var("RUST_X11_HELLO_MCAST_TEMP_PROMISC").is_ok();
         let timeout = env::var("RUST_X11_HELLO_MCAST_TIMEOUT_MS")
             .ok()
             .and_then(|value| value.parse::<u64>().ok())
             .map(std::time::Duration::from_millis)
             .unwrap_or(mcast::DEFAULT_PROBE_TIMEOUT);
-        let received = mcast::probe_multicast(&interface, timeout)?;
-        return if received {
-            eprintln!("multicast probe result=received");
+        let result = mcast::probe_multicast(
+            &interface,
+            port,
+            timeout,
+            temporary_firewall_source,
+            temporary_promiscuous,
+        )?;
+        return if result.received_external_multicast() {
+            eprintln!("multicast probe result=external-multicast-received");
             Ok(())
         } else {
-            Err(anyhow::anyhow!("multicast probe: no multicast received"))
+            Err(anyhow::anyhow!(
+                "multicast probe: no external multicast marker received"
+            ))
         };
     }
 

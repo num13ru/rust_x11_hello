@@ -1,0 +1,534 @@
+========================================
+KUAL Rust X11 Hello launcher
+Date: Sun Aug 30 23:39:26 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 40s plus 5s TERM grace
+PaperSpoon host: 192.168.15.201
+---- running Rust binary ----
+Child PID: 27841
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+multicast probe start interface=wlan0 address=192.168.0.4 bind=0.0.0.0:5582 group=224.0.0.251 port=5582 timeout_ms=25000
+multicast probe join interface=wlan0 address=192.168.0.4 ok
+multicast probe temporary-promiscuous enabled interface=wlan0 flags=0x1303
+multicast probe temporary-firewall installed chain=RXH_UDP_TEST interface=wlan0 source=192.168.0.12/32 local_source=192.168.0.4/32 group=224.0.0.251/32 port=5582 rule_order=external-unicast,external-multicast,local-interface-unicast,local-multicast
+multicast probe kernel-state path=/proc/net/igmp begin
+multicast probe kernel-state Idx	Device    : Count Querier	Group    Users Timer	Reporter
+multicast probe kernel-state 1	lo        :     1      V3
+multicast probe kernel-state 				010000E0     1 0:00000000		0
+multicast probe kernel-state 10	wlan0     :     2      V3
+multicast probe kernel-state 				FB0000E0     1 0:00000000		0
+multicast probe kernel-state 				010000E0     1 0:00000000		0
+multicast probe kernel-state path=/proc/net/igmp end
+multicast probe kernel-state path=/proc/net/dev_mcast begin
+multicast probe kernel-state 2    ifb0            1     0     333300000001
+multicast probe kernel-state 3    ifb1            1     0     333300000001
+multicast probe kernel-state 10   wlan0           1     0     333300000001
+multicast probe kernel-state 10   wlan0           1     0     01005e000001
+multicast probe kernel-state 10   wlan0           1     0     3333fffd2b06
+multicast probe kernel-state 10   wlan0           1     0     01005e0000fb
+multicast probe kernel-state path=/proc/net/dev_mcast end
+multicast probe kernel-state path=/proc/net/route begin
+multicast probe kernel-state Iface	Destination	Gateway 	Flags	RefCnt	Use	Metric	Mask		MTU	Window	IRTT                                                       
+multicast probe kernel-state wlan0	00000000	0100A8C0	0007	0	0	0	FFFFFFFF	0	0	0                                                                              
+multicast probe kernel-state wlan0	00000000	0100A8C0	0003	0	0	0	00000000	0	0	0                                                                              
+multicast probe kernel-state wlan0	0000A8C0	00000000	0001	0	0	0	00FFFFFF	0	0	0                                                                              
+multicast probe kernel-state path=/proc/net/route end
+multicast probe kernel-state path=/proc/net/udp begin
+multicast probe kernel-state    sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode ref pointer drops            
+multicast probe kernel-state   194: 00000000:836B 00000000:0000 07 00000000:00000000 00:00000000 00000000  9000        0 244166 2 bd662e26 0                
+multicast probe kernel-state   293: 00000000:15CE 00000000:0000 07 00000000:00000000 00:00000000 00000000     0        0 246634 2 f21e4637 0                
+multicast probe kernel-state   345: 0100007F:0202 00000000:0000 07 00000000:00000000 00:00000000 00000000     0        0 239477 2 15c70561 0                
+multicast probe kernel-state path=/proc/net/udp end
+multicast probe kernel-state path=/proc/net/ip_tables_names begin
+multicast probe kernel-state mangle
+multicast probe kernel-state raw
+multicast probe kernel-state filter
+multicast probe kernel-state path=/proc/net/ip_tables_names end
+multicast probe kernel-state path=/proc/sys/net/ipv4/conf/all/rp_filter begin
+multicast probe kernel-state 0
+multicast probe kernel-state path=/proc/sys/net/ipv4/conf/all/rp_filter end
+multicast probe kernel-state path=/proc/sys/net/ipv4/conf/wlan0/rp_filter begin
+multicast probe kernel-state 0
+multicast probe kernel-state path=/proc/sys/net/ipv4/conf/wlan0/rp_filter end
+multicast probe kernel-state path=/proc/sys/net/ipv4/conf/wlan0/accept_local begin
+multicast probe kernel-state 0
+multicast probe kernel-state path=/proc/sys/net/ipv4/conf/wlan0/accept_local end
+multicast probe kernel-state path=/sys/class/net/wlan0/flags begin
+multicast probe kernel-state 0x1303
+multicast probe kernel-state path=/sys/class/net/wlan0/flags end
+multicast probe command label=ip-rule program=ip status=exit status: 0 begin
+multicast probe command stdout 0:	from all lookup local 
+multicast probe command stdout 32766:	from all lookup main 
+multicast probe command stdout 32767:	from all lookup default 
+multicast probe command label=ip-rule end
+multicast probe command label=ip-route-all program=ip status=exit status: 0 begin
+multicast probe command stdout 0.0.0.0 via 192.168.0.1 dev wlan0 
+multicast probe command stdout default via 192.168.0.1 dev wlan0 
+multicast probe command stdout 192.168.0.0/24 dev wlan0 scope link  src 192.168.0.4 
+multicast probe command stdout local 127.0.0.0/8 dev lo table local scope host  src 127.0.0.1 
+multicast probe command stdout local 127.0.0.1 dev lo table local scope host  src 127.0.0.1 
+multicast probe command stdout broadcast 127.255.255.255 dev lo table local scope link  src 127.0.0.1 
+multicast probe command stdout local 192.168.0.4 dev wlan0 table local scope host  src 192.168.0.4 
+multicast probe command stdout broadcast 192.168.0.255 dev wlan0 table local scope link  src 192.168.0.4 
+multicast probe command stdout fe80::/64 dev wlan0  metric 256 
+multicast probe command stdout default via fe80::1 dev wlan0  metric 1024  expires 0sec
+multicast probe command stdout local ::1 dev lo table local  metric 0 
+multicast probe command stdout local fe80::562b:1cff:fefd:2b06 dev wlan0 table local  metric 0 
+multicast probe command stdout multicast ff00::/8 dev wlan0 table local  metric 256 
+multicast probe command label=ip-route-all end
+multicast probe command label=iptables-filter program=iptables status=exit status: 0 begin
+multicast probe command stdout Chain INPUT (policy DROP 0 packets, 0 bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command stdout 1        0     0 RXH_UDP_TEST  all  --  *      *       0.0.0.0/0            0.0.0.0/0           
+multicast probe command stdout 2        0     0 ACCEPT     tcp  --  ppp0   *       0.0.0.0/0            0.0.0.0/0            tcp dpt:40317
+multicast probe command stdout 3        0     0 ACCEPT     tcp  --  wwan0  *       0.0.0.0/0            0.0.0.0/0            tcp dpt:40317
+multicast probe command stdout 4        0     0 ACCEPT     tcp  --  ppp0   *       0.0.0.0/0            0.0.0.0/0            state RELATED,ESTABLISHED
+multicast probe command stdout 5        0     0 ACCEPT     tcp  --  wwan0  *       0.0.0.0/0            0.0.0.0/0            state RELATED,ESTABLISHED
+multicast probe command stdout 6    11207 6973K ACCEPT     tcp  --  wlan0  *       0.0.0.0/0            0.0.0.0/0            state RELATED,ESTABLISHED
+multicast probe command stdout 7      825  134K ACCEPT     udp  --  wlan0  *       0.0.0.0/0            0.0.0.0/0            state ESTABLISHED
+multicast probe command stdout 8        0     0 ACCEPT     udp  --  ppp0   *       0.0.0.0/0            0.0.0.0/0            state ESTABLISHED
+multicast probe command stdout 9        0     0 ACCEPT     udp  --  wwan0  *       0.0.0.0/0            0.0.0.0/0            state ESTABLISHED
+multicast probe command stdout 10       0     0 ACCEPT     udp  --  ppp0   *       0.0.0.0/0            0.0.0.0/0            udp spt:40317
+multicast probe command stdout 11       0     0 ACCEPT     udp  --  wwan0  *       0.0.0.0/0            0.0.0.0/0            udp spt:40317
+multicast probe command stdout 12       0     0 ACCEPT     udp  --  ppp0   *       0.0.0.0/0            0.0.0.0/0            udp spt:49317
+multicast probe command stdout 13       0     0 ACCEPT     udp  --  wwan0  *       0.0.0.0/0            0.0.0.0/0            udp spt:49317
+multicast probe command stdout 14       0     0 ACCEPT     udp  --  ppp0   *       0.0.0.0/0            0.0.0.0/0            udp spt:33434
+multicast probe command stdout 15       0     0 ACCEPT     udp  --  wwan0  *       0.0.0.0/0            0.0.0.0/0            udp spt:33434
+multicast probe command stdout 16   79652   26M ACCEPT     all  --  lo     *       127.0.0.1            0.0.0.0/0           
+multicast probe command stdout 17       0     0 ACCEPT     all  --  usb0   *       0.0.0.0/0            0.0.0.0/0           
+multicast probe command stdout 18       0     0 ACCEPT     icmp --  *      *       0.0.0.0/0            0.0.0.0/0            state RELATED,ESTABLISHED
+multicast probe command stdout 
+multicast probe command stdout Chain FORWARD (policy ACCEPT 0 packets, 0 bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command stdout 
+multicast probe command stdout Chain OUTPUT (policy ACCEPT 0 packets, 0 bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command stdout 1    79642   26M ACCEPT     all  --  *      lo      0.0.0.0/0            127.0.0.1           
+multicast probe command stdout 
+multicast probe command stdout Chain RXH_UDP_TEST (1 references)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command stdout 1        0     0 ACCEPT     udp  --  wlan0  *       192.168.0.12         192.168.0.4          udp dpt:5582
+multicast probe command stdout 2        0     0 ACCEPT     udp  --  wlan0  *       192.168.0.12         224.0.0.251          udp dpt:5582
+multicast probe command stdout 3        0     0 ACCEPT     udp  --  lo     *       192.168.0.4          192.168.0.4          udp dpt:5582
+multicast probe command stdout 4        0     0 ACCEPT     udp  --  *      *       192.168.0.4          224.0.0.251          udp dpt:5582
+multicast probe command label=iptables-filter end
+multicast probe command label=iptables-raw program=iptables status=exit status: 0 begin
+multicast probe command stdout Chain PREROUTING (policy ACCEPT 10762 packets, 1545K bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command stdout 
+multicast probe command stdout Chain OUTPUT (policy ACCEPT 10451 packets, 1481K bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command label=iptables-raw end
+multicast probe command label=iptables-mangle program=iptables status=exit status: 0 begin
+multicast probe command stdout Chain PREROUTING (policy ACCEPT 10762 packets, 1545K bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command stdout 
+multicast probe command stdout Chain INPUT (policy ACCEPT 10754 packets, 1541K bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command stdout 
+multicast probe command stdout Chain FORWARD (policy ACCEPT 0 packets, 0 bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command stdout 
+multicast probe command stdout Chain OUTPUT (policy ACCEPT 10451 packets, 1481K bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command stdout 
+multicast probe command stdout Chain POSTROUTING (policy ACCEPT 10456 packets, 1481K bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command label=iptables-mangle end
+multicast probe command label=netstat-udp program=netstat status=exit status: 0 begin
+multicast probe command stdout Active Internet connections (servers and established)
+multicast probe command stdout Proto Recv-Q Send-Q Local Address           Foreign Address         State       
+multicast probe command stdout udp        0      0 0.0.0.0:33643           0.0.0.0:*                           
+multicast probe command stdout udp        0      0 0.0.0.0:5582            0.0.0.0:*                           
+multicast probe command stdout udp        0      0 127.0.0.1:514           0.0.0.0:*                           
+multicast probe command label=netstat-udp end
+multicast probe sent kind=local-loopback-unicast destination=127.0.0.1:5582 bytes=37
+multicast probe sent kind=local-interface-unicast destination=192.168.0.4:5582 bytes=38
+multicast probe sent kind=local-multicast destination=224.0.0.251:5582 bytes=30
+multicast probe received-first kind=local-loopback-unicast from=127.0.0.1:53522 bytes=37 prefix=rust-x11-hello-local-loopback-unicast
+multicast probe received-first kind=local-interface-unicast from=192.168.0.4:53522 bytes=38 prefix=rust-x11-hello-local-interface-unicast
+multicast probe received-first kind=local-multicast from=192.168.0.4:5582 bytes=30 prefix=rust-x11-hello-local-multicast
+multicast probe received-first kind=external-unicast from=192.168.0.12:56597 bytes=31 prefix=rust-x11-hello-external-unicast
+multicast probe complete local_loopback_unicast=true local_interface_unicast=true local_multicast=true external_unicast=true external_multicast=false external_other=0
+multicast probe temporary-firewall counters begin
+multicast probe temporary-firewall counters Chain RXH_UDP_TEST (1 references)
+multicast probe temporary-firewall counters num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe temporary-firewall counters 1        9   531 ACCEPT     udp  --  wlan0  *       192.168.0.12         192.168.0.4          udp dpt:5582
+multicast probe temporary-firewall counters 2        0     0 ACCEPT     udp  --  wlan0  *       192.168.0.12         224.0.0.251          udp dpt:5582
+multicast probe temporary-firewall counters 3        1    66 ACCEPT     udp  --  lo     *       192.168.0.4          192.168.0.4          udp dpt:5582
+multicast probe temporary-firewall counters 4        1    58 ACCEPT     udp  --  *      *       192.168.0.4          224.0.0.251          udp dpt:5582
+multicast probe temporary-firewall counters end
+multicast probe temporary-firewall removed chain=RXH_UDP_TEST
+multicast probe temporary-firewall cleanup-verified chain=RXH_UDP_TEST absent
+multicast probe temporary-promiscuous cleanup-verified interface=wlan0 flags=0x1203
+Error: multicast probe: no external multicast marker received
+
+Rust binary exit status: 1
+End reason: process_exit
+Ended: Sun Aug 30 23:39:51 GMT+3:0100 2026
+========================================
+========================================
+KUAL Rust X11 Hello launcher
+Date: Sun Aug 30 23:39:54 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 40s plus 5s TERM grace
+PaperSpoon host: 192.168.15.201
+---- running Rust binary ----
+Child PID: 27926
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+multicast probe start interface=wlan0 address=192.168.0.4 bind=0.0.0.0:5582 group=224.0.0.251 port=5582 timeout_ms=25000
+multicast probe join interface=wlan0 address=192.168.0.4 ok
+multicast probe temporary-promiscuous enabled interface=wlan0 flags=0x1303
+multicast probe temporary-firewall installed chain=RXH_UDP_TEST interface=wlan0 source=192.168.0.12/32 local_source=192.168.0.4/32 group=224.0.0.251/32 port=5582 rule_order=external-unicast,external-multicast,local-interface-unicast,local-multicast
+multicast probe kernel-state path=/proc/net/igmp begin
+multicast probe kernel-state Idx	Device    : Count Querier	Group    Users Timer	Reporter
+multicast probe kernel-state 1	lo        :     1      V3
+multicast probe kernel-state 				010000E0     1 0:00000000		0
+multicast probe kernel-state 10	wlan0     :     2      V3
+multicast probe kernel-state 				FB0000E0     1 0:00000000		0
+multicast probe kernel-state 				010000E0     1 0:00000000		0
+multicast probe kernel-state path=/proc/net/igmp end
+multicast probe kernel-state path=/proc/net/dev_mcast begin
+multicast probe kernel-state 2    ifb0            1     0     333300000001
+multicast probe kernel-state 3    ifb1            1     0     333300000001
+multicast probe kernel-state 10   wlan0           1     0     333300000001
+multicast probe kernel-state 10   wlan0           1     0     01005e000001
+multicast probe kernel-state 10   wlan0           1     0     3333fffd2b06
+multicast probe kernel-state 10   wlan0           1     0     01005e0000fb
+multicast probe kernel-state path=/proc/net/dev_mcast end
+multicast probe kernel-state path=/proc/net/route begin
+multicast probe kernel-state Iface	Destination	Gateway 	Flags	RefCnt	Use	Metric	Mask		MTU	Window	IRTT                                                       
+multicast probe kernel-state wlan0	00000000	0100A8C0	0007	0	0	0	FFFFFFFF	0	0	0                                                                              
+multicast probe kernel-state wlan0	00000000	0100A8C0	0003	0	0	0	00000000	0	0	0                                                                              
+multicast probe kernel-state wlan0	0000A8C0	00000000	0001	0	0	0	00FFFFFF	0	0	0                                                                              
+multicast probe kernel-state path=/proc/net/route end
+multicast probe kernel-state path=/proc/net/udp begin
+multicast probe kernel-state    sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode ref pointer drops            
+multicast probe kernel-state   194: 00000000:836B 00000000:0000 07 00000000:00000000 00:00000000 00000000  9000        0 244166 2 bd662e26 0                
+multicast probe kernel-state   293: 00000000:15CE 00000000:0000 07 00000000:00000000 00:00000000 00000000     0        0 249266 2 27b7e61b 0                
+multicast probe kernel-state   345: 0100007F:0202 00000000:0000 07 00000000:00000000 00:00000000 00000000     0        0 239477 2 15c70561 0                
+multicast probe kernel-state path=/proc/net/udp end
+multicast probe kernel-state path=/proc/net/ip_tables_names begin
+multicast probe kernel-state mangle
+multicast probe kernel-state raw
+multicast probe kernel-state filter
+multicast probe kernel-state path=/proc/net/ip_tables_names end
+multicast probe kernel-state path=/proc/sys/net/ipv4/conf/all/rp_filter begin
+multicast probe kernel-state 0
+multicast probe kernel-state path=/proc/sys/net/ipv4/conf/all/rp_filter end
+multicast probe kernel-state path=/proc/sys/net/ipv4/conf/wlan0/rp_filter begin
+multicast probe kernel-state 0
+multicast probe kernel-state path=/proc/sys/net/ipv4/conf/wlan0/rp_filter end
+multicast probe kernel-state path=/proc/sys/net/ipv4/conf/wlan0/accept_local begin
+multicast probe kernel-state 0
+multicast probe kernel-state path=/proc/sys/net/ipv4/conf/wlan0/accept_local end
+multicast probe kernel-state path=/sys/class/net/wlan0/flags begin
+multicast probe kernel-state 0x1303
+multicast probe kernel-state path=/sys/class/net/wlan0/flags end
+multicast probe command label=ip-rule program=ip status=exit status: 0 begin
+multicast probe command stdout 0:	from all lookup local 
+multicast probe command stdout 32766:	from all lookup main 
+multicast probe command stdout 32767:	from all lookup default 
+multicast probe command label=ip-rule end
+multicast probe command label=ip-route-all program=ip status=exit status: 0 begin
+multicast probe command stdout 0.0.0.0 via 192.168.0.1 dev wlan0 
+multicast probe command stdout default via 192.168.0.1 dev wlan0 
+multicast probe command stdout 192.168.0.0/24 dev wlan0 scope link  src 192.168.0.4 
+multicast probe command stdout local 127.0.0.0/8 dev lo table local scope host  src 127.0.0.1 
+multicast probe command stdout local 127.0.0.1 dev lo table local scope host  src 127.0.0.1 
+multicast probe command stdout broadcast 127.255.255.255 dev lo table local scope link  src 127.0.0.1 
+multicast probe command stdout local 192.168.0.4 dev wlan0 table local scope host  src 192.168.0.4 
+multicast probe command stdout broadcast 192.168.0.255 dev wlan0 table local scope link  src 192.168.0.4 
+multicast probe command stdout fe80::/64 dev wlan0  metric 256 
+multicast probe command stdout default via fe80::1 dev wlan0  metric 1024  expires 0sec
+multicast probe command stdout local ::1 dev lo table local  metric 0 
+multicast probe command stdout local fe80::562b:1cff:fefd:2b06 dev wlan0 table local  metric 0 
+multicast probe command stdout multicast ff00::/8 dev wlan0 table local  metric 256 
+multicast probe command label=ip-route-all end
+multicast probe command label=iptables-filter program=iptables status=exit status: 0 begin
+multicast probe command stdout Chain INPUT (policy DROP 0 packets, 0 bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command stdout 1        0     0 RXH_UDP_TEST  all  --  *      *       0.0.0.0/0            0.0.0.0/0           
+multicast probe command stdout 2        0     0 ACCEPT     tcp  --  ppp0   *       0.0.0.0/0            0.0.0.0/0            tcp dpt:40317
+multicast probe command stdout 3        0     0 ACCEPT     tcp  --  wwan0  *       0.0.0.0/0            0.0.0.0/0            tcp dpt:40317
+multicast probe command stdout 4        0     0 ACCEPT     tcp  --  ppp0   *       0.0.0.0/0            0.0.0.0/0            state RELATED,ESTABLISHED
+multicast probe command stdout 5        0     0 ACCEPT     tcp  --  wwan0  *       0.0.0.0/0            0.0.0.0/0            state RELATED,ESTABLISHED
+multicast probe command stdout 6    11207 6973K ACCEPT     tcp  --  wlan0  *       0.0.0.0/0            0.0.0.0/0            state RELATED,ESTABLISHED
+multicast probe command stdout 7      825  134K ACCEPT     udp  --  wlan0  *       0.0.0.0/0            0.0.0.0/0            state ESTABLISHED
+multicast probe command stdout 8        0     0 ACCEPT     udp  --  ppp0   *       0.0.0.0/0            0.0.0.0/0            state ESTABLISHED
+multicast probe command stdout 9        0     0 ACCEPT     udp  --  wwan0  *       0.0.0.0/0            0.0.0.0/0            state ESTABLISHED
+multicast probe command stdout 10       0     0 ACCEPT     udp  --  ppp0   *       0.0.0.0/0            0.0.0.0/0            udp spt:40317
+multicast probe command stdout 11       0     0 ACCEPT     udp  --  wwan0  *       0.0.0.0/0            0.0.0.0/0            udp spt:40317
+multicast probe command stdout 12       0     0 ACCEPT     udp  --  ppp0   *       0.0.0.0/0            0.0.0.0/0            udp spt:49317
+multicast probe command stdout 13       0     0 ACCEPT     udp  --  wwan0  *       0.0.0.0/0            0.0.0.0/0            udp spt:49317
+multicast probe command stdout 14       0     0 ACCEPT     udp  --  ppp0   *       0.0.0.0/0            0.0.0.0/0            udp spt:33434
+multicast probe command stdout 15       0     0 ACCEPT     udp  --  wwan0  *       0.0.0.0/0            0.0.0.0/0            udp spt:33434
+multicast probe command stdout 16   79813   26M ACCEPT     all  --  lo     *       127.0.0.1            0.0.0.0/0           
+multicast probe command stdout 17       0     0 ACCEPT     all  --  usb0   *       0.0.0.0/0            0.0.0.0/0           
+multicast probe command stdout 18       0     0 ACCEPT     icmp --  *      *       0.0.0.0/0            0.0.0.0/0            state RELATED,ESTABLISHED
+multicast probe command stdout 
+multicast probe command stdout Chain FORWARD (policy ACCEPT 0 packets, 0 bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command stdout 
+multicast probe command stdout Chain OUTPUT (policy ACCEPT 0 packets, 0 bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command stdout 1    79803   26M ACCEPT     all  --  *      lo      0.0.0.0/0            127.0.0.1           
+multicast probe command stdout 
+multicast probe command stdout Chain RXH_UDP_TEST (1 references)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command stdout 1        0     0 ACCEPT     udp  --  wlan0  *       192.168.0.12         192.168.0.4          udp dpt:5582
+multicast probe command stdout 2        0     0 ACCEPT     udp  --  wlan0  *       192.168.0.12         224.0.0.251          udp dpt:5582
+multicast probe command stdout 3        0     0 ACCEPT     udp  --  lo     *       192.168.0.4          192.168.0.4          udp dpt:5582
+multicast probe command stdout 4        0     0 ACCEPT     udp  --  *      *       192.168.0.4          224.0.0.251          udp dpt:5582
+multicast probe command label=iptables-filter end
+multicast probe command label=iptables-raw program=iptables status=exit status: 0 begin
+multicast probe command stdout Chain PREROUTING (policy ACCEPT 10949 packets, 1563K bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command stdout 
+multicast probe command stdout Chain OUTPUT (policy ACCEPT 10619 packets, 1497K bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command label=iptables-raw end
+multicast probe command label=iptables-mangle program=iptables status=exit status: 0 begin
+multicast probe command stdout Chain PREROUTING (policy ACCEPT 10949 packets, 1563K bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command stdout 
+multicast probe command stdout Chain INPUT (policy ACCEPT 10941 packets, 1558K bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command stdout 
+multicast probe command stdout Chain FORWARD (policy ACCEPT 0 packets, 0 bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command stdout 
+multicast probe command stdout Chain OUTPUT (policy ACCEPT 10619 packets, 1497K bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command stdout 
+multicast probe command stdout Chain POSTROUTING (policy ACCEPT 10625 packets, 1497K bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command label=iptables-mangle end
+multicast probe command label=netstat-udp program=netstat status=exit status: 0 begin
+multicast probe command stdout Active Internet connections (servers and established)
+multicast probe command stdout Proto Recv-Q Send-Q Local Address           Foreign Address         State       
+multicast probe command stdout udp        0      0 0.0.0.0:33643           0.0.0.0:*                           
+multicast probe command stdout udp        0      0 0.0.0.0:5582            0.0.0.0:*                           
+multicast probe command stdout udp        0      0 127.0.0.1:514           0.0.0.0:*                           
+multicast probe command label=netstat-udp end
+multicast probe sent kind=local-loopback-unicast destination=127.0.0.1:5582 bytes=37
+multicast probe sent kind=local-interface-unicast destination=192.168.0.4:5582 bytes=38
+multicast probe sent kind=local-multicast destination=224.0.0.251:5582 bytes=30
+multicast probe received-first kind=local-loopback-unicast from=127.0.0.1:41907 bytes=37 prefix=rust-x11-hello-local-loopback-unicast
+multicast probe received-first kind=local-interface-unicast from=192.168.0.4:41907 bytes=38 prefix=rust-x11-hello-local-interface-unicast
+multicast probe received-first kind=local-multicast from=192.168.0.4:5582 bytes=30 prefix=rust-x11-hello-local-multicast
+multicast probe received-first kind=external-unicast from=192.168.0.12:56597 bytes=31 prefix=rust-x11-hello-external-unicast
+multicast probe complete local_loopback_unicast=true local_interface_unicast=true local_multicast=true external_unicast=true external_multicast=false external_other=0
+multicast probe temporary-firewall counters begin
+multicast probe temporary-firewall counters Chain RXH_UDP_TEST (1 references)
+multicast probe temporary-firewall counters num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe temporary-firewall counters 1       99  5841 ACCEPT     udp  --  wlan0  *       192.168.0.12         192.168.0.4          udp dpt:5582
+multicast probe temporary-firewall counters 2        0     0 ACCEPT     udp  --  wlan0  *       192.168.0.12         224.0.0.251          udp dpt:5582
+multicast probe temporary-firewall counters 3        1    66 ACCEPT     udp  --  lo     *       192.168.0.4          192.168.0.4          udp dpt:5582
+multicast probe temporary-firewall counters 4        1    58 ACCEPT     udp  --  *      *       192.168.0.4          224.0.0.251          udp dpt:5582
+multicast probe temporary-firewall counters end
+multicast probe temporary-firewall removed chain=RXH_UDP_TEST
+multicast probe temporary-firewall cleanup-verified chain=RXH_UDP_TEST absent
+multicast probe temporary-promiscuous cleanup-verified interface=wlan0 flags=0x1203
+Error: multicast probe: no external multicast marker received
+
+Rust binary exit status: 1
+End reason: process_exit
+Ended: Sun Aug 30 23:40:19 GMT+3:0100 2026
+========================================
+========================================
+KUAL Rust X11 Hello launcher
+Date: Sun Aug 30 23:40:48 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 40s plus 5s TERM grace
+PaperSpoon host: 192.168.15.201
+---- running Rust binary ----
+Child PID: 28016
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+multicast probe start interface=wlan0 address=192.168.0.4 bind=0.0.0.0:5582 group=224.0.0.251 port=5582 timeout_ms=25000
+multicast probe join interface=wlan0 address=192.168.0.4 ok
+multicast probe temporary-promiscuous enabled interface=wlan0 flags=0x1303
+multicast probe temporary-firewall installed chain=RXH_UDP_TEST interface=wlan0 source=192.168.0.12/32 local_source=192.168.0.4/32 group=224.0.0.251/32 port=5582 rule_order=external-unicast,external-multicast,local-interface-unicast,local-multicast
+multicast probe kernel-state path=/proc/net/igmp begin
+multicast probe kernel-state Idx	Device    : Count Querier	Group    Users Timer	Reporter
+multicast probe kernel-state 1	lo        :     1      V3
+multicast probe kernel-state 				010000E0     1 0:00000000		0
+multicast probe kernel-state 10	wlan0     :     2      V3
+multicast probe kernel-state 				FB0000E0     1 0:00000000		0
+multicast probe kernel-state 				010000E0     1 0:00000000		0
+multicast probe kernel-state path=/proc/net/igmp end
+multicast probe kernel-state path=/proc/net/dev_mcast begin
+multicast probe kernel-state 2    ifb0            1     0     333300000001
+multicast probe kernel-state 3    ifb1            1     0     333300000001
+multicast probe kernel-state 10   wlan0           1     0     333300000001
+multicast probe kernel-state 10   wlan0           1     0     01005e000001
+multicast probe kernel-state 10   wlan0           1     0     3333fffd2b06
+multicast probe kernel-state 10   wlan0           1     0     01005e0000fb
+multicast probe kernel-state path=/proc/net/dev_mcast end
+multicast probe kernel-state path=/proc/net/route begin
+multicast probe kernel-state Iface	Destination	Gateway 	Flags	RefCnt	Use	Metric	Mask		MTU	Window	IRTT                                                       
+multicast probe kernel-state wlan0	00000000	0100A8C0	0007	0	0	0	FFFFFFFF	0	0	0                                                                              
+multicast probe kernel-state wlan0	00000000	0100A8C0	0003	0	0	0	00000000	0	0	0                                                                              
+multicast probe kernel-state wlan0	0000A8C0	00000000	0001	0	0	0	00FFFFFF	0	0	0                                                                              
+multicast probe kernel-state path=/proc/net/route end
+multicast probe kernel-state path=/proc/net/udp begin
+multicast probe kernel-state    sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode ref pointer drops            
+multicast probe kernel-state   194: 00000000:836B 00000000:0000 07 00000000:00000000 00:00000000 00000000  9000        0 244166 2 bd662e26 0                
+multicast probe kernel-state   293: 00000000:15CE 00000000:0000 07 00000000:00000000 00:00000000 00000000     0        0 252773 2 ed259747 0                
+multicast probe kernel-state   345: 0100007F:0202 00000000:0000 07 00000000:00000000 00:00000000 00000000     0        0 239477 2 15c70561 0                
+multicast probe kernel-state path=/proc/net/udp end
+multicast probe kernel-state path=/proc/net/ip_tables_names begin
+multicast probe kernel-state mangle
+multicast probe kernel-state raw
+multicast probe kernel-state filter
+multicast probe kernel-state path=/proc/net/ip_tables_names end
+multicast probe kernel-state path=/proc/sys/net/ipv4/conf/all/rp_filter begin
+multicast probe kernel-state 0
+multicast probe kernel-state path=/proc/sys/net/ipv4/conf/all/rp_filter end
+multicast probe kernel-state path=/proc/sys/net/ipv4/conf/wlan0/rp_filter begin
+multicast probe kernel-state 0
+multicast probe kernel-state path=/proc/sys/net/ipv4/conf/wlan0/rp_filter end
+multicast probe kernel-state path=/proc/sys/net/ipv4/conf/wlan0/accept_local begin
+multicast probe kernel-state 0
+multicast probe kernel-state path=/proc/sys/net/ipv4/conf/wlan0/accept_local end
+multicast probe kernel-state path=/sys/class/net/wlan0/flags begin
+multicast probe kernel-state 0x1303
+multicast probe kernel-state path=/sys/class/net/wlan0/flags end
+multicast probe command label=ip-rule program=ip status=exit status: 0 begin
+multicast probe command stdout 0:	from all lookup local 
+multicast probe command stdout 32766:	from all lookup main 
+multicast probe command stdout 32767:	from all lookup default 
+multicast probe command label=ip-rule end
+multicast probe command label=ip-route-all program=ip status=exit status: 0 begin
+multicast probe command stdout 0.0.0.0 via 192.168.0.1 dev wlan0 
+multicast probe command stdout default via 192.168.0.1 dev wlan0 
+multicast probe command stdout 192.168.0.0/24 dev wlan0 scope link  src 192.168.0.4 
+multicast probe command stdout local 127.0.0.0/8 dev lo table local scope host  src 127.0.0.1 
+multicast probe command stdout local 127.0.0.1 dev lo table local scope host  src 127.0.0.1 
+multicast probe command stdout broadcast 127.255.255.255 dev lo table local scope link  src 127.0.0.1 
+multicast probe command stdout local 192.168.0.4 dev wlan0 table local scope host  src 192.168.0.4 
+multicast probe command stdout broadcast 192.168.0.255 dev wlan0 table local scope link  src 192.168.0.4 
+multicast probe command stdout fe80::/64 dev wlan0  metric 256 
+multicast probe command stdout default via fe80::1 dev wlan0  metric 1024  expires 0sec
+multicast probe command stdout local ::1 dev lo table local  metric 0 
+multicast probe command stdout local fe80::562b:1cff:fefd:2b06 dev wlan0 table local  metric 0 
+multicast probe command stdout multicast ff00::/8 dev wlan0 table local  metric 256 
+multicast probe command label=ip-route-all end
+multicast probe command label=iptables-filter program=iptables status=exit status: 0 begin
+multicast probe command stdout Chain INPUT (policy DROP 0 packets, 0 bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command stdout 1        0     0 RXH_UDP_TEST  all  --  *      *       0.0.0.0/0            0.0.0.0/0           
+multicast probe command stdout 2        0     0 ACCEPT     tcp  --  ppp0   *       0.0.0.0/0            0.0.0.0/0            tcp dpt:40317
+multicast probe command stdout 3        0     0 ACCEPT     tcp  --  wwan0  *       0.0.0.0/0            0.0.0.0/0            tcp dpt:40317
+multicast probe command stdout 4        0     0 ACCEPT     tcp  --  ppp0   *       0.0.0.0/0            0.0.0.0/0            state RELATED,ESTABLISHED
+multicast probe command stdout 5        0     0 ACCEPT     tcp  --  wwan0  *       0.0.0.0/0            0.0.0.0/0            state RELATED,ESTABLISHED
+multicast probe command stdout 6    11227 6979K ACCEPT     tcp  --  wlan0  *       0.0.0.0/0            0.0.0.0/0            state RELATED,ESTABLISHED
+multicast probe command stdout 7      827  135K ACCEPT     udp  --  wlan0  *       0.0.0.0/0            0.0.0.0/0            state ESTABLISHED
+multicast probe command stdout 8        0     0 ACCEPT     udp  --  ppp0   *       0.0.0.0/0            0.0.0.0/0            state ESTABLISHED
+multicast probe command stdout 9        0     0 ACCEPT     udp  --  wwan0  *       0.0.0.0/0            0.0.0.0/0            state ESTABLISHED
+multicast probe command stdout 10       0     0 ACCEPT     udp  --  ppp0   *       0.0.0.0/0            0.0.0.0/0            udp spt:40317
+multicast probe command stdout 11       0     0 ACCEPT     udp  --  wwan0  *       0.0.0.0/0            0.0.0.0/0            udp spt:40317
+multicast probe command stdout 12       0     0 ACCEPT     udp  --  ppp0   *       0.0.0.0/0            0.0.0.0/0            udp spt:49317
+multicast probe command stdout 13       0     0 ACCEPT     udp  --  wwan0  *       0.0.0.0/0            0.0.0.0/0            udp spt:49317
+multicast probe command stdout 14       0     0 ACCEPT     udp  --  ppp0   *       0.0.0.0/0            0.0.0.0/0            udp spt:33434
+multicast probe command stdout 15       0     0 ACCEPT     udp  --  wwan0  *       0.0.0.0/0            0.0.0.0/0            udp spt:33434
+multicast probe command stdout 16   79977   26M ACCEPT     all  --  lo     *       127.0.0.1            0.0.0.0/0           
+multicast probe command stdout 17       0     0 ACCEPT     all  --  usb0   *       0.0.0.0/0            0.0.0.0/0           
+multicast probe command stdout 18       0     0 ACCEPT     icmp --  *      *       0.0.0.0/0            0.0.0.0/0            state RELATED,ESTABLISHED
+multicast probe command stdout 
+multicast probe command stdout Chain FORWARD (policy ACCEPT 0 packets, 0 bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command stdout 
+multicast probe command stdout Chain OUTPUT (policy ACCEPT 0 packets, 0 bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command stdout 1    79967   26M ACCEPT     all  --  *      lo      0.0.0.0/0            127.0.0.1           
+multicast probe command stdout 
+multicast probe command stdout Chain RXH_UDP_TEST (1 references)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command stdout 1        0     0 ACCEPT     udp  --  wlan0  *       192.168.0.12         192.168.0.4          udp dpt:5582
+multicast probe command stdout 2        0     0 ACCEPT     udp  --  wlan0  *       192.168.0.12         224.0.0.251          udp dpt:5582
+multicast probe command stdout 3        0     0 ACCEPT     udp  --  lo     *       192.168.0.4          192.168.0.4          udp dpt:5582
+multicast probe command stdout 4        0     0 ACCEPT     udp  --  *      *       192.168.0.4          224.0.0.251          udp dpt:5582
+multicast probe command label=iptables-filter end
+multicast probe command label=iptables-raw program=iptables status=exit status: 0 begin
+multicast probe command stdout Chain PREROUTING (policy ACCEPT 11355 packets, 1598K bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command stdout 
+multicast probe command stdout Chain OUTPUT (policy ACCEPT 10819 packets, 1517K bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command label=iptables-raw end
+multicast probe command label=iptables-mangle program=iptables status=exit status: 0 begin
+multicast probe command stdout Chain PREROUTING (policy ACCEPT 11355 packets, 1598K bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command stdout 
+multicast probe command stdout Chain INPUT (policy ACCEPT 11347 packets, 1593K bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command stdout 
+multicast probe command stdout Chain FORWARD (policy ACCEPT 0 packets, 0 bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command stdout 
+multicast probe command stdout Chain OUTPUT (policy ACCEPT 10819 packets, 1517K bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command stdout 
+multicast probe command stdout Chain POSTROUTING (policy ACCEPT 10826 packets, 1517K bytes)
+multicast probe command stdout num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe command label=iptables-mangle end
+multicast probe command label=netstat-udp program=netstat status=exit status: 0 begin
+multicast probe command stdout Active Internet connections (servers and established)
+multicast probe command stdout Proto Recv-Q Send-Q Local Address           Foreign Address         State       
+multicast probe command stdout udp        0      0 0.0.0.0:33643           0.0.0.0:*                           
+multicast probe command stdout udp        0      0 0.0.0.0:5582            0.0.0.0:*                           
+multicast probe command stdout udp        0      0 127.0.0.1:514           0.0.0.0:*                           
+multicast probe command label=netstat-udp end
+multicast probe sent kind=local-loopback-unicast destination=127.0.0.1:5582 bytes=37
+multicast probe sent kind=local-interface-unicast destination=192.168.0.4:5582 bytes=38
+multicast probe sent kind=local-multicast destination=224.0.0.251:5582 bytes=30
+multicast probe received-first kind=local-loopback-unicast from=127.0.0.1:60139 bytes=37 prefix=rust-x11-hello-local-loopback-unicast
+multicast probe received-first kind=local-interface-unicast from=192.168.0.4:60139 bytes=38 prefix=rust-x11-hello-local-interface-unicast
+multicast probe received-first kind=local-multicast from=192.168.0.4:5582 bytes=30 prefix=rust-x11-hello-local-multicast
+multicast probe received-first kind=external-unicast from=192.168.0.12:56597 bytes=31 prefix=rust-x11-hello-external-unicast
+========================================
+KUAL Rust X11 Hello launcher
+Date: Sun Aug 30 23:41:13 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 40s plus 5s TERM grace
+ERROR: launcher already active with PID 28007
+========================================
+multicast probe complete local_loopback_unicast=true local_interface_unicast=true local_multicast=true external_unicast=true external_multicast=false external_other=0
+multicast probe temporary-firewall counters begin
+multicast probe temporary-firewall counters Chain RXH_UDP_TEST (1 references)
+multicast probe temporary-firewall counters num   pkts bytes target     prot opt in     out     source               destination         
+multicast probe temporary-firewall counters 1       98  5782 ACCEPT     udp  --  wlan0  *       192.168.0.12         192.168.0.4          udp dpt:5582
+multicast probe temporary-firewall counters 2        0     0 ACCEPT     udp  --  wlan0  *       192.168.0.12         224.0.0.251          udp dpt:5582
+multicast probe temporary-firewall counters 3        1    66 ACCEPT     udp  --  lo     *       192.168.0.4          192.168.0.4          udp dpt:5582
+multicast probe temporary-firewall counters 4        1    58 ACCEPT     udp  --  *      *       192.168.0.4          224.0.0.251          udp dpt:5582
+multicast probe temporary-firewall counters end
+multicast probe temporary-firewall removed chain=RXH_UDP_TEST
+multicast probe temporary-firewall cleanup-verified chain=RXH_UDP_TEST absent
+multicast probe temporary-promiscuous cleanup-verified interface=wlan0 flags=0x1203
+Error: multicast probe: no external multicast marker received
+
+Rust binary exit status: 1
+End reason: process_exit
+Ended: Sun Aug 30 23:41:14 GMT+3:0100 2026
+========================================
