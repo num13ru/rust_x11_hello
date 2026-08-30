@@ -119,8 +119,17 @@ mod tests {
             6
         );
         assert!(hit_button(&buttons, Point { x: 19, y: 60 }).is_none());
-        assert!(hit_button(&buttons, Point { x: 740, y: 339 }).is_none());
-        assert!(hit_button(&buttons, Point { x: 739, y: 340 }).is_none());
+        assert_eq!(
+            hit_button(&buttons, Point { x: 740, y: 339 }).unwrap().id,
+            7
+        );
+        // The exit bar spans the full width at the bottom (y >= 324).
+        assert_eq!(
+            hit_button(&buttons, Point { x: 739, y: 340 }).unwrap().id,
+            7
+        );
+        assert_eq!(hit_button(&buttons, Point { x: 5, y: 350 }).unwrap().id, 7);
+        assert!(hit_button(&buttons, Point { x: 760, y: 350 }).is_none());
         assert!(hit_button(&buttons, Point { x: -1, y: 100 }).is_none());
     }
 

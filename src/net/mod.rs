@@ -26,8 +26,17 @@ pub const COMPANION_PORT: u16 = 5581;
 /// Environment override for the companion host, for non-USBNetwork transports
 /// (e.g., the Kindle already on Wi-Fi, where the Mac's local IP differs).
 const COMPANION_HOST_ENV: &str = "RUST_X11_HELLO_COMPANION";
+/// Environment override for the companion port (defaults to
+/// [`COMPANION_PORT`]); used by tests to avoid clashing with other listeners.
+const COMPANION_PORT_ENV: &str = "RUST_X11_HELLO_COMPANION_PORT";
 
 const TCP_CONNECT_TIMEOUT: Duration = Duration::from_millis(150);
+fn companion_port() -> u16 {
+    std::env::var(COMPANION_PORT_ENV)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(COMPANION_PORT)
+}
 
 /// Messages a companion reader thread can deliver to the event loop.
 #[derive(Debug)]
@@ -55,7 +64,7 @@ fn companion_host() -> String {
 
 /// Resolve the companion address tuple from the configured host and port.
 fn companion_addr() -> Result<SocketAddr> {
-    (companion_host(), COMPANION_PORT)
+    (companion_host(), companion_port())
         .to_socket_addrs()
         .context("failed to resolve companion address")?
         .next()
@@ -179,9 +188,15 @@ mod tests {
         use std::net::TcpListener;
         use std::time::Duration;
 
-        // SAFETY: tests run serially; the override is removed before returning.
-        unsafe { std::env::set_var(COMPANION_HOST_ENV, "127.0.0.1") };
-        let listener = TcpListener::bind(("127.0.0.1", COMPANION_PORT)).expect("bind 5581");
+        // Bind an ephemeral port so this test never clashes with a listener
+        // that may hold the default companion port (e.g. another test binary).
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind ephemeral");
+        let port = listener.local_addr().expect("local addr").port();
+        // SAFETY: tests run serially; the overrides are restored before returning.
+        unsafe {
+            std::env::set_var(COMPANION_HOST_ENV, "127.0.0.1");
+            std::env::set_var(COMPANION_PORT_ENV, port.to_string());
+        }
         let (tx, rx) = std::sync::mpsc::channel::<Result<()>>();
         std::thread::spawn(move || {
             let result = (|| -> Result<()> {
@@ -199,5 +214,10 @@ mod tests {
         rx.recv_timeout(Duration::from_secs(2))
             .expect("reader test timed out")
             .expect("reader test failed");
+        // Restore env for any subsequent test.
+        unsafe {
+            std::env::remove_var(COMPANION_HOST_ENV);
+            std::env::remove_var(COMPANION_PORT_ENV);
+        }
     }
 }

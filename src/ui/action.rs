@@ -14,6 +14,7 @@ pub enum SemanticAction {
     TerminalNewWindow,
     TmuxWork,
     ZoomToggleMute,
+    Exit,
 }
 
 impl SemanticAction {
@@ -26,14 +27,14 @@ impl SemanticAction {
             Self::TerminalNewWindow => "terminal.new_window",
             Self::TmuxWork => "tmux.work",
             Self::ZoomToggleMute => "zoom.toggle_mute",
+            Self::Exit => "app.exit",
         }
     }
 }
 
-/// Map a grid button id (`1..=6`) to its semantic action.
+/// Map a grid button id (`1..=7`) to its semantic action.
 ///
 /// Returns `None` for any other id; the grid never produces one, so an
-/// out-of-range activation would be surfaced rather than silently remapped.
 pub fn action_for_button(button_id: u8) -> Option<SemanticAction> {
     match button_id {
         1 => Some(SemanticAction::MediaPlayPause),
@@ -42,6 +43,7 @@ pub fn action_for_button(button_id: u8) -> Option<SemanticAction> {
         4 => Some(SemanticAction::TerminalNewWindow),
         5 => Some(SemanticAction::TmuxWork),
         6 => Some(SemanticAction::ZoomToggleMute),
+        7 => Some(SemanticAction::Exit),
         _ => None,
     }
 }
@@ -59,6 +61,7 @@ mod tests {
             (4, SemanticAction::TerminalNewWindow, "terminal.new_window"),
             (5, SemanticAction::TmuxWork, "tmux.work"),
             (6, SemanticAction::ZoomToggleMute, "zoom.toggle_mute"),
+            (7, SemanticAction::Exit, "app.exit"),
         ];
 
         for (button_id, action, id) in expected {
@@ -70,7 +73,6 @@ mod tests {
     #[test]
     fn out_of_range_button_ids_have_no_semantic_action() {
         assert_eq!(action_for_button(0), None);
-        assert_eq!(action_for_button(7), None);
         assert_eq!(action_for_button(u8::MAX), None);
     }
 
@@ -83,9 +85,10 @@ mod tests {
             SemanticAction::TerminalNewWindow.id(),
             SemanticAction::TmuxWork.id(),
             SemanticAction::ZoomToggleMute.id(),
+            SemanticAction::Exit.id(),
         ];
         ids.sort_unstable();
         ids.dedup();
-        assert_eq!(ids.len(), 6);
+        assert_eq!(ids.len(), 7);
     }
 }

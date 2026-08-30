@@ -14,11 +14,12 @@ pub const GRID_LEFT_INSET: u16 = 20;
 pub const GRID_RIGHT_INSET: u16 = 20;
 pub const GRID_TOP_INSET: u16 = 60;
 pub const GRID_BOTTOM_INSET: u16 = 20;
+/// Height of the full-width exit bar below the button grid.
+pub const EXIT_BAR_HEIGHT: u16 = 36;
 pub const TITLE_X: u16 = 20;
 pub const TITLE_BASELINE: u16 = 40;
 pub const TITLE_TEXT: &[u8] = b"Core X11 button grid: tap 1-6";
 pub const BUTTON_LABELS: [&[u8]; 6] = [b"1", b"2", b"3", b"4", b"5", b"6"];
-
 /// Integer 2-D point in window-relative coordinates.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Point {
@@ -133,7 +134,7 @@ pub fn button_grid(width: u16, height: u16) -> Vec<LogicalButton> {
     );
     let grid_width = width - left - right;
     let grid_height = height - top - bottom;
-    let mut buttons = Vec::with_capacity(usize::from(GRID_COLUMNS * GRID_ROWS));
+    let mut buttons = Vec::with_capacity(usize::from(GRID_COLUMNS * GRID_ROWS) + 1);
 
     for row in 0..GRID_ROWS {
         let row_start = partition_offset(grid_height, row, GRID_ROWS);
@@ -153,9 +154,27 @@ pub fn button_grid(width: u16, height: u16) -> Vec<LogicalButton> {
         }
     }
 
+    // Full-width exit bar at the bottom, above the bottom inset.
+    let exit_bar = if height >= EXIT_BAR_HEIGHT {
+        let y = height - EXIT_BAR_HEIGHT;
+        Some(LogicalButton {
+            id: 7,
+            bounds: LogicalRect {
+                x: 0,
+                y,
+                width,
+                height: EXIT_BAR_HEIGHT,
+            },
+        })
+    } else {
+        None
+    };
+    if let Some(button) = exit_bar {
+        buttons.push(button);
+    }
+
     buttons
 }
-
 fn logical_coordinate(value: u32) -> i16 {
     value.min(i16::MAX as u32) as i16
 }
@@ -190,6 +209,17 @@ pub fn draw_layout(width: u16, height: u16) -> Option<DrawLayout> {
             x: logical_coordinate(center_x.saturating_sub(3)),
             y: logical_coordinate(center_y + baseline_offset),
             text: label,
+        });
+    }
+
+    // Label the exit bar (button 7), which is not in BUTTON_LABELS.
+    if let Some(exit) = buttons.iter().find(|button| button.id == 7) {
+        let center_x = u32::from(exit.bounds.x) + u32::from(exit.bounds.width) / 2;
+        let center_y = u32::from(exit.bounds.y) + u32::from(exit.bounds.height) / 2;
+        text.push(TextPlacement {
+            x: logical_coordinate(center_x.saturating_sub(18)),
+            y: logical_coordinate(center_y + baseline_offset),
+            text: b"EXIT",
         });
     }
 
@@ -230,30 +260,34 @@ mod tests {
     fn default_layout_draws_the_six_button_grid() {
         let layout = draw_layout(WINDOW_WIDTH, WINDOW_HEIGHT).expect("nonzero geometry");
 
-        assert_eq!(layout.rectangles.len(), 6);
+        assert_eq!(layout.rectangles.len(), 7);
         assert_rectangle(&layout.rectangles[0], 20, 60, 240, 140);
         assert_rectangle(&layout.rectangles[1], 260, 60, 240, 140);
         assert_rectangle(&layout.rectangles[2], 500, 60, 240, 140);
         assert_rectangle(&layout.rectangles[3], 20, 200, 240, 140);
         assert_rectangle(&layout.rectangles[4], 260, 200, 240, 140);
         assert_rectangle(&layout.rectangles[5], 500, 200, 240, 140);
-        assert_eq!(layout.text.len(), 7);
+        assert_rectangle(&layout.rectangles[6], 0, 324, 760, 36);
+        assert_eq!(layout.text.len(), 8);
         assert_text(&layout.text[0], 20, 40, TITLE_TEXT);
         assert_text(&layout.text[1], 137, 135, b"1");
         assert_text(&layout.text[6], 617, 275, b"6");
+        assert_text(&layout.text[7], 362, 347, b"EXIT");
     }
 
     #[test]
     fn half_size_layout_scales_the_grid_and_labels() {
         let layout = draw_layout(380, 180).expect("nonzero geometry");
 
-        assert_eq!(layout.rectangles.len(), 6);
+        assert_eq!(layout.rectangles.len(), 7);
         assert_rectangle(&layout.rectangles[0], 10, 30, 120, 70);
         assert_rectangle(&layout.rectangles[1], 130, 30, 120, 70);
         assert_rectangle(&layout.rectangles[5], 250, 100, 120, 70);
+        assert_rectangle(&layout.rectangles[6], 0, 144, 380, 36);
         assert_text(&layout.text[0], 10, 20, TITLE_TEXT);
         assert_text(&layout.text[1], 67, 67, b"1");
         assert_text(&layout.text[6], 307, 137, b"6");
+        assert_text(&layout.text[7], 172, 164, b"EXIT");
     }
 
     #[test]
@@ -275,7 +309,7 @@ mod tests {
         }
 
         let maximum = draw_layout(u16::MAX, u16::MAX).expect("maximum geometry");
-        assert_eq!(maximum.rectangles.len(), 6);
+        assert_eq!(maximum.rectangles.len(), 7);
         assert_rectangles_within(&maximum.rectangles, u16::MAX, u16::MAX);
         for placement in maximum.text {
             assert!(placement.x >= 0);
