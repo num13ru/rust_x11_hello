@@ -162,10 +162,11 @@ impl Companion {
 
     fn reconnect(&mut self) -> Result<()> {
         let addr = companion_addr()?;
-        let stream = TcpStream::connect_timeout(&addr, TCP_CONNECT_TIMEOUT)
-            .context("failed to reconnect to companion")?;
-        let _ = stream.set_nodelay(true);
-        self.stream = Some(stream);
+        // Full connect: a fresh socket also gets a fresh reader thread, so
+        // inbound display commands work after a reconnect too (the original
+        // reconnect created a bare socket with no reader, silently dropping
+        // every companion->Kindle control line).
+        *self = Self::connect_to(addr)?;
         Ok(())
     }
 }
@@ -193,5 +194,46 @@ mod tests {
         let default = companion_host();
         assert_eq!(overridden, "10.0.0.99");
         assert_eq!(default, COMPANION_HOST);
+    }
+
+    #[test]
+    fn reconnect_restores_reader_thread() {
+        use std::io::Write;
+        use std::net::TcpListener;
+        use std::time::Duration;
+
+        // Companion that is down at launch: the first activation reconnects.
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind ephemeral");
+        let addr = listener.local_addr().expect("local addr");
+        // SAFETY: tests run serially; overrides are restored before returning.
+        unsafe {
+            std::env::set_var(COMPANION_HOST_ENV, addr.ip().to_string());
+            std::env::set_var(COMPANION_PORT_ENV, addr.port().to_string());
+        }
+        let mut companion = Companion::disconnected();
+        let reconnect_result = companion.reconnect();
+        unsafe {
+            std::env::remove_var(COMPANION_HOST_ENV);
+            std::env::remove_var(COMPANION_PORT_ENV);
+        }
+        reconnect_result.expect("reconnect");
+
+        let (mut conn, _) = listener.accept().expect("accept");
+        // Sending over the persistent connection must reach a live reader
+        // thread even though the socket was created by reconnect(), not
+        // connect_to(). Without the fix the display text is silently dropped
+        // and poll_display stays None.
+        writeln!(conn, "display hello").expect("write display");
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(text) = companion.poll_display() {
+                assert_eq!(text, "hello");
+                return;
+            }
+            if std::time::Instant::now() >= deadline {
+                panic!("display command not delivered over reconnected socket");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 }

@@ -7,7 +7,11 @@
 /// Reference window width the fixed Kindle layout was verified at.
 pub const WINDOW_WIDTH: u16 = 760;
 /// Reference window height the fixed Kindle layout was verified at.
-pub const WINDOW_HEIGHT: u16 = 360;
+///
+/// 400 = 60 (top grid inset) + 2 rows of 128 (grid) + 8 (gap)
+///       + 36 (exit bar) + 40 (status strip). The status strip is where
+///       companion `display <text>` lines render, below the exit bar.
+pub const WINDOW_HEIGHT: u16 = 400;
 pub const GRID_COLUMNS: u16 = 3;
 pub const GRID_ROWS: u16 = 2;
 pub const GRID_LEFT_INSET: u16 = 20;
@@ -18,6 +22,9 @@ pub const GRID_TOP_INSET: u16 = 60;
 pub const EXIT_BAR_GAP: u16 = 8;
 /// Height of the full-width exit bar at the very bottom of the window.
 pub const EXIT_BAR_HEIGHT: u16 = 36;
+/// Height of the status strip below the exit bar where companion
+/// `display <text>` commands render.
+pub const STATUS_BAR_HEIGHT: u16 = 40;
 pub const TITLE_X: u16 = 20;
 pub const TITLE_BASELINE: u16 = 40;
 pub const TITLE_TEXT: &[u8] = b"Core X11 button grid: tap 1-6";
@@ -141,19 +148,17 @@ fn partition_offset(extent: u16, index: u16, parts: u16) -> u16 {
     ((u32::from(extent) * u32::from(index)) / u32::from(parts)) as u16
 }
 
-/// Reference-size vertical budget: top inset + grid + gap + exit bar must
-/// exactly equal [`WINDOW_HEIGHT`]. A change to any constant that breaks the
-/// sum is caught by [`layout_fits_reference`] before the build ships.
+/// Reference-size vertical budget: top inset + grid + gap + exit bar +
+/// status strip must exactly equal [`WINDOW_HEIGHT`]. A change to any
+/// constant that breaks the sum is caught by [`layout_fits_reference`]
+/// before the build ships.
 pub const fn reference_vertical_budget() -> u32 {
     GRID_TOP_INSET as u32
         + EXIT_BAR_GAP as u32
         + EXIT_BAR_HEIGHT as u32
         + GRID_ROWS as u32 * GRID_ROWS_CELL_HEIGHT as u32
+        + STATUS_BAR_HEIGHT as u32
 }
-
-/// Height of one grid row at the reference window size.
-pub const GRID_ROWS_CELL_HEIGHT: u16 = 128;
-
 /// True when the reference geometry consumes the full window height exactly.
 ///
 /// Evaluated at compile time so a constant that breaks the vertical budget
@@ -162,19 +167,27 @@ pub const fn layout_fits_reference() -> bool {
     reference_vertical_budget() == WINDOW_HEIGHT as u32
 }
 
+/// Height of one grid row at the reference window size.
+pub const GRID_ROWS_CELL_HEIGHT: u16 = 128;
+
 const _: () = {
     assert!(layout_fits_reference());
     // Reference grid tiles the full width: insets + 3 cells.
     assert!(GRID_RECT_LEFT + GRID_RECT_WIDTH + GRID_RIGHT_INSET == WINDOW_WIDTH);
-    // Exit bar spans the full reference width and ends at the bottom edge.
+    // Exit bar spans the full reference width; grid + gap + bar + status
+    // strip close the vertical budget exactly.
     assert!(EXIT_BAR_RECT_LEFT + EXIT_BAR_RECT_WIDTH == WINDOW_WIDTH);
-    assert!(EXIT_BAR_RECT_TOP + EXIT_BAR_HEIGHT == WINDOW_HEIGHT);
+    assert!(EXIT_BAR_RECT_TOP + EXIT_BAR_HEIGHT + STATUS_BAR_HEIGHT == WINDOW_HEIGHT);
+    // Status strip is non-empty and above the window's bottom edge.
+    assert!(STATUS_BAR_HEIGHT > 0);
+    assert!(STATUS_BAR_HEIGHT < WINDOW_HEIGHT);
 };
 /// Build the 2×3 logical button grid for a window extent.
 ///
-/// Layout is a closed vertical stack: top inset, grid, gap, exit bar. The
-/// grid occupies `top..grid_bottom`, the bar `bar_top..height`; the two never
-/// overlap because `bar_top = grid_bottom + gap`.
+/// Layout is a closed vertical stack: top inset, grid, gap, exit bar, status
+/// strip. The grid occupies `top..grid_bottom` and the bar `bar_top..bar_end`
+/// (where `bar_end = height - status_height`); the status strip is reserved
+/// below the bar and never overlaps the interactive buttons.
 ///
 /// Returns an empty grid when the extent cannot host `GRID_ROWS` full-height
 /// and `GRID_COLUMNS` full-width cells, so hit testing then finds nothing.
@@ -191,10 +204,15 @@ pub fn button_grid(width: u16, height: u16) -> Vec<LogicalButton> {
         WINDOW_WIDTH,
     );
     let top = scale_u16(GRID_TOP_INSET, height, WINDOW_HEIGHT).min(height);
-    let bar_height = scale_u16(EXIT_BAR_HEIGHT, height, WINDOW_HEIGHT).min(height);
-    let gap = scale_u16(EXIT_BAR_GAP, height, WINDOW_HEIGHT)
-        .min(height.saturating_sub(top).saturating_sub(bar_height));
-    let grid_bottom = height.saturating_sub(bar_height + gap);
+    let status_height = scale_u16(STATUS_BAR_HEIGHT, height, WINDOW_HEIGHT).min(height);
+    let bar_height = scale_u16(EXIT_BAR_HEIGHT, height, WINDOW_HEIGHT)
+        .min(height.saturating_sub(top).saturating_sub(status_height));
+    let gap = scale_u16(EXIT_BAR_GAP, height, WINDOW_HEIGHT).min(
+        height
+            .saturating_sub(top)
+            .saturating_sub(status_height + bar_height),
+    );
+    let grid_bottom = height.saturating_sub(status_height + bar_height + gap);
     let bar_top = grid_bottom.saturating_add(gap);
 
     let grid_height = grid_bottom.saturating_sub(top);
@@ -225,7 +243,7 @@ pub fn button_grid(width: u16, height: u16) -> Vec<LogicalButton> {
             });
         }
     }
-    if bar_height > 0 && height >= bar_top + bar_height {
+    if status_height + bar_height <= height && bar_height > 0 && height >= bar_top + bar_height {
         buttons.push(LogicalButton {
             id: EXIT_BUTTON_ID,
             bounds: LogicalRect {
@@ -491,10 +509,11 @@ mod fit_tests {
             exit.bounds.y,
             grid_bottom
         );
-        // And the bar sits at the very bottom, leaving no dangling gap.
+        // The bar ends above the status strip, which occupies the bottom
+        // STATUS_BAR_HEIGHT reference pixels.
         assert_eq!(
             u32::from(exit.bounds.y) + u32::from(exit.bounds.height),
-            u32::from(WINDOW_HEIGHT)
+            u32::from(WINDOW_HEIGHT - STATUS_BAR_HEIGHT)
         );
     }
 }

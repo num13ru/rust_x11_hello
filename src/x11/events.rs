@@ -7,7 +7,7 @@
 use crate::net::Companion;
 use crate::ui::action::{SemanticAction, action_for_button};
 use crate::ui::button::{ContactTracker, PointerEvent, PointerEventKind, handle_pointer_event};
-use crate::ui::geometry::{Point, WINDOW_HEIGHT, WINDOW_WIDTH, draw_layout};
+use crate::ui::geometry::{Point, STATUS_BAR_HEIGHT, WINDOW_HEIGHT, WINDOW_WIDTH, draw_layout};
 use anyhow::{Context, Result, anyhow};
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
@@ -25,10 +25,18 @@ enum GeometryUpdate {
     Unchanged,
     Changed { width: u16, height: u16 },
 }
-/// Left inset of the status text drawn below the grid.
+/// Left inset of the status text drawn in the status strip.
 const STATUS_TEXT_X: u16 = 20;
 /// Vertical distance from the window's bottom edge to the status baseline.
+///
+/// The baseline sits inside the status strip (below the exit bar), with
+/// room for the text's ascent; the strip itself is `STATUS_BAR_HEIGHT`
+/// reference pixels tall.
 const STATUS_TEXT_BOTTOM_MARGIN: u16 = 10;
+// The status strip is what separates the exit bar from the status text.
+const _: () = {
+    assert!(STATUS_BAR_HEIGHT > STATUS_TEXT_BOTTOM_MARGIN);
+};
 
 /// Run the event loop until the window is destroyed or the connection fails.
 pub fn event_loop(
@@ -266,7 +274,7 @@ fn draw(
     }
 
     if let Some(text) = status_text {
-        // Below the grid's bottom inset: the last 20 reference px are clear.
+        // Baseline inside the status strip, below the exit bar.
         let status_y = height
             .saturating_sub(STATUS_TEXT_BOTTOM_MARGIN)
             .min(i16::MAX as u16) as i16;
