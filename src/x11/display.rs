@@ -86,10 +86,19 @@ fn open_large_font(conn: &RustConnection) -> Result<Option<Font>> {
         "-misc-fixed-medium-r-normal--14-130-75-75-c-70-iso10646-1",
     ];
     for name in CANDIDATES {
-        if let Ok(font_id) = conn.generate_id() {
-            if conn.open_font(font_id, name.as_bytes()).is_ok() {
-                return Ok(Some(font_id));
-            }
+        let Ok(font_id) = conn.generate_id() else {
+            continue;
+        };
+        // `.check()` matters: open_font queues the request, but a server that
+        // lacks the name replies asynchronously with a BadName error. Without
+        // awaiting the cookie, that error later surfaces in the event loop and
+        // kills the run. Only a font the server actually accepts is returned.
+        let cookie = match conn.open_font(font_id, name.as_bytes()) {
+            Ok(cookie) => cookie,
+            Err(_) => continue,
+        };
+        if cookie.check().is_ok() {
+            return Ok(Some(font_id));
         }
     }
     Ok(None)
