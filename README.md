@@ -55,9 +55,9 @@ For a later update, first let the watchdog stop the app (or use the validated st
 scripts/deploy-kindle-mtp.sh update --confirm-stopped
 ```
 
-Update mode stages and verifies the new binary, retains the old binary as `rust_x11_hello.previous`, and refuses another update while that backup exists. MTP cannot prove that a process is stopped; `--confirm-stopped` is an explicit operator assertion.
+Update mode stages and verifies the new binary, downloads the active binary into a guarded host temporary directory, and uploads a verified device-side copy as `rust_x11_hello.previous`. It then activates the new binary with `put --replace --verify`, because tested Kindle firmware rejects MTP object renames. If activation fails, it attempts a verified replacement from the downloaded prior binary. Another update is refused while the retained backup exists. MTP cannot prove that a process is stopped; `--confirm-stopped` is an explicit operator assertion.
 
-MTP does not provide a multi-file transaction. If an update transfer fails before binary activation, the old binary remains selected but some support files may already be new; inspect the reported remote listing and rerun or repair the update before opening KUAL.
+MTP does not provide a multi-file transaction. If an update transfer fails before binary activation, the old binary remains selected but `.new`, `.previous`, or some support files may already exist; inspect the reported remote listing and repair the update before opening KUAL.
 
 ## Device test
 

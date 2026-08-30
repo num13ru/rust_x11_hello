@@ -2,7 +2,7 @@
 set -euo pipefail
 
 MTP_RS_BIN="${MTP_RS_BIN:-mtp-rs}"
-LOCAL_EXT="kindle-extension/rust_x11_hello"
+LOCAL_EXT="${LOCAL_EXT:-kindle-extension/rust_x11_hello}"
 LOCAL_BIN="${LOCAL_EXT}/bin/rust_x11_hello"
 REMOTE_EXT="/extensions/rust_x11_hello"
 REMOTE_BIN_DIR="${REMOTE_EXT}/bin"
@@ -12,6 +12,7 @@ REMOTE_PREVIOUS_BIN="${REMOTE_BIN}.previous"
 
 MODE="${1:-}"
 CONFIRMATION="${2:-}"
+UPDATE_TMP_DIR=""
 
 usage() {
     cat <<'EOF'
@@ -21,7 +22,8 @@ Usage:
 
 install refuses to touch an existing /extensions/rust_x11_hello.
 update requires an explicit stopped-process confirmation and retains the
-previous binary as rust_x11_hello.previous; it refuses to overwrite that backup.
+previous binary as rust_x11_hello.previous using verified MTP readback/copy;
+it refuses to overwrite that backup.
 EOF
 }
 
@@ -45,6 +47,14 @@ require_local_file() {
         exit 1
     fi
 }
+
+cleanup_local_temp() {
+    if [[ -n "$UPDATE_TMP_DIR" && -d "$UPDATE_TMP_DIR" ]]; then
+        rm -rf -- "$UPDATE_TMP_DIR"
+    fi
+}
+
+trap cleanup_local_temp EXIT
 
 upload_package_files() {
     mtp put "${LOCAL_EXT}/bin/run.sh" "${REMOTE_BIN_DIR}/run.sh" --replace --verify
@@ -118,12 +128,26 @@ case "$MODE" in
         fi
 
         mtp put "$LOCAL_BIN" "$REMOTE_STAGED_BIN" --replace --verify
+
+        UPDATE_TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/rust-x11-hello-update.XXXXXX")"
+        PREVIOUS_LOCAL_BIN="${UPDATE_TMP_DIR}/rust_x11_hello.previous"
+        mtp get "$REMOTE_BIN" "$PREVIOUS_LOCAL_BIN"
+        mtp put "$PREVIOUS_LOCAL_BIN" "$REMOTE_PREVIOUS_BIN" --verify
+
         upload_package_files
-        mtp rename "$REMOTE_BIN" "rust_x11_hello.previous"
-        if ! mtp rename "$REMOTE_STAGED_BIN" "rust_x11_hello"; then
-            printf 'ERROR: activating staged binary failed; attempting rollback\n' >&2
-            mtp rename "$REMOTE_PREVIOUS_BIN" "rust_x11_hello" || true
+
+        if ! mtp put "$LOCAL_BIN" "$REMOTE_BIN" --replace --verify; then
+            printf 'ERROR: activating staged binary failed; attempting verified rollback\n' >&2
+            if mtp put "$PREVIOUS_LOCAL_BIN" "$REMOTE_BIN" --replace --verify; then
+                printf 'Rollback restored the previous binary.\n' >&2
+            else
+                printf 'ERROR: rollback failed; do not launch from KUAL.\n' >&2
+            fi
             exit 1
+        fi
+
+        if ! mtp rm "$REMOTE_STAGED_BIN" --yes; then
+            printf 'WARNING: activated binary verified, but staged .new cleanup failed.\n' >&2
         fi
         ;;
 esac
