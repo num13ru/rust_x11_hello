@@ -44,7 +44,20 @@ fn run() -> Result<()> {
         ui::geometry::WINDOW_HEIGHT
     );
 
-    let event_result = event_loop(&conn, win, gc);
+    let mut companion = match net::Companion::connect() {
+        Ok(companion) => {
+            eprintln!("transport: connected to companion");
+            companion
+        }
+        Err(error) => {
+            // A companion that is down at startup is not fatal: the event
+            // loop runs, and each activation attempts a (bounded) reconnect.
+            eprintln!("transport error at startup: {error:#}");
+            net::Companion::disconnected()
+        }
+    };
+
+    let event_result = event_loop(&conn, win, gc, &mut companion);
     let destroy_window = match &event_result {
         Ok(EventLoopExit::WindowDestroyed) => false,
         Err(_) => true,
