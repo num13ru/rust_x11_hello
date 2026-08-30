@@ -13,6 +13,8 @@
 //! event loop or the on-device activation log.
 
 use crate::proto::{format_action_line, parse_display_command};
+
+pub mod discover;
 use anyhow::{Context, Result};
 use std::io::{BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
@@ -23,7 +25,6 @@ use std::time::Duration;
 /// Paperwhite 6) cannot run USBNetwork — no maintained package accepts it
 /// (see `docs/usbnetwork-pw2-report.md`) — so runs set
 /// `RUST_X11_HELLO_COMPANION` to the Mac's LAN address over Wi-Fi.
-pub const PAPERSPOON_HOST: &str = "192.168.15.201";
 pub const PAPERSPOON_PORT: u16 = 5581;
 
 /// Environment override for the PaperSpoon host, required for
@@ -61,21 +62,22 @@ pub struct Paperspoon {
     _reader_tx: Option<Sender<PaperspoonMsg>>,
 }
 
-/// Resolve the PaperSpoon host, honoring the `RUST_X11_HELLO_COMPANION`
-/// override (e.g., a Wi-Fi peer's address) and falling back to the
-/// USBNetwork static host when unset. The fallback exists only for
-/// compatibility; on this PW6 the override is the working transport.
-fn paperspoon_host() -> String {
-    std::env::var(COMPANION_HOST_ENV).unwrap_or_else(|_| PAPERSPOON_HOST.to_string())
-}
-
-/// Resolve the PaperSpoon address tuple from the configured host and port.
+/// Resolve the PaperSpoon address.
+///
+/// - If `RUST_X11_HELLO_COMPANION` is set, resolve it directly (explicit
+///   host control path).
+/// - Otherwise run zero-config UDP discovery; do not fall back to a
+///   hard-coded IP when discovery fails (that would hide the experiment's
+///   result).
 fn paperspoon_addr() -> Result<SocketAddr> {
-    (paperspoon_host(), paperspoon_port())
-        .to_socket_addrs()
-        .context("failed to resolve PaperSpoon address")?
-        .next()
-        .context("PaperSpoon address resolved to nothing")
+    match std::env::var(COMPANION_HOST_ENV) {
+        Ok(host) => (host, paperspoon_port())
+            .to_socket_addrs()
+            .context("failed to resolve PaperSpoon address")?
+            .next()
+            .context("PaperSpoon address resolved to nothing"),
+        Err(_) => crate::net::discover::discover_paperspoon(),
+    }
 }
 
 impl Paperspoon {
@@ -178,24 +180,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn paperspoon_address_resolves() {
-        let addrs: Vec<std::net::SocketAddr> = (PAPERSPOON_HOST, PAPERSPOON_PORT)
-            .to_socket_addrs()
-            .expect("static host must resolve")
-            .collect();
-        assert!(!addrs.is_empty());
+    fn paperspoon_port_has_a_default() {
+        assert_eq!(paperspoon_port(), PAPERSPOON_PORT);
     }
 
     #[test]
-    fn paperspoon_host_env_override_is_isolated() {
+    fn explicit_host_env_resolves_directly() {
         // SAFETY: these tests run serially by default; the env var is
         // restored before the test returns.
-        unsafe { std::env::set_var(COMPANION_HOST_ENV, "10.0.0.99") };
-        let overridden = paperspoon_host();
+        unsafe { std::env::set_var(COMPANION_HOST_ENV, "127.0.0.1") };
+        let addr = paperspoon_addr().expect("explicit host must resolve");
         unsafe { std::env::remove_var(COMPANION_HOST_ENV) };
-        let default = paperspoon_host();
-        assert_eq!(overridden, "10.0.0.99");
-        assert_eq!(default, PAPERSPOON_HOST);
+        assert_eq!(addr, SocketAddr::from(([127, 0, 0, 1], PAPERSPOON_PORT)));
     }
 
     #[test]
