@@ -17,6 +17,10 @@
       "action": "sh -c 'RUST_X11_HELLO_BONJOUR_DIAGNOSTIC=1 RUST_X11_HELLO_BONJOUR_SERVICE=_services._dns-sd._udp.local. RUST_X11_HELLO_BONJOUR_TIMEOUT_MS=20000 RUST_X11_HELLO_WATCHDOG_SECONDS=25 sh bin/run.sh'"
     },
     {
+      "name": "Run Multicast Probe (25s)",
+      "action": "sh -c 'RUST_X11_HELLO_MCAST_PROBE=1 RUST_X11_HELLO_MCAST_TIMEOUT_MS=25000 RUST_X11_HELLO_WATCHDOG_SECONDS=30 sh bin/run.sh'"
+    },
+    {
       "name": "Stop Rust X11 Hello",
       "action": "sh bin/stop.sh"
     },

@@ -12,6 +12,7 @@ use x11::display;
 use x11::events::{EventLoopExit, event_loop};
 
 mod bonjour;
+mod mcast;
 mod net;
 mod proto;
 mod ui;
@@ -30,6 +31,23 @@ fn print_environment() {
     eprintln!("XAUTHORITY={:?}", env::var("XAUTHORITY").ok());
 }
 fn run() -> Result<()> {
+    // Diagnostic-only multicast probe: bounded listen on 224.0.0.251:5353
+    // while the operator floods the group from the Mac. Exits without X11.
+    if env::var("RUST_X11_HELLO_MCAST_PROBE").is_ok() {
+        let timeout = env::var("RUST_X11_HELLO_MCAST_TIMEOUT_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .map(std::time::Duration::from_millis)
+            .unwrap_or(mcast::DEFAULT_PROBE_TIMEOUT);
+        let received = mcast::probe_multicast(timeout)?;
+        return if received {
+            eprintln!("multicast probe result=received");
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("multicast probe: no multicast received"))
+        };
+    }
+
     // Diagnostic-only Bonjour browse: when requested, run a bounded browse
     // of `_paperspoon._tcp.local.` (or the overridden service type) and exit
     // without touching X11. This is the Phase 3 device probe; the normal
