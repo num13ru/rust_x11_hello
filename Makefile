@@ -1,9 +1,9 @@
 IMAGE := rust-kindle-armv7hf-builder
 WORKDIR := /work
 
-.PHONY: check
+.PHONY: check check-protocol check-companion
 
-check:
+check: check-protocol check-companion
 	cargo fmt --check
 	cargo check
 	cargo clippy --all-targets -- -D warnings
@@ -14,6 +14,18 @@ check:
 	bash -n scripts/deploy-kindle-mtp.sh
 	bash scripts/test-deploy-kindle-mtp.sh
 	jq empty kindle-extension/rust_x11_hello/menu.json
+
+check-protocol:
+	cargo fmt --manifest-path crates/transport-protocol/Cargo.toml -- --check
+	cargo check --manifest-path crates/transport-protocol/Cargo.toml
+	cargo clippy --manifest-path crates/transport-protocol/Cargo.toml --all-targets -- -D warnings
+	cargo test --manifest-path crates/transport-protocol/Cargo.toml
+
+check-companion:
+	cargo fmt --manifest-path tools/companion/Cargo.toml -- --check
+	cargo check --manifest-path tools/companion/Cargo.toml
+	cargo clippy --manifest-path tools/companion/Cargo.toml --all-targets -- -D warnings
+	cargo test --manifest-path tools/companion/Cargo.toml --all-targets
 
 .PHONY: image build verify shell clean clean-gnu clean-target
 

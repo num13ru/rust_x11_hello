@@ -5,4 +5,5 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1"
+transport-protocol = { path = "crates/transport-protocol" }
 x11rb = "0.13"

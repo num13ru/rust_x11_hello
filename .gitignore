@@ -2,6 +2,9 @@
 .DS_Store
 /kindle-extension/rust_x11_hello/bin/rust_x11_hello
 /target
+/crates/transport-protocol/target
+/companion.id
+/tools/companion/companion.id
 /logs
 
 # Keep human-readable Kindle run evidence, but not downloaded binary readbacks.

@@ -3,12 +3,5 @@
 version = 4
 
 [[package]]
-name = "companion"
-version = "0.1.0"
-dependencies = [
- "transport-protocol",
-]
-
-[[package]]
 name = "transport-protocol"
 version = "0.1.0"

@@ -51,6 +51,7 @@ name = "rust_x11_hello"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "transport-protocol",
  "x11rb",
 ]
 
@@ -66,6 +67,10 @@ dependencies = [
  "linux-raw-sys",
  "windows-sys",
 ]
+
+[[package]]
+name = "transport-protocol"
+version = "0.1.0"
 
 [[package]]
 name = "windows-link"

@@ -10,10 +10,9 @@ LOCK_DIR="$EXT_DIR/rust_x11_hello.lock"
 LOCK_OWNER_FILE="$LOCK_DIR/launcher.pid"
 WATCHDOG_SECONDS="${RUST_X11_HELLO_WATCHDOG_SECONDS:-90}"
 WATCHDOG_TERM_GRACE_SECONDS="${RUST_X11_HELLO_WATCHDOG_TERM_GRACE_SECONDS:-5}"
-# Default is the legacy USBNetwork static host; this PW6 cannot run USBNetwork
-# (see docs/usbnetwork-pw2-report.md), so KUAL sets
-# RUST_X11_HELLO_COMPANION to the Mac's LAN address over Wi-Fi.
-COMPANION_HOST="${RUST_X11_HELLO_COMPANION:-192.168.15.201}"
+# An explicit host overrides discovery. Empty/unset means bounded UDP
+# auto-discovery on the local Wi-Fi broadcast domain.
+COMPANION_HOST="${RUST_X11_HELLO_COMPANION:-}"
 
 CHILD_PID=""
 WATCHDOG_PID=""
@@ -212,9 +211,14 @@ rm -f "$WATCHDOG_MARKER"
 if ! chmod +x "$BIN" 2>> "$LOG"; then
     echo "WARNING: chmod +x failed; attempting launch with existing mode" >> "$LOG"
 fi
-echo "Companion host: $COMPANION_HOST" >> "$LOG"
 echo "---- running Rust binary ----" >> "$LOG"
-RUST_X11_HELLO_COMPANION="$COMPANION_HOST" "$BIN" >> "$LOG" 2>&1 &
+if [ -n "$COMPANION_HOST" ]; then
+    echo "Companion transport: explicit host=$COMPANION_HOST" >> "$LOG"
+    RUST_X11_HELLO_COMPANION="$COMPANION_HOST" "$BIN" >> "$LOG" 2>&1 &
+else
+    echo "Companion transport: UDP discovery" >> "$LOG"
+    "$BIN" >> "$LOG" 2>&1 &
+fi
 CHILD_PID=$!
 
 if ! printf '%s\n' "$CHILD_PID" > "$PID_FILE"; then

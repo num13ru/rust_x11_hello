@@ -52,13 +52,30 @@ Presses outside the grid, releases in another button or outside the grid, repeat
 
 ## TCP transport (Wi-Fi)
 
-The Kindle opens one persistent TCP connection to the companion on launch.
-Each activation sends one newline-terminated protocol line over that
-connection:
+The Kindle uses one persistent TCP connection for versioned events, ACKs, and
+`display` controls. An explicit host is tried directly; otherwise a background
+worker discovers the companion over UDP without blocking the X11 event loop.
 
 ```text
 event action=<semantic-id>;
 ```
+
+The line above is the migration format accepted by the new companion for an
+old Kindle binary. A negotiated version-1 session sends and acknowledges:
+
+```text
+hello v=1 session=<32-hex-id>;
+welcome v=1 companion=<32-hex-id>;
+event v=1 session=<session-id> seq=<u64> action=<semantic-id>;
+ack v=1 session=<session-id> seq=<u64> status=logged;
+```
+
+`logged` means the companion validated the event, appended it to its log,
+flushed it, and called `sync_data`. It does not mean a later media, tmux, or
+other external side effect completed. The Kindle retries an unacknowledged
+event at most three times with the same `(session, seq)` identity. The
+companion suppresses duplicates only within its current process; exactly-once
+execution across a companion restart is not claimed.
 
 The companion (a std-only Rust listener, `tools/companion`) prints each
 received line and appends it to a log file. It also forwards lines typed on
@@ -71,25 +88,23 @@ display <text>
 which renders `<text>` in the window's status strip (below the exit bar)
 and is logged on the device as `display: <text>`.
 
-The connection target defaults to the USBNetwork static host
-`192.168.15.201:5581` (kept only as a compatibility default; USBNetwork is
-unavailable on this PW6, see `docs/usbnetwork-pw2-report.md`)
-and can be overridden per run with the
-`RUST_X11_HELLO_COMPANION` environment variable, e.g. for a Wi-Fi run where
-the Mac is at `192.168.0.12`:
+With no explicit host, the Kindle sends bounded discovery probes to UDP port
+`5580`, validates the echoed random nonce, and connects to the TCP port in the
+single valid offer (default `5581`). Multiple unpaired companion identities are
+an error. Set `RUST_X11_HELLO_COMPANION_ID` to the selected 32-hex companion ID
+or set `RUST_X11_HELLO_COMPANION` to bypass discovery with a hostname/IP. The
+explicit port override is `RUST_X11_HELLO_COMPANION_PORT`.
 
 ```sh
 cd tools/companion && cargo build --release && \
   ./target/release/companion 5581 /tmp/companion.log
 ```
 
-On the device, export the same variable in the KUAL launch environment so the
-binary targets the Mac over Wi-Fi. A companion that is down or unreachable costs a bounded 150 ms
-connect timeout and is logged as `transport error: ...` on the device; it
-never breaks the X11 event loop or the on-device activation log, and the
-Kindle retries the connection on the next activation. The Kindle opens no
-listening socket; only the action id leaves the device, and only `display`
-commands enter it.
+Discovery uses three 250 ms response windows; TCP connect uses a 300 ms bound,
+the handshake uses a 750 ms bound, and ACK retry uses a one-second timeout.
+Those waits occur only in the network worker. Failure never blocks or exits the
+X11 loop. Pending actions and all handoff channels are bounded. The Kindle
+opens no listening socket.
 
 ### Running the companion
 
@@ -98,7 +113,7 @@ Build and run the Rust listener (on the Mac):
 ```sh
 cd tools/companion
 cargo build --release
-./target/release/companion 5581 /tmp/companion.log
+./target/release/companion 5581 /tmp/companion.log companion.id 5580
 ```
 
 Then type a display command at its stdin:
@@ -107,17 +122,21 @@ Then type a display command at its stdin:
 display hello
 ```
 
-For a Wi-Fi run, the listener binds `0.0.0.0` and the Kindle targets the Mac's
-LAN address via `RUST_X11_HELLO_COMPANION`; Wi-Fi and MTP can coexist over
-the USB link. USBNetwork is not available on this Paperwhite 6 — no
-maintained USBNetwork package accepts the device (see
-`docs/usbnetwork-pw2-report.md`) — so the USBNetwork
-interface setup and MTP/USBNetwork exclusivity rules below do not apply:
+The companion binds TCP and discovery UDP on `0.0.0.0`. Its identity file is
+created atomically and reused. CLI syntax is
+`companion [tcp-port] [log-file] [identity-file] [discovery-port]`.
 
-For the default USBNetwork path, the Mac must have the USBNetwork interface
-up with this host at `192.168.15.201` (Kindle at `.200`); MTP mode and
-USBNetwork cannot run over the same USB link at once, so deploy the binary
-over MTP first, then switch the device to USBNetwork for the run.
+Automatic discovery works only on an IPv4 broadcast domain where the AP,
+macOS firewall, VLAN policy, and guest/client isolation allow peer UDP and TCP.
+It is unauthenticated: a stable companion ID selects a peer but does not prove
+its identity. Use only on a trusted LAN, and retain the explicit hostname/IP
+fallback for networks that do not pass broadcast. USBNetwork is unavailable on
+this Paperwhite 6; see `docs/usbnetwork-pw2-report.md`.
+
+To talk to an old companion, set both an explicit host and
+`RUST_X11_HELLO_LEGACY=1`. Legacy mode sends the old event line without hello,
+ACK, retry, or a receipt claim; there is no automatic downgrade from a failed
+versioned handshake.
 
 ## Host checks and Kindle build
 

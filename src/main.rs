@@ -12,7 +12,6 @@ use x11::display;
 use x11::events::{EventLoopExit, event_loop};
 
 mod net;
-mod proto;
 mod ui;
 mod x11;
 
@@ -46,12 +45,12 @@ fn run() -> Result<()> {
 
     let mut companion = match net::Companion::connect() {
         Ok(companion) => {
-            eprintln!("transport: connected to companion");
+            eprintln!("transport: network worker started");
             companion
         }
         Err(error) => {
-            // A companion that is down at startup is not fatal: the event
-            // loop runs, and each activation attempts a (bounded) reconnect.
+            // Invalid transport configuration or worker setup is not fatal to
+            // the X11 UI. Activations report the disabled transport locally.
             eprintln!("transport error at startup: {error:#}");
             net::Companion::disconnected()
         }
