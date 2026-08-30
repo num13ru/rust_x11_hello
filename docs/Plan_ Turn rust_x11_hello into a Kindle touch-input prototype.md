@@ -228,11 +228,11 @@ The rendering layer should remain on `x11rb` even if input eventually comes from
 
 Do not implement the evdev fallback unless core X11 input has actually been shown not to work or the repository contains enough device evidence to justify it.
 
-## Phase 9: Send semantic activations over USBNetwork
+## Phase 9: Send semantic activations over Wi-Fi
 
 Once the logical button grid, release-based activation, and semantic action ids
 are proven on the physical Kindle, add the first transport: send each
-activation to the macOS companion over the USB network.
+activation to the macOS companion over TCP.
 
 Keep the current file layout (the input/UI boundary from Phase 7). The new code
 is a small `net` layer:
@@ -255,7 +255,7 @@ event action=<semantic-id>;
 ```
 
 One newline-terminated line per activation, from the Kindle to the companion
-listener on `192.168.15.201:5581` (the USBNetwork static host). The Kindle
+listener (default `192.168.15.201:5581`). The Kindle
 connects, writes the line, and disconnects; a client that is down costs at most
 the short connect timeout and is logged (`transport error: ...`) without
 breaking the X11 event loop. No listening socket opens on the Kindle, and no
@@ -264,10 +264,14 @@ device, button, or coordinate state leaves the device -- only the action id.
 Conditions:
 
 - The Kindle runs USBNetwork (static: device at `192.168.15.200`, host at
-  `192.168.15.201`) instead of MTP over the same USB link.
+  `192.168.15.201`) instead of MTP over the same USB link. USBNetwork is
+  unavailable on this Paperwhite 6: no maintained USBNetwork release lists the
+  device (see `docs/usbnetwork-pw2-report.md`), so this
+  milestone is proven over the device's Wi-Fi instead.
 - The Mac brings up the USB network interface at `192.168.15.201` and runs the
   companion listener (`tools/companion_listen.py`), which prints and validates
-  each received action id.
+  each received action id. Wi-Fi uses the Mac's LAN address instead; the IPv4
+  link-local static pair applies only to a device that can run USBNetwork.
 - Deploy the binary over MTP first, then switch the device to USBNetwork for
   the run.
 
@@ -353,7 +357,8 @@ Avoid panics for ordinary runtime failures.
 Do not implement yet:
 
 - communication with macOS;
-- USBNetwork;
+- Wi-Fi transport (USBNetwork is unavailable on this PW6; see
+  `docs/usbnetwork-pw2-report.md`);
 - Wi-Fi transport;
 - Hammerspoon integration;
 - WebSockets;
@@ -416,7 +421,7 @@ logical button
     ↓
 small semantic protocol
     ↓
-TCP over Wi-Fi or USBNetwork
+TCP over Wi-Fi (USBNetwork is unavailable on this PW6)
     ↓
 macOS companion
 ```
@@ -464,7 +469,8 @@ commands in this phase.
 ### Transport
 
 - Kindle opens one TCP connection to the companion address on launch
-  (same `RUST_X11_HELLO_COMPANION` override; default USBNetwork static host).
+  (same `RUST_X11_HELLO_COMPANION` override; default USBNetwork static host,
+  unusable on this PW6 — Wi-Fi is the working transport).
 - The connection stays open for the run; each activation writes one
   `event action=<id>;` line over it.
 - The companion reads with a short nonblocking poll so the X11 event loop is

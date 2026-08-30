@@ -10,6 +10,9 @@ LOCK_DIR="$EXT_DIR/rust_x11_hello.lock"
 LOCK_OWNER_FILE="$LOCK_DIR/launcher.pid"
 WATCHDOG_SECONDS="${RUST_X11_HELLO_WATCHDOG_SECONDS:-90}"
 WATCHDOG_TERM_GRACE_SECONDS="${RUST_X11_HELLO_WATCHDOG_TERM_GRACE_SECONDS:-5}"
+# Default is the legacy USBNetwork static host; this PW6 cannot run USBNetwork
+# (see docs/usbnetwork-pw2-report.md), so KUAL sets
+# RUST_X11_HELLO_COMPANION to the Mac's LAN address over Wi-Fi.
 COMPANION_HOST="${RUST_X11_HELLO_COMPANION:-192.168.15.201}"
 
 CHILD_PID=""

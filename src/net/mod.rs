@@ -19,12 +19,16 @@ use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::mpsc::{self, Sender};
 use std::time::Duration;
 
-/// Companion address: standard USBNetwork static host.
+/// Companion address: standard USBNetwork static host. This device (a
+/// Paperwhite 6) cannot run USBNetwork — no maintained package accepts it
+/// (see `docs/usbnetwork-pw2-report.md`) — so runs set
+/// `RUST_X11_HELLO_COMPANION` to the Mac's LAN address over Wi-Fi.
 pub const COMPANION_HOST: &str = "192.168.15.201";
 pub const COMPANION_PORT: u16 = 5581;
 
-/// Environment override for the companion host, for non-USBNetwork transports
-/// (e.g., the Kindle already on Wi-Fi, where the Mac's local IP differs).
+/// Environment override for the companion host, required for non-USBNetwork
+/// transports (this Kindle runs the Wi-Fi peer's address, because it cannot
+/// run USBNetwork).
 const COMPANION_HOST_ENV: &str = "RUST_X11_HELLO_COMPANION";
 /// Environment override for the companion port (defaults to
 /// [`COMPANION_PORT`]); used by tests to avoid clashing with other listeners.
@@ -57,7 +61,8 @@ pub struct Companion {
 
 /// Resolve the companion host, honoring the `RUST_X11_HELLO_COMPANION`
 /// override (e.g., a Wi-Fi peer's address) and falling back to the
-/// USBNetwork static host when unset.
+/// USBNetwork static host when unset. The fallback exists only for
+/// compatibility; on this PW6 the override is the working transport.
 fn companion_host() -> String {
     std::env::var(COMPANION_HOST_ENV).unwrap_or_else(|_| COMPANION_HOST.to_string())
 }

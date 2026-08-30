@@ -42,12 +42,15 @@ Every activation also emits its stable semantic action id. The current grid maps
 | 5 | `tmux.work` |
 | 6 | `zoom.toggle_mute` |
 
-These dotted ids are the wire units of the semantic protocol; the USBNetwork
-transport that carries them is described below.
+These dotted ids are the wire units of the semantic protocol; the transport
+that carries them is described below. USBNetwork itself is not used: no
+maintained USBNetwork package targets this Paperwhite 6 (see
+`docs/usbnetwork-pw2-report.md`), so the transport is
+Wi-Fi.
 
 Presses outside the grid, releases in another button or outside the grid, repeated primary presses, geometry changes, and window unmapping cancel the contact. Unmatched releases do nothing. Auxiliary details such as the observed Kindle `detail=6` and `detail=9` pairs retain their raw diagnostic lines but neither activate nor cancel the armed primary contact. Pointer motion remains unlogged.
 
-## TCP transport (USBNetwork or Wi-Fi)
+## TCP transport (Wi-Fi)
 
 The Kindle opens one persistent TCP connection to the companion on launch.
 Each activation sends one newline-terminated protocol line over that
@@ -68,8 +71,10 @@ display <text>
 which renders `<text>` in the window's status area (below the button grid)
 and is logged on the device as `display: <text>`.
 
-The connection target defaults to `192.168.15.201:5581` (the USBNetwork
-static host) and can be overridden per run with the
+The connection target defaults to the USBNetwork static host
+`192.168.15.201:5581` (kept only as a compatibility default; USBNetwork is
+unavailable on this PW6, see `docs/usbnetwork-pw2-report.md`)
+and can be overridden per run with the
 `RUST_X11_HELLO_COMPANION` environment variable, e.g. for a Wi-Fi run where
 the Mac is at `192.168.0.12`:
 
@@ -79,8 +84,7 @@ cd tools/companion && cargo build --release && \
 ```
 
 On the device, export the same variable in the KUAL launch environment so the
-binary targets the Mac over Wi-Fi instead of the (PW6-unavailable) USBNetwork
-static host. A companion that is down or unreachable costs a bounded 150 ms
+binary targets the Mac over Wi-Fi. A companion that is down or unreachable costs a bounded 150 ms
 connect timeout and is logged as `transport error: ...` on the device; it
 never breaks the X11 event loop or the on-device activation log, and the
 Kindle retries the connection on the next activation. The Kindle opens no
@@ -103,13 +107,17 @@ Then type a display command at its stdin:
 display hello
 ```
 
+For a Wi-Fi run, the listener binds `0.0.0.0` and the Kindle targets the Mac's
+LAN address via `RUST_X11_HELLO_COMPANION`; Wi-Fi and MTP can coexist over
+the USB link. USBNetwork is not available on this Paperwhite 6 — no
+maintained USBNetwork package accepts the device (see
+`docs/usbnetwork-pw2-report.md`) — so the USBNetwork
+interface setup and MTP/USBNetwork exclusivity rules below do not apply:
+
 For the default USBNetwork path, the Mac must have the USBNetwork interface
 up with this host at `192.168.15.201` (Kindle at `.200`); MTP mode and
 USBNetwork cannot run over the same USB link at once, so deploy the binary
-over MTP first, then switch the device to USBNetwork for the run. For a
-Wi-Fi run, the listener binds `0.0.0.0` and the Kindle targets the Mac's
-LAN address via `RUST_X11_HELLO_COMPANION`; Wi-Fi and MTP can coexist over
-the USB link.
+over MTP first, then switch the device to USBNetwork for the run.
 
 ## Host checks and Kindle build
 

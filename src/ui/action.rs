@@ -1,9 +1,10 @@
 //! Semantic action IDs for the six-button grid.
 //!
 //! This is the wire-independent unit of the small semantic protocol: a button
-//! activation maps to a stable dotted action id that later transports (TCP
-//! over Wi-Fi/USBNetwork) will carry verbatim to a macOS companion. No
-//! transport exists yet; this module only defines the mapping and the IDs.
+//! activation maps to a stable dotted action id that a transport (TCP over
+//! Wi-Fi; USBNetwork is unavailable on this PW6) will carry verbatim to a
+//! macOS companion. No transport exists yet; this module only defines the
+//! mapping and the IDs.
 
 /// A semantic action assignable to a grid button.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -5,8 +5,10 @@ Listens on a TCP port for the one-line protocol:
     event action=<semantic-id>
 and prints each received action, validating it against the six known ids.
 
-Defaults to 0.0.0.0:5581 (the USBNetwork companion port). For a Wi-Fi run,
-bind explicitly and/or select a specific interface:
+Defaults to 0.0.0.0:5581 (the legacy USBNetwork companion port; this PW6
+cannot run USBNetwork, so Wi-Fi runs bind 0.0.0.0 and the Kindle targets the
+Mac's LAN address via RUST_X11_HELLO_COMPANION). For a Wi-Fi run, bind
+explicitly and/or select a specific interface:
     python3 tools/companion_listen.py --host 0.0.0.0 --port 5581
 """
 
