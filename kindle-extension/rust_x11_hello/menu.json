@@ -2,7 +2,7 @@
   "items": [
     {
       "name": "Run Rust X11 Hello (WiFi)",
-      "action": "sh -c 'RUST_X11_HELLO_WATCHDOG_SECONDS=300 sh bin/run.sh'"
+      "action": "sh -c 'RUST_X11_HELLO_COMPANION=192.168.0.12 RUST_X11_HELLO_WATCHDOG_SECONDS=300 sh bin/run.sh'"
     },
     {
       "name": "Run Rust X11 Hello (90s)",

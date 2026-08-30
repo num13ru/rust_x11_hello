@@ -133,6 +133,16 @@ its identity. Use only on a trusted LAN, and retain the explicit hostname/IP
 fallback for networks that do not pass broadcast. USBNetwork is unavailable on
 this Paperwhite 6; see `docs/usbnetwork-pw2-report.md`.
 
+On this specific device/network (Paperwhite 6, verified 2026-08-30), the
+companion demonstrably sends both unicast and limited-broadcast discovery
+offers, but the Kindle never receives a valid offer (`no valid companion
+discovery offer received` in the device log), while the explicit-host path
+completes versioned handshake, ACK, and `display` reliably. UDP discovery is
+therefore not used as the default here: the KUAL WiFi action sets
+`RUST_X11_HELLO_COMPANION=192.168.0.12` explicitly. Discovery remains available
+for LANs where the UDP return path works, but do not assume it works on this
+setup without a checksum-matched device-log confirmation.
+
 To talk to an old companion, set both an explicit host and
 `RUST_X11_HELLO_LEGACY=1`. Legacy mode sends the old event line without hello,
 ACK, retry, or a receipt claim; there is no automatic downgrade from a failed

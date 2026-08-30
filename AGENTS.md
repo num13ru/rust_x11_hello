@@ -14,6 +14,31 @@ steps an agent should follow, especially around physical-device work.
   USBNetwork is NOT available on this device (no maintained package accepts it; see
   `docs/usbnetwork-pw2-report.md`); transport is Wi-Fi via `RUST_X11_HELLO_COMPANION`.
 
+
+## Companion process (operator-owned)
+
+- NEVER start, restart, or run the companion automatically — not via an agent,
+  not in the background, not with `nohup`/`&`/`hub`, not as part of a test or
+  deploy step. The companion is an interactive terminal process owned by the
+  user: it must be started manually by the user and kept alive in their
+  terminal so they can observe its stdout and type `display` commands.
+- A companion started by an agent (even with the fixed broadcast code) blocks
+  physical testing: the user must be able to see the companion output on
+  their own terminal and feed it stdin. The user cannot do that if the agent
+  holds the process.
+- If a companion is already running, NEVER kill or restart it unless the user
+  explicitly asks. Killing the user's companion is destructive.
+- When the user needs a companion for a device run, state the exact command
+  for them to run in their own terminal, and wait for them to confirm it is
+  up:
+  ```sh
+  cd tools/companion && ./target/release/companion 5581 /private/tmp/companion.log ./companion.id 5580
+  ```
+  (The user may substitute their own log path/port. The companion persists its
+  identity in `companion.id`.)
+- After the user confirms the companion is listening, the agent may verify
+  transport endpoints (`lsof`/network checks) but must not take ownership of
+  the process.
 ## Device deployment (MTP)
 
 Prerequisites:
