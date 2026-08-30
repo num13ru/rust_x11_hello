@@ -1,6 +1,10 @@
 {
   "items": [
     {
+      "name": "Run Rust X11 Hello (WiFi)",
+      "action": "sh -c 'RUST_X11_HELLO_COMPANION=192.168.0.12 sh bin/run.sh'"
+    },
+    {
       "name": "Run Rust X11 Hello (90s)",
       "action": "sh bin/run.sh"
     },

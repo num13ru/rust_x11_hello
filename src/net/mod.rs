@@ -19,15 +19,31 @@ use crate::proto::format_action_line;
 pub const COMPANION_HOST: &str = "192.168.15.201";
 pub const COMPANION_PORT: u16 = 5581;
 
+/// Environment override for the companion host, for non-USBNetwork transports
+/// (e.g., the Kindle already on Wi-Fi, where the Mac's local IP differs).
+const COMPANION_HOST_ENV: &str = "RUST_X11_HELLO_COMPANION";
+
+/// Resolve the companion host, honoring the `RUST_X11_HELLO_COMPANION`
+/// override (e.g., a Wi-Fi peer's address) and falling back to the
+/// USBNetwork static host when unset.
+fn companion_host() -> String {
+    std::env::var(COMPANION_HOST_ENV).unwrap_or_else(|_| COMPANION_HOST.to_string())
+}
+
+/// Resolve the companion address tuple from the configured host and port.
+fn companion_addr() -> Result<std::net::SocketAddr> {
+    (companion_host(), COMPANION_PORT)
+        .to_socket_addrs()
+        .context("failed to resolve companion address")?
+        .next()
+        .context("companion address resolved to nothing")
+}
+
 const TCP_CONNECT_TIMEOUT: Duration = Duration::from_millis(150);
 
 /// Send one semicolon-terminated protocol line to the companion.
 pub fn send_semantic_action(semantic_id: &str) -> Result<()> {
-    let addr = (COMPANION_HOST, COMPANION_PORT)
-        .to_socket_addrs()
-        .context("failed to resolve companion address")?
-        .next()
-        .context("companion address resolved to nothing")?;
+    let addr = companion_addr()?;
 
     let mut stream = TcpStream::connect_timeout(&addr, TCP_CONNECT_TIMEOUT)
         .context("failed to connect to companion")?;
@@ -50,5 +66,17 @@ mod tests {
             .expect("static host must resolve")
             .collect();
         assert!(!addrs.is_empty());
+    }
+
+    #[test]
+    fn companion_host_env_override_is_isolated() {
+        // SAFETY: these tests run serially by default; the env var is
+        // restored before the test returns.
+        unsafe { std::env::set_var(COMPANION_HOST_ENV, "10.0.0.99") };
+        let overridden = companion_host();
+        unsafe { std::env::remove_var(COMPANION_HOST_ENV) };
+        let default = companion_host();
+        assert_eq!(overridden, "10.0.0.99");
+        assert_eq!(default, COMPANION_HOST);
     }
 }
