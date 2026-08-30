@@ -15,13 +15,24 @@ The current milestone opens a persistent override-redirect X11 window, redraws f
 
 ## Geometry-aware rendering
 
-- The initial Kindle window remains `(80,120)` at `760 x 360`; that verified geometry produces the same two rectangles and four text baselines as before.
+- The initial Kindle window remains `(80,120)` at `760 x 360`; the 2×3 button grid and labels scale from that reference geometry.
 - The final event in each `Expose` batch clears and redraws the current window extent.
 - A size-changing `ConfigureNotify` updates the active geometry and redraws immediately. Duplicate geometry is ignored, and a defensive zero-width/zero-height report is logged without replacing the last valid extent.
-- Rectangle insets and text origins scale from the verified `760 x 360` reference layout. Arithmetic is bounded for tiny windows and the full core-X11 `u16` extent; text coordinates saturate at the protocol's signed-coordinate limit.
-- This milestone does not interpret touches or change rendering in response to input. Logical hit testing remains the next step.
+- Grid bounds and text origins scale from the verified `760 x 360` reference layout. Arithmetic is bounded for tiny windows and the full core-X11 `u16` extent; text coordinates saturate at the protocol's signed-coordinate limit.
 
 Host tests verify layout and geometry decisions at default, half, one-pixel, zero, and maximum dimensions. The ARM/static gates verify deployability, but runtime resize/redraw behavior still requires observation on an X server that actually sends resize events; no such event was part of the fixed-geometry Kindle evidence run.
+
+## Logical hit testing
+
+The window contains six logical buttons in a 2×3 grid. Their geometry is independent of X11 event structures and uses half-open bounds, so every shared edge belongs to exactly one button.
+
+Only core-X11 `detail=1` participates in UI activation. A primary press arms the button under the initial coordinate; a matching primary release activates only when it remains inside that same button and emits:
+
+```text
+ui action=activate button=4
+```
+
+Presses outside the grid, releases in another button or outside the grid, repeated primary presses, geometry changes, and window unmapping cancel the contact. Unmatched releases do nothing. Auxiliary details such as the observed Kindle `detail=6` and `detail=9` pairs retain their raw diagnostic lines but neither activate nor cancel the armed primary contact. Pointer motion remains unlogged, and this milestone has no network or external side effect.
 
 ## Host checks and Kindle build
 
