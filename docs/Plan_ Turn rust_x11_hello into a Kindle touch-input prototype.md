@@ -228,6 +228,63 @@ The rendering layer should remain on `x11rb` even if input eventually comes from
 
 Do not implement the evdev fallback unless core X11 input has actually been shown not to work or the repository contains enough device evidence to justify it.
 
+## Phase 9: Send semantic activations over USBNetwork
+
+Once the logical button grid, release-based activation, and semantic action ids
+are proven on the physical Kindle, add the first transport: send each
+activation to the macOS companion over the USB network.
+
+Keep the current file layout (the input/UI boundary from Phase 7). The new code
+is a small `net` layer:
+
+```text
+src/
+├── main.rs
+├── net/
+│   └── mod.rs        one-shot TCP sender
+├── proto/
+│   └── mod.rs        wire format (`event action=<id>;`)
+├── ui/
+└── x11/
+```
+
+Protocol:
+
+```text
+event action=<semantic-id>;
+```
+
+One newline-terminated line per activation, from the Kindle to the companion
+listener on `192.168.15.201:5581` (the USBNetwork static host). The Kindle
+connects, writes the line, and disconnects; a client that is down costs at most
+the short connect timeout and is logged (`transport error: ...`) without
+breaking the X11 event loop. No listening socket opens on the Kindle, and no
+device, button, or coordinate state leaves the device -- only the action id.
+
+Conditions:
+
+- The Kindle runs USBNetwork (static: device at `192.168.15.200`, host at
+  `192.168.15.201`) instead of MTP over the same USB link.
+- The Mac brings up the USB network interface at `192.168.15.201` and runs the
+  companion listener (`tools/companion_listen.py`), which prints and validates
+  each received action id.
+- Deploy the binary over MTP first, then switch the device to USBNetwork for
+  the run.
+
+Acceptance:
+
+1. Each on-device activation produces a matching `event action=<id>;` line at
+   the companion listener.
+2. A stopped or unreachable companion never breaks the on-device event loop;
+   activation logging continues.
+3. The transport is std-only TCP (no new dependencies).
+4. Physical-device logs and companion output together count as the transport
+   proof; host-only testing does not.
+
+Do not add retries, queues, acknowledgements, heartbeats, or a bidirectional
+protocol in this phase. The next milestone (Phase 10) can add a persistent
+connection and Mac-to-Kindle control once the single-shot direction is proven.
+
 ## Dependency policy
 
 Keep dependencies minimal.
