@@ -1,0 +1,52 @@
+========================================
+KUAL Rust X11 Hello launcher
+Date: Mon Aug 31 00:41:55 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 90s plus 5s TERM grace
+Discovery firewall rule removed
+Discovery firewall rule installed: -i wlan0 -p udp --sport 5580 --dport 5582 -j ACCEPT
+PaperSpoon host: (unset, discovery)
+Child PID: 32709
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+connected to X11
+screen_num: 0
+root: 0x51
+width: 1272
+height: 1696
+root_depth: 8
+black_pixel: 0
+white_pixel: 255
+window mapped id=0x1c00000 x=80 y=120 width=760 height=400
+discovery bind address=0.0.0.0:5582
+discovery probe attempt=1 destination=255.255.255.255:5580 nonce=18d0b33a886000167fc5
+discovery response from=192.168.0.12:5580 bytes=42
+discovery response valid endpoint=192.168.0.12:5581
+discovery result endpoint=192.168.0.12:5581
+transport: connected to PaperSpoon
+event type=MapNotify window=0x1c00000
+input type=ButtonPress detail=1 event_x=175 event_y=108 root_x=257 root_y=230 time=33646411 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=176 event_y=111 root_x=258 root_y=233 time=33646572 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=1 semantic=media.play_pause
+input type=ButtonPress detail=1 event_x=375 event_y=108 root_x=457 root_y=230 time=33646859 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=384 event_y=110 root_x=466 root_y=232 time=33647059 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=2 semantic=media.next
+input type=ButtonPress detail=1 event_x=639 event_y=118 root_x=721 root_y=240 time=33647322 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=644 event_y=119 root_x=726 root_y=241 time=33647497 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=3 semantic=media.previous
+input type=ButtonPress detail=1 event_x=476 event_y=348 root_x=558 root_y=470 time=33687876 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=476 event_y=350 root_x=558 root_y=472 time=33688048 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=7 semantic=app.exit
+event type=UnmapNotify window=0x1c00000
+event type=DestroyNotify window=0x1c00000
+
+Rust binary exit status: 0
+End reason: process_exit
+Ended: Mon Aug 31 00:42:48 GMT+3:0100 2026
+========================================
+Discovery firewall rule removed

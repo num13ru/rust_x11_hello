@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "companion"
+name = "paperspoon"
 version = "0.1.0"

@@ -10,7 +10,7 @@ pub const WINDOW_WIDTH: u16 = 760;
 ///
 /// 400 = 60 (top grid inset) + 2 rows of 128 (grid) + 8 (gap)
 ///       + 36 (exit bar) + 40 (status strip). The status strip is where
-///       companion `display <text>` lines render, below the exit bar.
+///       PaperSpoon `display <text>` lines render, below the exit bar.
 pub const WINDOW_HEIGHT: u16 = 400;
 pub const GRID_COLUMNS: u16 = 3;
 pub const GRID_ROWS: u16 = 2;
@@ -22,7 +22,7 @@ pub const GRID_TOP_INSET: u16 = 60;
 pub const EXIT_BAR_GAP: u16 = 8;
 /// Height of the full-width exit bar at the very bottom of the window.
 pub const EXIT_BAR_HEIGHT: u16 = 36;
-/// Height of the status strip below the exit bar where companion
+/// Height of the status strip below the exit bar where PaperSpoon
 /// `display <text>` commands render.
 pub const STATUS_BAR_HEIGHT: u16 = 40;
 pub const TITLE_X: u16 = 20;

@@ -1,0 +1,99 @@
+========================================
+KUAL Rust X11 Hello launcher
+Date: Mon Aug 31 00:32:16 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 300s plus 5s TERM grace
+Discovery firewall rule removed
+Discovery firewall rule installed: -i wlan0 -p udp --sport 5580 --dport 5582 -j ACCEPT
+PaperSpoon host: 192.168.0.12
+---- running Rust binary ----
+Child PID: 31337
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+connected to X11
+screen_num: 0
+root: 0x51
+width: 1272
+height: 1696
+root_depth: 8
+black_pixel: 0
+white_pixel: 255
+window mapped id=0x1c00000 x=80 y=120 width=760 height=400
+transport: connected to PaperSpoon
+event type=MapNotify window=0x1c00000
+input type=ButtonPress detail=1 event_x=167 event_y=136 root_x=249 root_y=258 time=33057238 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=168 event_y=138 root_x=250 root_y=260 time=33057363 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=1 semantic=media.play_pause
+input type=ButtonPress detail=1 event_x=380 event_y=150 root_x=462 root_y=272 time=33057563 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=386 event_y=150 root_x=468 root_y=272 time=33057700 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=2 semantic=media.next
+input type=ButtonPress detail=1 event_x=625 event_y=151 root_x=707 root_y=273 time=33057925 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=629 event_y=154 root_x=711 root_y=276 time=33058050 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=3 semantic=media.previous
+input type=ButtonPress detail=1 event_x=498 event_y=354 root_x=580 root_y=476 time=33066674 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=498 event_y=354 root_x=580 root_y=476 time=33066821 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=7 semantic=app.exit
+event type=UnmapNotify window=0x1c00000
+event type=DestroyNotify window=0x1c00000
+
+Rust binary exit status: 0
+End reason: process_exit
+Ended: Mon Aug 31 00:32:27 GMT+3:0100 2026
+========================================
+Discovery firewall rule removed
+========================================
+KUAL Rust X11 Hello launcher
+Date: Mon Aug 31 00:35:27 GMT+3:0100 2026
+PWD: /mnt/us/extensions/rust_x11_hello
+UID/GID: uid=0(root) gid=0(root) groups=0(root)
+BIN: /mnt/us/extensions/rust_x11_hello/bin/rust_x11_hello
+Watchdog: 90s plus 5s TERM grace
+Discovery firewall rule removed
+Discovery firewall rule installed: -i wlan0 -p udp --sport 5580 --dport 5582 -j ACCEPT
+PaperSpoon host: 192.168.15.201
+---- running Rust binary ----
+Child PID: 32220
+Rust X11 touch prototype for Kindle
+target_arch: arm
+target_os: linux
+DISPLAY=Some(":0.0")
+XAUTHORITY=None
+connected to X11
+screen_num: 0
+root: 0x51
+width: 1272
+height: 1696
+root_depth: 8
+black_pixel: 0
+white_pixel: 255
+window mapped id=0x1c00000 x=80 y=120 width=760 height=400
+transport error at startup: failed to connect to PaperSpoon: connection timed out
+event type=MapNotify window=0x1c00000
+input type=ButtonPress detail=1 event_x=100 event_y=165 root_x=182 root_y=287 time=33250903 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=104 event_y=176 root_x=186 root_y=298 time=33251075 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=1 semantic=media.play_pause
+transport error: failed to connect to PaperSpoon: connection timed out
+input type=ButtonPress detail=1 event_x=330 event_y=142 root_x=412 root_y=264 time=33251757 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=330 event_y=143 root_x=412 root_y=265 time=33251906 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=2 semantic=media.next
+transport error: failed to connect to PaperSpoon: connection timed out
+input type=ButtonPress detail=1 event_x=609 event_y=140 root_x=691 root_y=262 time=33252231 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=609 event_y=136 root_x=691 root_y=258 time=33252380 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=3 semantic=media.previous
+transport error: failed to connect to PaperSpoon: connection timed out
+input type=ButtonPress detail=1 event_x=183 event_y=351 root_x=265 root_y=473 time=33260407 window=0x1c00000 root=0x51 child=0x0 state=0x0000 same_screen=true
+input type=ButtonRelease detail=1 event_x=183 event_y=351 root_x=265 root_y=473 time=33260480 window=0x1c00000 root=0x51 child=0x0 state=0x0100 same_screen=true
+ui action=activate button=7 semantic=app.exit
+event type=UnmapNotify window=0x1c00000
+event type=DestroyNotify window=0x1c00000
+
+Rust binary exit status: 0
+End reason: process_exit
+Ended: Mon Aug 31 00:35:40 GMT+3:0100 2026
+========================================
+Discovery firewall rule removed
