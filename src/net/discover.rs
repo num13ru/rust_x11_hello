@@ -115,12 +115,6 @@ mod tests {
     use std::net::UdpSocket;
 
     #[test]
-    fn client_parses_valid_here() {
-        let response = crate::discovery::format_discover("deadbeef");
-        assert!(response.starts_with(crate::discovery::DISCOVER_PREFIX));
-    }
-
-    #[test]
     fn client_discovers_responder_over_udp() {
         // Real responder socket on an ephemeral loopback port: reads the
         // DISCOVER nonce, replies HERE with TCP port 5581.

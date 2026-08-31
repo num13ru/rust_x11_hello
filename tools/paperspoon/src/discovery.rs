@@ -32,8 +32,8 @@ fn parse_discover(datagram: &[u8]) -> Option<String> {
     Some(nonce.to_string())
 }
 
-/// Parse a HERE response datagram into nonce and TCP port (used by tests).
-#[allow(dead_code)]
+/// Parse a HERE response datagram into nonce and TCP port.
+#[cfg(test)]
 fn parse_here(datagram: &[u8]) -> Option<(String, u16)> {
     let text = std::str::from_utf8(datagram).ok()?.trim_end();
     let rest = text.strip_prefix(HERE_PREFIX)?;
@@ -45,7 +45,6 @@ fn parse_here(datagram: &[u8]) -> Option<(String, u16)> {
     }
     Some((nonce, port))
 }
-
 /// Build a HERE response datagram.
 fn format_here(nonce: &str, tcp_port: u16) -> String {
     format!("{HERE_PREFIX}{nonce} {tcp_port}\n")
