@@ -11,6 +11,7 @@ use x11rb::rust_connection::RustConnection;
 use x11::display;
 use x11::events::{EventLoopExit, event_loop};
 
+mod discovery;
 mod net;
 mod proto;
 mod ui;
@@ -44,20 +45,21 @@ fn run() -> Result<()> {
         ui::geometry::WINDOW_HEIGHT
     );
 
-    let mut companion = match net::Companion::connect() {
-        Ok(companion) => {
-            eprintln!("transport: connected to companion");
-            companion
+    let mut paperspoon = match net::Paperspoon::connect() {
+        Ok(paperspoon) => {
+            eprintln!("transport: connected to PaperSpoon");
+            paperspoon
         }
         Err(error) => {
-            // A companion that is down at startup is not fatal: the event
+            // A PaperSpoon that is down at startup is not fatal: the event
             // loop runs, and each activation attempts a (bounded) reconnect.
             eprintln!("transport error at startup: {error:#}");
-            net::Companion::disconnected()
+            net::Paperspoon::disconnected()
         }
     };
 
-    let event_result = event_loop(&conn, win, gc, &mut companion);
+    let event_result = event_loop(&conn, win, gc, &mut paperspoon);
+
     let destroy_window = match &event_result {
         Ok(EventLoopExit::WindowDestroyed) => false,
         Err(_) => true,
