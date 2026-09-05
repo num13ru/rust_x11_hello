@@ -4,16 +4,16 @@
 //! button rectangles, scaled text positions, and text label placements. The X11
 //! layer maps these onto its own wire types.
 
-/// Reference window width the fixed Kindle layout was verified at.
+/// Reference window width for the fixed Kindle layout.
 pub const WINDOW_WIDTH: u16 = 760;
-/// Reference window height the fixed Kindle layout was verified at.
+/// Reference window height for the fixed Kindle layout.
 ///
-/// 400 = 60 (top grid inset) + 2 rows of 128 (grid) + 8 (gap)
+/// 528 = 60 (top grid inset) + 3 rows of 128 (grid) + 8 (gap)
 ///       + 36 (exit bar) + 40 (status strip). The status strip is where
 ///       PaperSpoon `display <text>` lines render, below the exit bar.
-pub const WINDOW_HEIGHT: u16 = 400;
+pub const WINDOW_HEIGHT: u16 = 528;
 pub const GRID_COLUMNS: u16 = 3;
-pub const GRID_ROWS: u16 = 2;
+pub const GRID_ROWS: u16 = 3;
 pub const GRID_LEFT_INSET: u16 = 20;
 pub const GRID_RIGHT_INSET: u16 = 20;
 /// Vertical space above the grid: title baseline plus top margin.
@@ -27,8 +27,8 @@ pub const EXIT_BAR_HEIGHT: u16 = 36;
 pub const STATUS_BAR_HEIGHT: u16 = 40;
 pub const TITLE_X: u16 = 20;
 pub const TITLE_BASELINE: u16 = 40;
-pub const TITLE_TEXT: &[u8] = b"Core X11 button grid: tap 1-6";
-pub const BUTTON_LABELS: [&[u8]; 6] = [b"1", b"2", b"3", b"4", b"5", b"6"];
+pub const TITLE_TEXT: &[u8] = b"Core X11 button grid: tap 1-9";
+pub const BUTTON_LABELS: [&[u8]; 9] = [b"1", b"2", b"3", b"4", b"5", b"6", b"7", b"8", b"9"];
 /// Grid cell width at the reference window size: `(760 - 20 - 20) / 3`.
 pub const GRID_ROWS_CELL_WIDTH: u16 = 240;
 
@@ -55,7 +55,7 @@ pub const LABEL_TEXT_Y_OFFSET: u16 = 5;
 pub const EXIT_TEXT_X_OFFSET: u16 = 18;
 
 /// Logical button id of the full-width exit bar.
-pub const EXIT_BUTTON_ID: u8 = 7;
+pub const EXIT_BUTTON_ID: u8 = 10;
 /// Label drawn centered in the exit bar.
 pub const EXIT_TEXT: &[u8] = b"EXIT";
 
@@ -182,7 +182,7 @@ const _: () = {
     assert!(STATUS_BAR_HEIGHT > 0);
     assert!(STATUS_BAR_HEIGHT < WINDOW_HEIGHT);
 };
-/// Build the 2×3 logical button grid for a window extent.
+/// Build the 3×3 logical button grid for a window extent.
 ///
 /// Layout is a closed vertical stack: top inset, grid, gap, exit bar, status
 /// strip. The grid occupies `top..grid_bottom` and the bar `bar_top..bar_end`
@@ -368,7 +368,7 @@ mod tests {
     }
 
     #[test]
-    fn default_layout_draws_the_six_button_grid() {
+    fn default_layout_draws_the_nine_button_grid() {
         let layout = draw_layout(WINDOW_WIDTH, WINDOW_HEIGHT).expect("nonzero geometry");
 
         let expected_rectangles: Vec<LayoutRect> = (0..GRID_ROWS)
@@ -383,7 +383,7 @@ mod tests {
             text: TITLE_TEXT,
         })
         .chain(
-            expected_rectangles[..6]
+            expected_rectangles[..9]
                 .iter()
                 .zip(BUTTON_LABELS)
                 .map(|(rect, label)| {
@@ -391,7 +391,7 @@ mod tests {
                 }),
         )
         .chain(std::iter::once(label_placement(
-            expected_rectangles[6],
+            expected_rectangles[9],
             EXIT_TEXT_X_OFFSET,
             LABEL_TEXT_Y_OFFSET,
             EXIT_TEXT,
@@ -422,8 +422,8 @@ mod tests {
         );
         let half_baseline_offset =
             scale_u16(LABEL_TEXT_Y_OFFSET, WINDOW_HEIGHT / 2, WINDOW_HEIGHT).max(1);
-        // Six grid buttons: label centered on each half-size cell.
-        for (placement, rect) in layout.text[1..7].iter().zip(&layout.rectangles[..6]) {
+        // Nine grid buttons: label centered on each half-size cell.
+        for (placement, rect) in layout.text[1..10].iter().zip(&layout.rectangles[..9]) {
             assert_eq!(
                 placement.x,
                 rect.x + rect.width as i16 / 2 - LABEL_TEXT_X_OFFSET as i16
@@ -434,13 +434,13 @@ mod tests {
             );
         }
         // The exit label is centered on the bar with its own x offset.
-        let exit_rect = layout.rectangles[6];
+        let exit_rect = layout.rectangles[9];
         assert_eq!(
-            layout.text[7].x,
+            layout.text[10].x,
             exit_rect.x + exit_rect.width as i16 / 2 - EXIT_TEXT_X_OFFSET as i16
         );
         assert_eq!(
-            layout.text[7].y,
+            layout.text[10].y,
             exit_rect.y + exit_rect.height as i16 / 2 + half_baseline_offset as i16
         );
     }
