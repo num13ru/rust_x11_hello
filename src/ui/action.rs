@@ -1,4 +1,4 @@
-//! Semantic action IDs for the six-button grid.
+//! Semantic action IDs for the nine-button grid.
 //!
 //! This is the wire-independent unit of the small semantic protocol: a button
 //! activation maps to a stable dotted action id that a transport (TCP over
@@ -15,6 +15,9 @@ pub enum SemanticAction {
     TerminalNewWindow,
     TmuxWork,
     ZoomToggleMute,
+    StubButton7,
+    StubButton8,
+    StubButton9,
     Exit,
 }
 
@@ -28,12 +31,15 @@ impl SemanticAction {
             Self::TerminalNewWindow => "terminal.new_window",
             Self::TmuxWork => "tmux.work",
             Self::ZoomToggleMute => "zoom.toggle_mute",
+            Self::StubButton7 => "stub.button_7",
+            Self::StubButton8 => "stub.button_8",
+            Self::StubButton9 => "stub.button_9",
             Self::Exit => "app.exit",
         }
     }
 }
 
-/// Map a grid button id (1..=6, plus the exit bar id) to its semantic action.
+/// Map a grid button id (1..=9, plus the exit bar id) to its semantic action.
 ///
 /// Returns `None` for any other id; the grid never produces one.
 pub fn action_for_button(button_id: u8) -> Option<SemanticAction> {
@@ -45,6 +51,9 @@ pub fn action_for_button(button_id: u8) -> Option<SemanticAction> {
         4 => Some(SemanticAction::TerminalNewWindow),
         5 => Some(SemanticAction::TmuxWork),
         6 => Some(SemanticAction::ZoomToggleMute),
+        7 => Some(SemanticAction::StubButton7),
+        8 => Some(SemanticAction::StubButton8),
+        9 => Some(SemanticAction::StubButton9),
         _ => None,
     }
 }
@@ -62,6 +71,9 @@ mod tests {
             (4, SemanticAction::TerminalNewWindow, "terminal.new_window"),
             (5, SemanticAction::TmuxWork, "tmux.work"),
             (6, SemanticAction::ZoomToggleMute, "zoom.toggle_mute"),
+            (7, SemanticAction::StubButton7, "stub.button_7"),
+            (8, SemanticAction::StubButton8, "stub.button_8"),
+            (9, SemanticAction::StubButton9, "stub.button_9"),
             (
                 crate::ui::geometry::EXIT_BUTTON_ID,
                 SemanticAction::Exit,
@@ -90,10 +102,13 @@ mod tests {
             SemanticAction::TerminalNewWindow.id(),
             SemanticAction::TmuxWork.id(),
             SemanticAction::ZoomToggleMute.id(),
+            SemanticAction::StubButton7.id(),
+            SemanticAction::StubButton8.id(),
+            SemanticAction::StubButton9.id(),
             SemanticAction::Exit.id(),
         ];
         ids.sort_unstable();
         ids.dedup();
-        assert_eq!(ids.len(), 7);
+        assert_eq!(ids.len(), 10);
     }
 }
