@@ -8,12 +8,10 @@ use x11rb::protocol::xproto::{
 };
 use x11rb::rust_connection::RustConnection;
 
-use crate::ui::geometry::{WINDOW_HEIGHT, WINDOW_WIDTH};
-
-pub const WINDOW_X: i16 = 80;
-pub const WINDOW_Y: i16 = 120;
-/// Border width of the test window, in pixels.
-pub const WINDOW_BORDER_WIDTH: u16 = 2;
+pub const WINDOW_X: i16 = 0;
+pub const WINDOW_Y: i16 = 0;
+/// A border would extend beyond the full-screen client area.
+pub const WINDOW_BORDER_WIDTH: u16 = 0;
 /// X11 wire value meaning "inherit from parent" for the window visual.
 pub const VISUAL_COPY_FROM_PARENT: u32 = 0;
 
@@ -27,9 +25,18 @@ pub fn touch_event_mask() -> EventMask {
 }
 /// Connect to the X server and create, map, and publish the test window.
 ///
-/// Returns the connection, window, and GC; the caller owns their lifecycle.
-pub fn setup_window(conn: &RustConnection) -> Result<(Window, Gcontext)> {
-    let screen = &conn.setup().roots[0];
+/// Returns the window, GC, and initial screen extent; the caller owns cleanup.
+pub fn setup_window(
+    conn: &RustConnection,
+    screen_num: usize,
+) -> Result<(Window, Gcontext, (u16, u16))> {
+    let screen = conn
+        .setup()
+        .roots
+        .get(screen_num)
+        .context("selected X11 screen is missing")?;
+    let size = (screen.width_in_pixels, screen.height_in_pixels);
+    anyhow::ensure!(size.0 > 0 && size.1 > 0, "X11 screen has zero dimensions");
 
     let win = conn.generate_id().context("failed to generate window id")?;
     let gc = conn.generate_id().context("failed to generate GC id")?;
@@ -41,8 +48,8 @@ pub fn setup_window(conn: &RustConnection) -> Result<(Window, Gcontext)> {
         screen.root,
         WINDOW_X,
         WINDOW_Y,
-        WINDOW_WIDTH,
-        WINDOW_HEIGHT,
+        size.0,
+        size.1,
         WINDOW_BORDER_WIDTH,
         WindowClass::INPUT_OUTPUT,
         VISUAL_COPY_FROM_PARENT,
@@ -73,7 +80,7 @@ pub fn setup_window(conn: &RustConnection) -> Result<(Window, Gcontext)> {
         .context("X11 server rejected map-window request")?;
     conn.flush().context("failed to flush map request")?;
 
-    Ok((win, gc))
+    Ok((win, gc, size))
 }
 
 /// Release the window and GC, destroying the window unless it is already gone.

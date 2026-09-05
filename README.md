@@ -15,16 +15,18 @@ The current milestone opens a persistent override-redirect X11 window, redraws f
 
 ## Geometry-aware rendering
 
-- The initial Kindle window is `(80,120)` at `760 x 528`; the 3×3 button grid, exit bar, and status strip scale from that reference geometry.
+- The app opens a borderless window at `(0,0)` covering the selected X11 screen. The Paperwhite 6 reports `1272 x 1696` in portrait; runtime dimensions come from X11 rather than a fixed device resolution.
+- Each of the nine grid cells is square, with side length `(screen width / 3) - (20 * 2)` using integer division. On this Kindle, cells are `384 x 384`, with 20px outer margins and 40px gaps between rows and columns. Any division remainder is absorbed by the column gaps so both outer edges stay aligned.
+- The title sits above the grid. Exit sits 8px below it, is 72px tall (twice its previous height), and spans `screen width - 40px` with the same outer margins. A 40px status strip remains reserved at the screen bottom for PaperSpoon `display` text.
+- Shorter windows reduce the cell side to fit the grid, Exit, and status strip without stretching the cells. Windows too small for the fixed margins and controls have no interactive buttons. Layout coordinates are capped at X11's signed-coordinate limit.
 - The final event in each `Expose` batch clears and redraws the current window extent.
-- A size-changing `ConfigureNotify` updates the active geometry and redraws immediately. Duplicate geometry is ignored, and a defensive zero-width/zero-height report is logged without replacing the last valid extent.
-- Grid bounds and text origins scale from the `760 x 528` reference layout (grid + exit bar above a 40px status strip where PaperSpoon `display` text renders). Arithmetic is bounded for tiny windows and the full core-X11 `u16` extent; text coordinates saturate at the protocol's signed-coordinate limit.
+- A size-changing `ConfigureNotify` updates drawing and hit testing together and cancels an active contact. Duplicate geometry is ignored; a zero-width/zero-height report is logged without replacing the last valid extent.
 
-Host tests verify layout and geometry decisions at default, half, one-pixel, zero, and maximum dimensions. The ARM/static gates verify deployability, but runtime resize/redraw behavior still requires observation on an X server that actually sends resize events; no such event was part of the fixed-geometry Kindle evidence run.
+Host tests cover the portrait layout, smaller and landscape windows, division remainders, gaps, aligned Exit bounds, and zero/maximum dimensions. ARM/static checks verify buildability. Full-screen rendering and touch behavior still require a physical Kindle run.
 
 ## Logical hit testing
 
-The window contains nine logical buttons in a 3×3 grid, with a separate full-width Exit button below. Their geometry is independent of X11 event structures and uses half-open bounds, so every shared edge belongs to exactly one button.
+The window contains nine logical buttons in a 3×3 grid, with a separate Exit button aligned below. Their geometry is independent of X11 event structures and uses half-open bounds, so the trailing edges and gaps do not activate a button.
 
 Only core-X11 `detail=1` participates in UI activation. A primary press arms the button under the initial coordinate; a matching primary release activates only when it remains inside that same button and emits:
 ```text
@@ -46,8 +48,9 @@ Every activation also emits its stable semantic action id. The current grid maps
 | 9 | `stub.button_9` |
 | Exit (ID 10) | `app.exit` (closes the window locally) |
 
-Buttons 7–9 send placeholder action IDs for future companion bindings. The new
-three-row layout has not yet been verified on the physical Kindle.
+Buttons 7–9 send placeholder action IDs for future companion bindings. The previous
+760×528 three-row layout was confirmed on the physical Kindle; the new full-screen
+layout still needs device verification.
 
 These dotted ids are the wire units of the semantic protocol; the transport
 that carries them is described below. USBNetwork itself is not used: no
