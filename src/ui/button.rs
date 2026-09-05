@@ -103,8 +103,8 @@ pub fn handle_pointer_event(
 mod tests {
     use super::*;
     use crate::ui::geometry::{
-        EXIT_BAR_HEIGHT, EXIT_BAR_RECT_TOP, GRID_RECT_LEFT, GRID_RECT_TOP, GRID_ROWS_CELL_HEIGHT,
-        GRID_ROWS_CELL_WIDTH, WINDOW_HEIGHT, WINDOW_WIDTH,
+        EXIT_BAR_HEIGHT, EXIT_BAR_RECT_TOP, EXIT_BUTTON_ID, GRID_RECT_LEFT, GRID_RECT_TOP,
+        GRID_ROWS_CELL_HEIGHT, GRID_ROWS_CELL_WIDTH, WINDOW_HEIGHT, WINDOW_WIDTH,
     };
 
     /// Center point of grid cell `(row, column)` at the reference size.
@@ -167,7 +167,10 @@ mod tests {
             .is_none()
         );
         // Exit bar: full width, below the grid.
-        assert_eq!(hit_button(&buttons, exit_bar_center()).unwrap().id, 7);
+        assert_eq!(
+            hit_button(&buttons, exit_bar_center()).unwrap().id,
+            EXIT_BUTTON_ID
+        );
         assert_eq!(
             hit_button(
                 &buttons,
@@ -178,7 +181,7 @@ mod tests {
             )
             .unwrap()
             .id,
-            7
+            EXIT_BUTTON_ID
         );
         // Outside the window: no hit. (Negative x is a boundary sentinel.)
         assert!(
@@ -200,6 +203,35 @@ mod tests {
                 }
             )
             .is_none()
+        );
+    }
+
+    #[test]
+    fn third_row_and_exit_are_distinct_activation_targets() {
+        let buttons = button_grid(WINDOW_WIDTH, WINDOW_HEIGHT);
+        let mut contact = ContactTracker::default();
+
+        for column in 0..3 {
+            let point = cell_center(2, column);
+            let expected_id = 7 + column as u8;
+            assert_eq!(hit_button(&buttons, point).unwrap().id, expected_id);
+            contact.press(PRIMARY_BUTTON_DETAIL, point, &buttons);
+            assert_eq!(
+                contact.release(PRIMARY_BUTTON_DETAIL, point, &buttons),
+                Some(expected_id)
+            );
+
+            contact.press(PRIMARY_BUTTON_DETAIL, point, &buttons);
+            assert_eq!(
+                contact.release(PRIMARY_BUTTON_DETAIL, exit_bar_center(), &buttons),
+                None
+            );
+        }
+
+        contact.press(PRIMARY_BUTTON_DETAIL, exit_bar_center(), &buttons);
+        assert_eq!(
+            contact.release(PRIMARY_BUTTON_DETAIL, exit_bar_center(), &buttons),
+            Some(EXIT_BUTTON_ID)
         );
     }
 
