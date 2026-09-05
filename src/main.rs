@@ -35,14 +35,14 @@ fn run() -> Result<()> {
         .context("failed to connect to X11 display; check DISPLAY and /tmp/.X11-unix/X0")?;
 
     display::print_screen_info(&conn, screen_num);
-    let (win, gc) = display::setup_window(&conn)?;
+    let (win, gc, size) = display::setup_window(&conn, screen_num)?;
 
     eprintln!(
         "window mapped id=0x{win:x} x={} y={} width={} height={}",
         x11::display::WINDOW_X,
         x11::display::WINDOW_Y,
-        ui::geometry::WINDOW_WIDTH,
-        ui::geometry::WINDOW_HEIGHT
+        size.0,
+        size.1
     );
 
     let mut paperspoon = match net::Paperspoon::connect() {
@@ -58,7 +58,7 @@ fn run() -> Result<()> {
         }
     };
 
-    let event_result = event_loop(&conn, win, gc, &mut paperspoon);
+    let event_result = event_loop(&conn, win, gc, size, &mut paperspoon);
 
     let destroy_window = match &event_result {
         Ok(EventLoopExit::WindowDestroyed) => false,

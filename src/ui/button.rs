@@ -103,23 +103,27 @@ pub fn handle_pointer_event(
 mod tests {
     use super::*;
     use crate::ui::geometry::{
-        EXIT_BAR_HEIGHT, EXIT_BAR_RECT_TOP, EXIT_BUTTON_ID, GRID_RECT_LEFT, GRID_RECT_TOP,
-        GRID_ROWS_CELL_HEIGHT, GRID_ROWS_CELL_WIDTH, WINDOW_HEIGHT, WINDOW_WIDTH,
+        CELL_MARGIN, EXIT_BAR_HEIGHT, EXIT_BAR_RECT_TOP, EXIT_BUTTON_ID, GRID_RECT_LEFT,
+        GRID_RECT_TOP, GRID_ROWS_CELL_HEIGHT, GRID_ROWS_CELL_WIDTH, WINDOW_HEIGHT, WINDOW_WIDTH,
     };
 
     /// Center point of grid cell `(row, column)` at the reference size.
     fn cell_center(row: u16, column: u16) -> Point {
         Point {
-            x: (GRID_RECT_LEFT + column * GRID_ROWS_CELL_WIDTH + GRID_ROWS_CELL_WIDTH / 2) as i16,
-            y: (GRID_RECT_TOP + row * GRID_ROWS_CELL_HEIGHT + GRID_ROWS_CELL_HEIGHT / 2) as i16,
+            x: (GRID_RECT_LEFT
+                + column * (GRID_ROWS_CELL_WIDTH + CELL_MARGIN * 2)
+                + GRID_ROWS_CELL_WIDTH / 2) as i16,
+            y: (GRID_RECT_TOP
+                + row * (GRID_ROWS_CELL_HEIGHT + CELL_MARGIN * 2)
+                + GRID_ROWS_CELL_HEIGHT / 2) as i16,
         }
     }
 
     /// A point inside the boundary of cell `(row, column)` at the reference size.
     fn inside_cell(row: u16, column: u16) -> Point {
         Point {
-            x: (GRID_RECT_LEFT + column * GRID_ROWS_CELL_WIDTH) as i16,
-            y: (GRID_RECT_TOP + row * GRID_ROWS_CELL_HEIGHT) as i16,
+            x: (GRID_RECT_LEFT + column * (GRID_ROWS_CELL_WIDTH + CELL_MARGIN * 2)) as i16,
+            y: (GRID_RECT_TOP + row * (GRID_ROWS_CELL_HEIGHT + CELL_MARGIN * 2)) as i16,
         }
     }
 
@@ -140,15 +144,15 @@ mod tests {
         assert_eq!(hit_button(&buttons, cell_center(1, 2)).unwrap().id, 6);
         // Points just inside the leading/trailing edge of a cell.
         assert_eq!(hit_button(&buttons, inside_cell(0, 1)).unwrap().id, 2);
-        // The shared vertical edge belongs to the right-hand cell (half-open).
+        // The next column begins after the non-interactive gap.
         assert_eq!(hit_button(&buttons, inside_cell(0, 1)).unwrap().id, 2);
-        // The shared horizontal edge belongs to the lower cell.
+        // The next row begins after the non-interactive gap.
         assert_eq!(
             hit_button(
                 &buttons,
                 Point {
                     x: (GRID_RECT_LEFT + GRID_ROWS_CELL_WIDTH / 2) as i16,
-                    y: (GRID_RECT_TOP + GRID_ROWS_CELL_HEIGHT) as i16,
+                    y: (GRID_RECT_TOP + GRID_ROWS_CELL_HEIGHT + CELL_MARGIN * 2) as i16,
                 }
             )
             .unwrap()
@@ -166,7 +170,7 @@ mod tests {
             )
             .is_none()
         );
-        // Exit bar: full width, below the grid.
+        // Exit bar: aligned with the grid, below its last row.
         assert_eq!(
             hit_button(&buttons, exit_bar_center()).unwrap().id,
             EXIT_BUTTON_ID
@@ -175,7 +179,7 @@ mod tests {
             hit_button(
                 &buttons,
                 Point {
-                    x: WINDOW_WIDTH as i16 - 1,
+                    x: (WINDOW_WIDTH - CELL_MARGIN - 1) as i16,
                     y: (EXIT_BAR_RECT_TOP + 1) as i16,
                 }
             )
@@ -204,6 +208,42 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    #[test]
+    fn gaps_and_exit_margins_do_not_activate_buttons() {
+        let buttons = button_grid(WINDOW_WIDTH, WINDOW_HEIGHT);
+        let mut contact = ContactTracker::default();
+        for point in [
+            Point {
+                x: (GRID_RECT_LEFT + GRID_ROWS_CELL_WIDTH) as i16,
+                y: cell_center(0, 0).y,
+            },
+            Point {
+                x: cell_center(0, 0).x,
+                y: (GRID_RECT_TOP + GRID_ROWS_CELL_HEIGHT) as i16,
+            },
+            Point {
+                x: 0,
+                y: exit_bar_center().y,
+            },
+            Point {
+                x: (WINDOW_WIDTH - CELL_MARGIN) as i16,
+                y: exit_bar_center().y,
+            },
+        ] {
+            assert!(hit_button(&buttons, point).is_none());
+            contact.press(PRIMARY_BUTTON_DETAIL, cell_center(0, 0), &buttons);
+            assert_eq!(
+                contact.release(PRIMARY_BUTTON_DETAIL, point, &buttons),
+                None
+            );
+            contact.press(PRIMARY_BUTTON_DETAIL, point, &buttons);
+            assert_eq!(
+                contact.release(PRIMARY_BUTTON_DETAIL, cell_center(0, 0), &buttons),
+                None
+            );
+        }
     }
 
     #[test]

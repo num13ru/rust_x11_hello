@@ -7,7 +7,7 @@
 use crate::net::Paperspoon;
 use crate::ui::action::{SemanticAction, action_for_button};
 use crate::ui::button::{ContactTracker, PointerEvent, PointerEventKind, handle_pointer_event};
-use crate::ui::geometry::{Point, STATUS_BAR_HEIGHT, WINDOW_HEIGHT, WINDOW_WIDTH, draw_layout};
+use crate::ui::geometry::{Point, STATUS_BAR_HEIGHT, draw_layout};
 use anyhow::{Context, Result, anyhow};
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
@@ -43,10 +43,10 @@ pub fn event_loop(
     conn: &RustConnection,
     win: Window,
     gc: Gcontext,
+    initial_size: (u16, u16),
     paperspoon: &mut Paperspoon,
 ) -> Result<EventLoopExit> {
-    let mut width = WINDOW_WIDTH;
-    let mut height = WINDOW_HEIGHT;
+    let (mut width, mut height) = initial_size;
     let mut contact = ContactTracker::default();
     let mut status_text: Option<String> = None;
 
@@ -373,7 +373,8 @@ mod tests {
             y: (GRID_RECT_TOP + GRID_ROWS_CELL_HEIGHT / 2) as i16,
         };
         let button_2 = Point {
-            x: (GRID_RECT_LEFT + GRID_ROWS_CELL_WIDTH + GRID_ROWS_CELL_WIDTH / 2) as i16,
+            x: (GRID_RECT_LEFT + GRID_ROWS_CELL_WIDTH + CELL_MARGIN * 2 + GRID_ROWS_CELL_WIDTH / 2)
+                as i16,
             y: (GRID_RECT_TOP + GRID_ROWS_CELL_HEIGHT / 2) as i16,
         };
         assert_eq!(
@@ -435,7 +436,8 @@ mod tests {
         // Same-button press/release in button 4: exactly one activation.
         let inside_4 = Point {
             x: (GRID_RECT_LEFT + GRID_ROWS_CELL_WIDTH / 2) as i16,
-            y: (GRID_RECT_TOP + GRID_ROWS_CELL_HEIGHT + GRID_ROWS_CELL_HEIGHT / 2) as i16,
+            y: (GRID_RECT_TOP + GRID_ROWS_CELL_HEIGHT + CELL_MARGIN * 2 + GRID_ROWS_CELL_HEIGHT / 2)
+                as i16,
         };
         assert_eq!(
             handle_pointer_event(
@@ -466,6 +468,7 @@ mod tests {
     }
 
     use crate::ui::geometry::{
-        GRID_RECT_LEFT, GRID_RECT_TOP, GRID_ROWS_CELL_HEIGHT, GRID_ROWS_CELL_WIDTH, Point,
+        CELL_MARGIN, GRID_RECT_LEFT, GRID_RECT_TOP, GRID_ROWS_CELL_HEIGHT, GRID_ROWS_CELL_WIDTH,
+        Point, WINDOW_HEIGHT, WINDOW_WIDTH,
     };
 }
