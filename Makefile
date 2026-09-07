@@ -1,18 +1,13 @@
 IMAGE := rust-kindle-armv7hf-builder
 WORKDIR := /work
-PAPERSPOON_MANIFEST := tools/paperspoon/Cargo.toml
 
 .PHONY: check
 
 check:
-	cargo fmt --check
-	cargo check
-	cargo clippy --all-targets -- -D warnings
-	cargo test
-	cargo fmt --manifest-path $(PAPERSPOON_MANIFEST) --check
-	cargo check --manifest-path $(PAPERSPOON_MANIFEST)
-	cargo clippy --manifest-path $(PAPERSPOON_MANIFEST) --all-targets -- -D warnings
-	cargo test --manifest-path $(PAPERSPOON_MANIFEST)
+	cargo fmt --all --check
+	cargo check --workspace
+	cargo clippy --workspace --all-targets -- -D warnings
+	cargo test --workspace
 	sh -n kindle-extension/rust_x11_hello/bin/run.sh
 	sh -n kindle-extension/rust_x11_hello/bin/show.sh
 	sh -n kindle-extension/rust_x11_hello/bin/stop.sh

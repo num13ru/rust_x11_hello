@@ -3,6 +3,10 @@ name = "rust_x11_hello"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = [".", "tools/paperspoon"]
+resolver = "3"
+
 [dependencies]
 anyhow = "1"
 x11rb = "0.13"
