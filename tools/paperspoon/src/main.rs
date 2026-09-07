@@ -55,19 +55,19 @@ fn parse_options(args: &[String]) -> Options {
     let mut port = DEFAULT_PORT;
     let mut log_path = DEFAULT_LOG_FILE.to_string();
     let mut forward_url = FORWARD_TO_HAMMERSPOON;
-    let mut positional = args.iter().skip(1);
-    while let Some(arg) = positional.next() {
+    let positional = args.iter().skip(1);
+    for arg in positional {
         match arg.as_str() {
             "--no-forward-url" => {
                 forward_url = false;
             }
             _ => {
                 // Positional: try port first, then log file.
-                if port == DEFAULT_PORT {
-                    if let Ok(parsed) = arg.parse() {
-                        port = parsed;
-                        continue;
-                    }
+                if port == DEFAULT_PORT
+                    && let Ok(parsed) = arg.parse()
+                {
+                    port = parsed;
+                    continue;
                 }
                 if log_path == DEFAULT_LOG_FILE {
                     log_path = arg.clone();
@@ -99,7 +99,10 @@ fn main() -> io::Result<()> {
     let opts = parse_options(&args);
 
     let listener = TcpListener::bind(("0.0.0.0", opts.port))?;
-    println!("listening on 0.0.0.0:{}, logging to {}", opts.port, opts.log_path);
+    println!(
+        "listening on 0.0.0.0:{}, logging to {}",
+        opts.port, opts.log_path
+    );
 
     println!("type 'display <text>' to send a control command");
     if opts.forward_url {
@@ -206,12 +209,13 @@ fn main() -> io::Result<()> {
             }
             let _ = file.flush();
 
-            if opts.forward_url {
-                if let Some(action_id) = line.strip_prefix("event action=").and_then(|s| s.strip_suffix(';')) {
-                    if let Err(error) = forward_url(action_id) {
-                        eprintln!("forward error to Hammerspoon: {error}");
-                    }
-                }
+            if opts.forward_url
+                && let Some(action_id) = line
+                    .strip_prefix("event action=")
+                    .and_then(|s| s.strip_suffix(';'))
+                && let Err(error) = forward_url(action_id)
+            {
+                eprintln!("forward error to Hammerspoon: {error}");
             }
         }
         let stale = current
@@ -234,8 +238,6 @@ fn main() -> io::Result<()> {
 mod tests {
     use super::*;
 
-
-
     #[test]
     fn parse_options_keeps_backward_compatible_positional_args() {
         let opts = parse_options(&[
@@ -256,10 +258,7 @@ mod tests {
 
     #[test]
     fn parse_options_without_forward_url_disables() {
-        let opts = parse_options(&[
-            "paperspoon".to_string(),
-            "--no-forward-url".to_string(),
-        ]);
+        let opts = parse_options(&["paperspoon".to_string(), "--no-forward-url".to_string()]);
         assert!(!opts.forward_url);
     }
 
