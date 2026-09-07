@@ -39,9 +39,8 @@ const COMPANION_HOST_ENV: &str = "RUST_X11_HELLO_COMPANION";
 const COMPANION_PORT_ENV: &str = "RUST_X11_HELLO_COMPANION_PORT";
 
 const TCP_CONNECT_TIMEOUT: Duration = Duration::from_millis(150);
-fn paperspoon_port() -> u16 {
-    std::env::var(COMPANION_PORT_ENV)
-        .ok()
+fn paperspoon_port(value: Option<&str>) -> u16 {
+    value
         .and_then(|value| value.parse().ok())
         .unwrap_or(PAPERSPOON_PORT)
 }
@@ -71,11 +70,11 @@ pub struct Paperspoon {
 /// - Otherwise run zero-config UDP discovery; do not fall back to a
 ///   hard-coded IP when discovery fails (that would hide the experiment's
 ///   result).
-fn paperspoon_addr() -> Result<SocketAddr> {
-    match std::env::var(COMPANION_HOST_ENV) {
+fn paperspoon_addr(host: Option<&str>, port: u16) -> Result<SocketAddr> {
+    match host {
         // An explicit, non-empty override resolves directly; empty or
         // missing falls through to discovery.
-        Ok(host) if !host.trim().is_empty() => (host, paperspoon_port())
+        Some(host) if !host.trim().is_empty() => (host, port)
             .to_socket_addrs()
             .context("failed to resolve PaperSpoon address")?
             .next()
@@ -97,7 +96,9 @@ impl Paperspoon {
 
     /// Connect to PaperSpoon and start the reader thread.
     pub fn connect() -> Result<Self> {
-        let addr = paperspoon_addr()?;
+        let host = std::env::var(COMPANION_HOST_ENV).ok();
+        let port = std::env::var(COMPANION_PORT_ENV).ok();
+        let addr = paperspoon_addr(host.as_deref(), paperspoon_port(port.as_deref()))?;
         Self::connect_to(addr)
     }
 
@@ -245,17 +246,15 @@ mod tests {
 
     #[test]
     fn paperspoon_port_has_a_default() {
-        assert_eq!(paperspoon_port(), PAPERSPOON_PORT);
+        assert_eq!(paperspoon_port(None), PAPERSPOON_PORT);
+        assert_eq!(paperspoon_port(Some("not-a-port")), PAPERSPOON_PORT);
+        assert_eq!(paperspoon_port(Some("6000")), 6000);
     }
 
     #[test]
-    fn explicit_host_env_resolves_directly() {
-        // SAFETY: these tests run serially by default; the env var is
-        // restored before the test returns.
-        unsafe { std::env::set_var(COMPANION_HOST_ENV, "127.0.0.1") };
-        let addr = paperspoon_addr().expect("explicit host must resolve");
-        unsafe { std::env::remove_var(COMPANION_HOST_ENV) };
-        assert_eq!(addr, SocketAddr::from(([127, 0, 0, 1], PAPERSPOON_PORT)));
+    fn explicit_host_resolves_directly() {
+        let addr = paperspoon_addr(Some("127.0.0.1"), 6000).expect("explicit host must resolve");
+        assert_eq!(addr, SocketAddr::from(([127, 0, 0, 1], 6000)));
     }
 
     #[test]
