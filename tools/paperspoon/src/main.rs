@@ -6,9 +6,14 @@
 //!   stdout and appended with a unix timestamp and peer address to a log
 //!   file (default `paperspoon.log`);
 //! - lines typed on stdin are forwarded to the Kindle as control commands
-//!   (`display <text>`).
+//!   (`display <text>`);
+//! - received action lines are also sent as UDP datagrams to a local
+//!   consumer (default `127.0.0.1:5584`) so Hammerspoon can dispatch them
+//!   without opening another TCP port. One datagram per action line: the
+//!   consumer fires exactly once per datagram, so actions never replay.
 //!
-//! Usage: `paperspoon [port] [log-file]`
+//! Usage: `paperspoon [<port> <log-file>] [--forward-udp <port> |
+//!         --no-forward-udp]`
 //!
 //! Only the most recently accepted connection receives stdin control lines.
 //! The Kindle reconnects across runs, and each accepted socket would get its
@@ -16,6 +21,11 @@
 //! for an earlier (dead) connection would swallow operator lines forever.
 //! One forwarder thread therefore writes every stdin line to the current
 //! connection, replaced on each accept.
+//!
+//! UDP forwarding is best-effort and stateless: if the consumer is not
+//! listening when an action arrives, the datagram is dropped (UDP semantics)
+//! and the next action is delivered normally. The Kindle-facing accept loop
+//! never blocks on the forward path.
 
 use std::env;
 use std::fs::OpenOptions;
@@ -30,20 +40,73 @@ mod discovery;
 const DEFAULT_PORT: u16 = 5581;
 /// Default log file name for received activation lines.
 const DEFAULT_LOG_FILE: &str = "paperspoon.log";
+/// Whether to forward actions to Hammerspoon via `open -g hammerspoon://`.
+const FORWARD_TO_HAMMERSPOON: bool = true;
+
+/// Parsed command line.
+struct Options {
+    port: u16,
+    log_path: String,
+    /// None means URL forwarding is disabled.
+    forward_url: bool,
+}
+
+fn parse_options(args: &[String]) -> Options {
+    let mut port = DEFAULT_PORT;
+    let mut log_path = DEFAULT_LOG_FILE.to_string();
+    let mut forward_url = FORWARD_TO_HAMMERSPOON;
+    let mut positional = args.iter().skip(1);
+    while let Some(arg) = positional.next() {
+        match arg.as_str() {
+            "--no-forward-url" => {
+                forward_url = false;
+            }
+            _ => {
+                // Positional: try port first, then log file.
+                if port == DEFAULT_PORT {
+                    if let Ok(parsed) = arg.parse() {
+                        port = parsed;
+                        continue;
+                    }
+                }
+                if log_path == DEFAULT_LOG_FILE {
+                    log_path = arg.clone();
+                    continue;
+                }
+            }
+        }
+    }
+    Options {
+        port,
+        log_path,
+        forward_url,
+    }
+}
+
+/// Forward one action line to Hammerspoon via `open -g hammerspoon://`.
+/// The action id is passed as a query parameter (`?action=<id>`); Hammerspoon's
+/// urlevent handler receives it in the params table. No sockets, no ports,
+/// no file polling.
+fn forward_url(action_id: &str) -> io::Result<()> {
+    std::process::Command::new("open")
+        .arg("-g")
+        .arg(format!("hammerspoon://paperpad?action={}", action_id))
+        .status()?;
+    Ok(())
+}
 fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().collect();
-    let port: u16 = args
-        .get(1)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(DEFAULT_PORT);
-    let log_path = args
-        .get(2)
-        .cloned()
-        .unwrap_or_else(|| DEFAULT_LOG_FILE.to_string());
+    let opts = parse_options(&args);
 
-    let listener = TcpListener::bind(("0.0.0.0", port))?;
-    println!("listening on 0.0.0.0:{port}, logging to {log_path}");
+    let listener = TcpListener::bind(("0.0.0.0", opts.port))?;
+    println!("listening on 0.0.0.0:{}, logging to {}", opts.port, opts.log_path);
+
     println!("type 'display <text>' to send a control command");
+    if opts.forward_url {
+        println!("forwarding actions to Hammerspoon via open -g hammerspoon://paperpad/...");
+    } else {
+        println!("action forwarding to Hammerspoon disabled");
+    }
     io::stdout().flush()?;
 
     // Discovery responder: serve confirmations on UDP 5580 regardless of the
@@ -55,8 +118,6 @@ fn main() -> io::Result<()> {
         }
     });
 
-    // The connection operator control lines go to. Set to the most recent
-    // accept; the single forwarder below writes each stdin line to it.
     let current: Arc<Mutex<Option<TcpStream>>> = Arc::new(Mutex::new(None));
 
     {
@@ -99,37 +160,60 @@ fn main() -> io::Result<()> {
             .peer_addr()
             .unwrap_or_else(|_| SocketAddr::from(([0, 0, 0, 0], 0)));
         println!("connected: {peer}");
-        io::stdout().flush()?;
+        let _ = io::stdout().flush();
 
         // This is now the active Kindle connection for control lines.
-        let write_stream = stream.try_clone()?;
+        let write_stream = match stream.try_clone() {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("clone error for {peer}: {e}");
+                continue;
+            }
+        };
         *current.lock().expect("current lock") = Some(write_stream);
 
-        let mut file = OpenOptions::new()
+        let mut file = match OpenOptions::new()
             .create(true)
             .append(true)
-            .open(&log_path)?;
-
+            .open(&opts.log_path)
+        {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("log open error for {peer}: {e}");
+                continue;
+            }
+        };
         let reader = BufReader::new(&mut stream);
         for line in reader.lines() {
-            let line = line.unwrap_or_default();
+            let line = match line {
+                Ok(line) => line,
+                Err(_) => break, // EOF or read error: client went away.
+            };
             let line = line.trim();
             if line.is_empty() {
                 continue;
             }
             println!("received from {peer}: {line}");
-            io::stdout().flush()?;
+            let _ = io::stdout().flush();
 
             let ts = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
-            writeln!(file, "{ts} {peer} {line}")?;
-            file.flush()?;
-        }
+            // Never let a log write failure tear down the connection.
+            if let Err(error) = writeln!(file, "{ts} {peer} {line}") {
+                eprintln!("log write error: {error}");
+            }
+            let _ = file.flush();
 
-        // Drop the current slot only if it still belongs to this connection,
-        // so a newer accept is not clobbered by an older one finishing late.
+            if opts.forward_url {
+                if let Some(action_id) = line.strip_prefix("event action=").and_then(|s| s.strip_suffix(';')) {
+                    if let Err(error) = forward_url(action_id) {
+                        eprintln!("forward error to Hammerspoon: {error}");
+                    }
+                }
+            }
+        }
         let stale = current
             .lock()
             .expect("current lock")
@@ -141,7 +225,54 @@ fn main() -> io::Result<()> {
         }
 
         println!("disconnected: {peer}");
-        io::stdout().flush()?;
+        let _ = io::stdout().flush();
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+
+
+    #[test]
+    fn parse_options_keeps_backward_compatible_positional_args() {
+        let opts = parse_options(&[
+            "paperspoon".to_string(),
+            "5581".to_string(),
+            "/tmp/paperspoon.log".to_string(),
+        ]);
+        assert_eq!(opts.port, 5581);
+        assert_eq!(opts.log_path, "/tmp/paperspoon.log");
+        assert!(opts.forward_url);
+    }
+
+    #[test]
+    fn parse_options_forward_url_default_on() {
+        let opts = parse_options(&["paperspoon".to_string()]);
+        assert!(opts.forward_url);
+    }
+
+    #[test]
+    fn parse_options_without_forward_url_disables() {
+        let opts = parse_options(&[
+            "paperspoon".to_string(),
+            "--no-forward-url".to_string(),
+        ]);
+        assert!(!opts.forward_url);
+    }
+
+    #[test]
+    fn parse_options_positional_and_forward_url_coexist() {
+        let opts = parse_options(&[
+            "paperspoon".to_string(),
+            "5582".to_string(),
+            "/tmp/x.log".to_string(),
+            "--no-forward-url".to_string(),
+        ]);
+        assert_eq!(opts.port, 5582);
+        assert_eq!(opts.log_path, "/tmp/x.log");
+        assert!(!opts.forward_url);
+    }
 }
