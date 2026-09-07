@@ -145,11 +145,10 @@ device, and only `display` commands enter it.
 
 ### Running PaperSpoon
 
-Build and run the Rust listener (on the Mac):
+From the repository root, build and run the Rust listener on the Mac:
 
 ```sh
-cd tools/paperspoon
-cargo build --release
+cargo build --release --package paperspoon
 ./target/release/paperspoon 5581 /tmp/paperspoon.log
 ```
 
@@ -175,8 +174,7 @@ it runs `open -g hammerspoon://paperpad?action=<id>` once per action.
 Forwarding is on by default; pass `--no-forward-url` to disable it:
 
 ```sh
-cd tools/paperspoon
-cargo build --release
+cargo build --release --package paperspoon
 ./target/release/paperspoon 5581 /tmp/paperspoon.log
 ```
 
@@ -212,7 +210,9 @@ The verified package is `kindle-extension/rust_x11_hello`; its binary is:
 kindle-extension/rust_x11_hello/bin/rust_x11_hello
 ```
 
-`make check` requires the Rust toolchain, Bash, and `jq`. `make build` and `make verify` require Docker. Verification rejects a dynamic interpreter and GLIBC symbol requirements.
+`make check` validates both Rust workspace members and requires the Rust toolchain,
+Bash, and `jq`. `make build` and `make verify` require Docker. Verification
+rejects a dynamic interpreter and GLIBC symbol requirements.
 
 ## Fresh MTP installation
 
