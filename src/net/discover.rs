@@ -20,14 +20,17 @@ pub const PROBE_WINDOW: Duration = Duration::from_millis(500);
 /// Returns the discovered `SocketAddr` (PaperSpoon IP + TCP port) or an
 /// error describing the failure.
 pub fn discover_paperspoon() -> Result<SocketAddr> {
-    discover_paperspoon_to(SocketAddr::from((Ipv4Addr::BROADCAST, DISCOVERY_PORT)))
+    discover_paperspoon_from_to(
+        SocketAddr::from((Ipv4Addr::UNSPECIFIED, CLIENT_PORT)),
+        SocketAddr::from((Ipv4Addr::BROADCAST, DISCOVERY_PORT)),
+    )
 }
 
-/// Core discovery against a specific probe target (broadcast for the real
-/// path, loopback for tests).
-fn discover_paperspoon_to(target: SocketAddr) -> Result<SocketAddr> {
-    let socket = UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, CLIENT_PORT)))
-        .context("discovery bind address=0.0.0.0:5582")?;
+/// Core discovery with explicit bind and probe addresses (fixed broadcast
+/// addresses for the real path, ephemeral loopback addresses for tests).
+fn discover_paperspoon_from_to(bind_addr: SocketAddr, target: SocketAddr) -> Result<SocketAddr> {
+    let socket = UdpSocket::bind(bind_addr)
+        .with_context(|| format!("discovery bind address={bind_addr}"))?;
     socket
         .set_broadcast(true)
         .context("discovery enable broadcast")?;
@@ -36,7 +39,12 @@ fn discover_paperspoon_to(target: SocketAddr) -> Result<SocketAddr> {
         .context("discovery set read timeout")?;
 
     let nonce = fresh_nonce();
-    eprintln!("discovery bind address=0.0.0.0:{CLIENT_PORT}");
+    eprintln!(
+        "discovery bind address={}",
+        socket
+            .local_addr()
+            .context("discovery read local address")?
+    );
 
     let mut responses: Vec<(SocketAddr, u16)> = Vec::new();
     let deadline = Instant::now() + PROBE_COUNT * PROBE_WINDOW;
@@ -119,26 +127,35 @@ mod tests {
         // Real responder socket on an ephemeral loopback port: reads the
         // DISCOVER nonce, replies HERE with TCP port 5581.
         let responder = UdpSocket::bind("127.0.0.1:0").expect("bind responder");
+        responder
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("set responder deadline");
         let responder_port = responder.local_addr().unwrap().port();
-        let responder_thread = std::thread::spawn(move || {
+        let responder_thread = std::thread::spawn(move || -> std::io::Result<()> {
             let mut buffer = [0u8; 256];
-            let (count, source) = responder.recv_from(&mut buffer).expect("recv discover");
-            let datagram = std::str::from_utf8(&buffer[..count]).unwrap();
+            let (count, source) = responder.recv_from(&mut buffer)?;
+            let datagram = std::str::from_utf8(&buffer[..count])
+                .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
             let nonce = datagram
                 .strip_prefix(crate::discovery::DISCOVER_PREFIX)
-                .unwrap()
+                .ok_or_else(|| {
+                    std::io::Error::new(std::io::ErrorKind::InvalidData, "missing discovery prefix")
+                })?
                 .trim_end()
                 .to_string();
             let here = format!("{} {nonce} 5581\n", crate::discovery::HERE_PREFIX);
-            responder
-                .send_to(here.as_bytes(), source)
-                .expect("send here");
+            responder.send_to(here.as_bytes(), source)?;
+            Ok(())
         });
 
-        // Exercise the real client core against the loopback responder.
+        // Exercise the real client core with an ephemeral client port so
+        // parallel test processes cannot collide on the production port.
+        let bind_addr = SocketAddr::from((Ipv4Addr::LOCALHOST, 0));
         let target = SocketAddr::from((Ipv4Addr::LOCALHOST, responder_port));
-        let endpoint = discover_paperspoon_to(target).expect("discover");
-        responder_thread.join().expect("responder thread");
+        let endpoint = discover_paperspoon_from_to(bind_addr, target);
+        let responder_result = responder_thread.join().expect("responder thread panicked");
+        responder_result.expect("responder failed");
+        let endpoint = endpoint.expect("discover");
 
         assert_eq!(endpoint.ip(), Ipv4Addr::LOCALHOST);
         assert_eq!(endpoint.port(), 5581);
