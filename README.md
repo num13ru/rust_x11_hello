@@ -168,7 +168,37 @@ available on this Paperwhite 6 — no maintained USBNetwork package accepts
 the device (see `docs/usbnetwork-pw2-report.md`) — so the USBNetwork
 interface setup and MTP/USBNetwork exclusivity rules do not apply.
 
+### Hammering actions into the Mac (Hammerspoon)
+
+PaperSpoon forwards every received action line to Hammerspoon as a URL event:
+it runs `open -g hammerspoon://paperpad?action=<id>` once per action.
+Forwarding is on by default; pass `--no-forward-url` to disable it:
+
+```sh
+cd tools/paperspoon
+cargo build --release
+./target/release/paperspoon 5581 /tmp/paperspoon.log
+```
+
+The banner now shows `forwarding actions to Hammerspoon via open -g
+hammerspoon://paperpad/...`.
+
+Hammerspoon handles this from `~/.hammerspoon/init.lua` (a working copy lives
+at `tools/hammerspoon/init.example.lua`) via `hs.urlevent.bind("paperpad",
+...)`:
+
+- `media.play_pause`, `media.next`, `media.previous` control the Music app
+  via in-process AppleScript (`hs.osascript`);
+- `terminal.new_window` and `zoom.toggle_mute` dispatch to keyboard
+  shortcuts (`cmd+n`, `cmd+shift+a`);
+- `app.exit` is deliberately a no-op (the Kindle closes its own window);
+- unknown ids raise a notification.
+
+`hs.urlevent` fires exactly once per URL open, so every Kindle tap dispatches
+exactly one action — no sockets to manage, no timers, no replay loops.
+
 ## Host checks and Kindle build
+
 
 ```sh
 make check

@@ -18,7 +18,8 @@ pub mod discover;
 use anyhow::{Context, Result};
 use std::io::{BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// PaperSpoon address: legacy USBNetwork static host. This device (a
@@ -55,8 +56,9 @@ pub enum PaperspoonMsg {
 /// A persistent outbound connection to PaperSpoon with an inbound message
 /// queue drained by the X11 event loop.
 pub struct Paperspoon {
-    stream: Option<TcpStream>,
-    reader: Option<mpsc::Receiver<PaperspoonMsg>>,
+    /// Shared with the reconnector thread; `None` = disconnected.
+    stream: Arc<Mutex<Option<TcpStream>>>,
+    reader: Option<Receiver<PaperspoonMsg>>,
     /// Writer half cloned into the reader thread; kept alive here so writes
     /// from the main thread and reads share one socket.
     _reader_tx: Option<Sender<PaperspoonMsg>>,
@@ -87,7 +89,7 @@ impl Paperspoon {
     /// next activation. Startup failures are not fatal to the X11 loop.
     pub fn disconnected() -> Self {
         Self {
-            stream: None,
+            stream: Arc::new(Mutex::new(None)),
             reader: None,
             _reader_tx: None,
         }
@@ -107,11 +109,24 @@ impl Paperspoon {
         let stream = TcpStream::connect_timeout(&addr, TCP_CONNECT_TIMEOUT)
             .context("failed to connect to PaperSpoon")?;
         let _ = stream.set_nodelay(true);
+
+        // The socket is shared with a reconnector thread. When the reader
+        // hits EOF, it clears the shared slot and wakes the reconnector,
+        // which retries until PaperSpoon is reachable again and swaps in a
+        // fresh socket — proactive auto-reconnect without user input.
+        let shared = Arc::new(Mutex::new(Some(stream)));
         let (tx, rx) = mpsc::channel::<PaperspoonMsg>();
-        let reader_stream = stream
+        let (wake_tx, wake_rx) = mpsc::channel::<()>();
+
+        let reader_stream = shared
+            .lock()
+            .expect("shared stream lock")
+            .as_ref()
+            .expect("connected stream")
             .try_clone()
             .context("failed to clone PaperSpoon stream")?;
         let reader_tx = tx.clone();
+        let reader_wake = wake_tx.clone();
         std::thread::spawn(move || {
             let reader = BufReader::new(reader_stream);
             for line in reader.lines() {
@@ -124,9 +139,63 @@ impl Paperspoon {
                 }
             }
             let _ = reader_tx.send(PaperspoonMsg::Disconnected);
+            let _ = reader_wake.send(());
         });
+
+        // Reconnector: wake on EOF, clear slot, retry connect until success,
+        // install fresh socket + reader, then wait for the next EOF.
+        {
+            let shared = Arc::clone(&shared);
+            let reader_tx = tx.clone();
+            std::thread::spawn(move || {
+                loop {
+                    let _ = wake_rx.recv();
+                    {
+                        *shared.lock().expect("shared stream lock") = None;
+                    }
+                    loop {
+                        match TcpStream::connect_timeout(&addr, TCP_CONNECT_TIMEOUT) {
+                            Ok(new_stream) => {
+                                let _ = new_stream.set_nodelay(true);
+                                {
+                                    let mut guard = shared.lock().expect("shared stream lock");
+                                    *guard = Some(new_stream);
+                                }
+                                let fresh_reader = shared
+                                    .lock()
+                                    .expect("shared stream lock")
+                                    .as_ref()
+                                    .expect("connected stream")
+                                    .try_clone()
+                                    .expect("fresh clone");
+                                let fresh_reader_tx = reader_tx.clone();
+                                let fresh_reader_wake = wake_tx.clone();
+                                std::thread::spawn(move || {
+                                    let reader = BufReader::new(fresh_reader);
+                                    for line in reader.lines() {
+                                        let line = match line {
+                                            Ok(line) => line,
+                                            Err(_) => break,
+                                        };
+                                        if let Some(text) = parse_display_command(&line) {
+                                            let _ =
+                                                fresh_reader_tx.send(PaperspoonMsg::Display(text));
+                                        }
+                                    }
+                                    let _ = fresh_reader_tx.send(PaperspoonMsg::Disconnected);
+                                    let _ = fresh_reader_wake.send(());
+                                });
+                                break;
+                            }
+                            Err(_) => std::thread::sleep(TCP_CONNECT_TIMEOUT),
+                        }
+                    }
+                }
+            });
+        }
+
         Ok(Self {
-            stream: Some(stream),
+            stream: shared,
             reader: Some(rx),
             _reader_tx: Some(tx),
         })
@@ -134,46 +203,39 @@ impl Paperspoon {
 
     /// Send one semantic activation over the persistent connection.
     ///
-    /// If the connection is gone, tries to reconnect once; a PaperSpoon that
-    /// is down costs a bounded connect timeout and the error is logged by the
-    /// caller.
+    /// Writes to the shared stream; if the reconnector has not yet finished
+    /// restoring it, the write fails fast and the caller logs it (the
+    /// reconnector keeps retrying in the background).
     pub fn send_action(&mut self, semantic_id: &str) -> Result<()> {
         let line = format_action_line(semantic_id);
-        if self.stream.is_none() {
-            self.reconnect()?;
-        }
-        let stream = self.stream.as_mut().context("PaperSpoon not connected")?;
-        stream
+        let mut write_stream = {
+            let guard = self.stream.lock().expect("shared stream lock");
+            guard
+                .as_ref()
+                .context("PaperSpoon not connected")?
+                .try_clone()
+                .context("failed to clone PaperSpoon stream")?
+        };
+        write_stream
             .write_all(line.as_bytes())
-            .context("failed to write action to PaperSpoon")
+            .context("failed to write action to PaperSpoon")?;
+        Ok(())
     }
 
     /// Drain any display commands received since the last call.
     ///
     /// Returns the first pending display text, if any. The event loop calls
-    /// this between X11 events; it never blocks.
-    pub fn poll_display(&self) -> Option<String> {
-        self.reader
-            .as_ref()
-            .and_then(|rx| rx.try_recv().ok())
-            .and_then(|msg| match msg {
-                PaperspoonMsg::Display(text) => Some(text),
-                PaperspoonMsg::Disconnected => {
-                    // First poll after disconnect reports it once; the stream
-                    // itself is cleared by reconnect on the next send.
-                    None
-                }
-            })
-    }
-
-    fn reconnect(&mut self) -> Result<()> {
-        let addr = paperspoon_addr()?;
-        // Full connect: a fresh socket also gets a fresh reader thread, so
-        // inbound display commands work after a reconnect too (the original
-        // reconnect created a bare socket with no reader, silently dropping
-        // every PaperSpoon->Kindle control line).
-        *self = Self::connect_to(addr)?;
-        Ok(())
+    /// this between X11 events; it never blocks. `Disconnected` messages are
+    /// consumed here so the reconnector's channel stays empty between cycles.
+    pub fn poll_display(&mut self) -> Option<String> {
+        let rx = self.reader.as_ref()?;
+        loop {
+            match rx.try_recv() {
+                Ok(PaperspoonMsg::Display(text)) => return Some(text),
+                Ok(_) => continue,
+                Err(_) => return None,
+            }
+        }
     }
 }
 
@@ -197,43 +259,59 @@ mod tests {
     }
 
     #[test]
-    fn reconnect_restores_reader_thread() {
+    fn auto_reconnects_when_paperspoon_returns() {
         use std::io::Write;
         use std::net::TcpListener;
         use std::time::Duration;
 
-        // PaperSpoon that is down at launch: the first activation reconnects.
-        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind ephemeral");
-        let addr = listener.local_addr().expect("local addr");
-        // SAFETY: tests run serially; overrides are restored before returning.
-        unsafe {
-            std::env::set_var(COMPANION_HOST_ENV, addr.ip().to_string());
-            std::env::set_var(COMPANION_PORT_ENV, addr.port().to_string());
-        }
-        let mut paperspoon = Paperspoon::disconnected();
-        let reconnect_result = paperspoon.reconnect();
-        unsafe {
-            std::env::remove_var(COMPANION_HOST_ENV);
-            std::env::remove_var(COMPANION_PORT_ENV);
-        }
-        reconnect_result.expect("reconnect");
-
-        let (mut conn, _) = listener.accept().expect("accept");
-        // Sending over the persistent connection must reach a live reader
-        // thread even though the socket was created by reconnect(), not
-        // connect_to(). Without the fix the display text is silently dropped
-        // and poll_display stays None.
-        writeln!(conn, "display hello").expect("write display");
+        // Start a listener (PaperSpoon), connect, then stop it to force EOF.
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let mut paperspoon = Paperspoon::connect_to(addr).expect("connect");
+        let (mut first, _) = listener.accept().expect("accept first");
+        writeln!(first, "display first").expect("write first");
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         loop {
-            if let Some(text) = paperspoon.poll_display() {
-                assert_eq!(text, "hello");
-                return;
+            if paperspoon.poll_display() == Some("first".to_string()) {
+                break;
             }
-            if std::time::Instant::now() >= deadline {
-                panic!("display command not delivered over reconnected socket");
-            }
+            assert!(std::time::Instant::now() < deadline, "no first display");
             std::thread::sleep(Duration::from_millis(10));
         }
+        drop(first);
+        drop(listener); // Force EOF: the reconnector must notice.
+
+        // A new PaperSpoon appears; the reconnector should restore the stream
+        // without any send_action call from us. The reconnector loops forever
+        // retrying `addr` (now free), so rebinding the SAME port and
+        // accepting proves the auto-restore.
+        let listener3 = TcpListener::bind(addr).expect("rebind same port");
+        // Wait for the reconnector to connect to `addr` again.
+        listener3.set_nonblocking(true).expect("nonblocking");
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut reconnected = false;
+        while std::time::Instant::now() < deadline {
+            if let Ok((mut conn, _)) = listener3.accept() {
+                writeln!(conn, "display again").expect("write again");
+                // The reconnector installs a fresh reader; the display text
+                // must be delivered to poll_display.
+                let dl = std::time::Instant::now() + Duration::from_secs(2);
+                loop {
+                    if paperspoon.poll_display() == Some("again".to_string()) {
+                        reconnected = true;
+                        break;
+                    }
+                    if std::time::Instant::now() >= dl {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                if reconnected {
+                    break;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(reconnected, "reconnector did not restore the connection");
     }
 }
