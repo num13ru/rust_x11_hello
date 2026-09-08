@@ -4,9 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = [".", "tools/paperspoon"]
+members = [".", "crates/paper-protocol", "tools/paperspoon"]
 resolver = "3"
 
 [dependencies]
 anyhow = "1"
+paper-protocol = { path = "crates/paper-protocol" }
 x11rb = "0.13"

@@ -34,6 +34,8 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use paper_protocol::parse_action_line;
+
 mod discovery;
 
 /// Default TCP port. Must match `rust_x11_hello`'s `COMPANION_PORT`.
@@ -210,9 +212,7 @@ fn main() -> io::Result<()> {
             let _ = file.flush();
 
             if opts.forward_url
-                && let Some(action_id) = line
-                    .strip_prefix("event action=")
-                    .and_then(|s| s.strip_suffix(';'))
+                && let Some(action_id) = parse_action_line(line)
                 && let Err(error) = forward_url(action_id)
             {
                 eprintln!("forward error to Hammerspoon: {error}");
