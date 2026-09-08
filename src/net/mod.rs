@@ -20,7 +20,7 @@ pub mod discover;
 use crate::config::PaperpadConfig;
 use anyhow::{Context, Result};
 use connection::ConnectionState;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -29,6 +29,9 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 const TCP_CONNECT_TIMEOUT: Duration = Duration::from_millis(150);
+/// Maximum complete inbound TCP line, including its newline when present.
+/// Status rendering policy remains separate; this limit only bounds framing.
+const MAX_INBOUND_LINE_BYTES: usize = 8 * 1024;
 
 /// Messages a PaperSpoon reader thread can deliver to the event loop.
 #[derive(Debug)]
@@ -57,12 +60,8 @@ fn spawn_reader(
     wake_tx: Sender<()>,
 ) -> JoinHandle<()> {
     std::thread::spawn(move || {
-        let reader = BufReader::new(stream);
-        for line in reader.lines() {
-            let line = match line {
-                Ok(line) => line,
-                Err(_) => break,
-            };
+        let mut reader = BufReader::new(stream);
+        while let Ok(Some(line)) = read_inbound_line(&mut reader) {
             if let Some(text) = parse_display_command(&line) {
                 let _ = message_tx.send(PaperspoonMsg::Display(text));
             }
@@ -70,6 +69,31 @@ fn spawn_reader(
         let _ = message_tx.send(PaperspoonMsg::Disconnected);
         let _ = wake_tx.send(());
     })
+}
+
+fn read_inbound_line<R: BufRead>(reader: &mut R) -> io::Result<Option<String>> {
+    let mut bytes = Vec::new();
+    reader
+        .take((MAX_INBOUND_LINE_BYTES + 1) as u64)
+        .read_until(b'\n', &mut bytes)?;
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+    if bytes.len() > MAX_INBOUND_LINE_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "PaperSpoon inbound line exceeds 8192 bytes",
+        ));
+    }
+    if bytes.last() == Some(&b'\n') {
+        bytes.pop();
+        if bytes.last() == Some(&b'\r') {
+            bytes.pop();
+        }
+    }
+    String::from_utf8(bytes)
+        .map(Some)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
 }
 
 /// Resolve the PaperSpoon address.
@@ -257,6 +281,7 @@ impl Drop for Paperspoon {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
 
     fn accept_before(listener: &std::net::TcpListener, timeout: Duration) -> TcpStream {
         listener.set_nonblocking(true).expect("set nonblocking");
@@ -277,6 +302,85 @@ mod tests {
     fn explicit_host_resolves_directly() {
         let addr = paperspoon_addr(Some("127.0.0.1"), 6000).expect("explicit host must resolve");
         assert_eq!(addr, SocketAddr::from(([127, 0, 0, 1], 6000)));
+    }
+
+    #[test]
+    fn inbound_line_reader_preserves_lines_semantics() {
+        let mut input = Cursor::new(b"display first\r\ndisplay second\nfinal".to_vec());
+        assert_eq!(
+            read_inbound_line(&mut input).expect("read CRLF line"),
+            Some("display first".to_string())
+        );
+        assert_eq!(
+            read_inbound_line(&mut input).expect("read LF line"),
+            Some("display second".to_string())
+        );
+        assert_eq!(
+            read_inbound_line(&mut input).expect("read final line"),
+            Some("final".to_string())
+        );
+        assert_eq!(read_inbound_line(&mut input).expect("read EOF"), None);
+    }
+
+    #[test]
+    fn inbound_line_reader_accepts_exact_limit() {
+        let mut input = Cursor::new(vec![b'x'; MAX_INBOUND_LINE_BYTES]);
+        let line = read_inbound_line(&mut input)
+            .expect("read bounded line")
+            .expect("line");
+        assert_eq!(line.len(), MAX_INBOUND_LINE_BYTES);
+    }
+
+    #[test]
+    fn inbound_line_reader_rejects_oversize_and_invalid_utf8() {
+        let mut oversized = Cursor::new(vec![b'x'; MAX_INBOUND_LINE_BYTES + 1]);
+        assert_eq!(
+            read_inbound_line(&mut oversized)
+                .expect_err("oversized line must fail")
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+
+        let mut invalid_utf8 = Cursor::new(vec![0xff, b'\n']);
+        assert_eq!(
+            read_inbound_line(&mut invalid_utf8)
+                .expect_err("invalid UTF-8 must fail")
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn oversized_inbound_line_reconnects_without_peer_eof() {
+        use std::io::Write;
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let mut paperspoon = Paperspoon::connect_to(addr).expect("connect");
+        let mut first_peer = accept_before(&listener, Duration::from_secs(2));
+
+        let mut oversized = vec![b'x'; MAX_INBOUND_LINE_BYTES + 1];
+        oversized.push(b'\n');
+        first_peer
+            .write_all(&oversized)
+            .expect("write oversized line");
+
+        // Keep the original peer open: a second accept proves the reader
+        // rejected the frame and woke the reconnector instead of seeing EOF.
+        let mut replacement_peer = accept_before(&listener, Duration::from_secs(5));
+        writeln!(replacement_peer, "display recovered").expect("write recovered display");
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            if paperspoon.poll_display() == Some("recovered".to_string()) {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "no display after oversized-line reconnect"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[test]
