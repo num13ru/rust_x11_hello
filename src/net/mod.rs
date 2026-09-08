@@ -17,6 +17,7 @@ use paper_protocol::{format_action_line, parse_display_command};
 mod connection;
 pub mod discover;
 
+use crate::config::PaperpadConfig;
 use anyhow::{Context, Result};
 use connection::ConnectionState;
 use std::io::{BufRead, BufReader, Write};
@@ -27,28 +28,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-/// PaperSpoon address: legacy USBNetwork static host. This device (a
-/// Paperwhite 6) cannot run USBNetwork — no maintained package accepts it
-/// — so runs set
-/// `RUST_X11_HELLO_COMPANION` to the Mac's LAN address over Wi-Fi.
-pub const PAPERSPOON_PORT: u16 = paper_protocol::DEFAULT_TCP_PORT;
-
-/// Environment override for the PaperSpoon host, required for
-/// non-USBNetwork transports (this Kindle runs the Wi-Fi peer's address,
-/// because it cannot run USBNetwork). The `COMPANION` name is retained for
-/// compatibility with existing KUAL launch environments.
-const COMPANION_HOST_ENV: &str = "RUST_X11_HELLO_COMPANION";
-/// Environment override for the PaperSpoon port (defaults to
-/// [`PAPERSPOON_PORT`]); used by tests to avoid clashing with other
-/// listeners.
-const COMPANION_PORT_ENV: &str = "RUST_X11_HELLO_COMPANION_PORT";
-
 const TCP_CONNECT_TIMEOUT: Duration = Duration::from_millis(150);
-fn paperspoon_port(value: Option<&str>) -> u16 {
-    value
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(PAPERSPOON_PORT)
-}
 
 /// Messages a PaperSpoon reader thread can deliver to the event loop.
 #[derive(Debug)]
@@ -127,10 +107,8 @@ impl Paperspoon {
     }
 
     /// Connect to PaperSpoon and start the reader thread.
-    pub fn connect() -> Result<Self> {
-        let host = std::env::var(COMPANION_HOST_ENV).ok();
-        let port = std::env::var(COMPANION_PORT_ENV).ok();
-        let addr = paperspoon_addr(host.as_deref(), paperspoon_port(port.as_deref()))?;
+    pub fn connect(config: &PaperpadConfig) -> Result<Self> {
+        let addr = paperspoon_addr(config.host(), config.port())?;
         Self::connect_to(addr)
     }
 
@@ -293,13 +271,6 @@ mod tests {
                 Err(error) => panic!("accept failed: {error}"),
             }
         }
-    }
-
-    #[test]
-    fn paperspoon_port_has_a_default() {
-        assert_eq!(paperspoon_port(None), PAPERSPOON_PORT);
-        assert_eq!(paperspoon_port(Some("not-a-port")), PAPERSPOON_PORT);
-        assert_eq!(paperspoon_port(Some("6000")), 6000);
     }
 
     #[test]
