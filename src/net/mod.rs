@@ -12,7 +12,7 @@
 //! retries the connect, and a disconnected PaperSpoon never breaks the X11
 //! event loop or the on-device activation log.
 
-use crate::proto::{format_action_line, parse_display_command};
+use paper_protocol::{format_action_line, parse_display_command};
 
 pub mod discover;
 use anyhow::{Context, Result};

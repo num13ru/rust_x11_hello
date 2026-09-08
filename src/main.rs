@@ -13,7 +13,6 @@ use x11::events::{EventLoopExit, event_loop};
 
 mod discovery;
 mod net;
-mod proto;
 mod ui;
 mod x11;
 
