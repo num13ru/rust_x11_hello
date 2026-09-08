@@ -11,6 +11,7 @@ use crate::net::Paperspoon;
 use crate::ui::button::{PointerEvent, PointerEventKind};
 use crate::ui::geometry::Point;
 use anyhow::{Context, Result, anyhow};
+use std::time::Duration;
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
 use x11rb::protocol::xproto::{ButtonPressEvent, ConnectionExt, Gcontext, Window};
@@ -20,6 +21,8 @@ use x11rb::rust_connection::RustConnection;
 pub enum EventLoopExit {
     WindowDestroyed,
 }
+
+const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 /// Run the event loop until the window is destroyed or the connection fails.
 pub fn event_loop(
@@ -42,9 +45,13 @@ pub fn event_loop(
             draw_app(conn, win, gc, app.set_status_text(text))
                 .context("failed to redraw status after PaperSpoon command")?;
         }
-        let event = conn
-            .wait_for_event()
-            .context("X11 connection failed while waiting for an event")?;
+        let Some(event) = conn
+            .poll_for_event()
+            .context("X11 connection failed while waiting for an event")?
+        else {
+            std::thread::sleep(EVENT_POLL_INTERVAL);
+            continue;
+        };
 
         match event {
             Event::Expose(event) if event.window == win && event.count == 0 => {
