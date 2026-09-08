@@ -11,9 +11,12 @@ pub(super) enum ConnectionState {
 
 #[derive(Debug)]
 pub(super) struct ConnectionStream {
-    token: Arc<()>,
+    token: ConnectionToken,
     stream: TcpStream,
 }
+
+#[derive(Clone, Debug)]
+pub(super) struct ConnectionToken(Arc<()>);
 
 impl ConnectionStream {
     pub(super) fn stream_mut(&mut self) -> &mut TcpStream {
@@ -37,12 +40,34 @@ impl ConnectionState {
         }
     }
 
+    pub(super) fn current_token(&self) -> Result<ConnectionToken> {
+        let Self::Connected { token, .. } = self else {
+            return Err(anyhow!("PaperSpoon not connected"));
+        };
+        Ok(ConnectionToken(Arc::clone(token)))
+    }
+
     pub(super) fn clone_stream(&self) -> Result<ConnectionStream> {
         let Self::Connected { token, stream } = self else {
             return Err(anyhow!("PaperSpoon not connected"));
         };
         Ok(ConnectionStream {
-            token: Arc::clone(token),
+            token: ConnectionToken(Arc::clone(token)),
+            stream: stream
+                .try_clone()
+                .context("failed to clone PaperSpoon stream")?,
+        })
+    }
+
+    pub(super) fn clone_stream_for(&self, candidate: &ConnectionToken) -> Result<ConnectionStream> {
+        let Self::Connected { token, stream } = self else {
+            return Err(anyhow!("PaperSpoon not connected"));
+        };
+        if !Arc::ptr_eq(token, &candidate.0) {
+            return Err(anyhow!("PaperSpoon connection changed before action write"));
+        }
+        Ok(ConnectionStream {
+            token: candidate.clone(),
             stream: stream
                 .try_clone()
                 .context("failed to clone PaperSpoon stream")?,
@@ -58,7 +83,7 @@ impl ConnectionState {
         let Self::Connected { token, .. } = self else {
             return false;
         };
-        if !Arc::ptr_eq(token, &candidate.token) {
+        if !Arc::ptr_eq(token, &candidate.token.0) {
             return false;
         }
         self.disconnect();
@@ -93,6 +118,7 @@ mod tests {
         let state = ConnectionState::disconnected();
         let error = state.clone_stream().expect_err("must be disconnected");
         assert!(error.to_string().contains("PaperSpoon not connected"));
+        state.current_token().expect_err("must have no token");
     }
 
     #[test]
@@ -148,9 +174,17 @@ mod tests {
             .expect("set replacement peer timeout");
 
         let mut state = ConnectionState::connected(first);
+        let stale_token = state.current_token().expect("first token");
         let stale = state.clone_stream().expect("clone first stream");
         state.reconnect(replacement);
 
+        assert!(
+            state
+                .clone_stream_for(&stale_token)
+                .expect_err("stale token must not clone replacement")
+                .to_string()
+                .contains("connection changed")
+        );
         assert!(!state.disconnect_if_current(&stale));
         let mut current = state.clone_stream().expect("clone replacement");
         current

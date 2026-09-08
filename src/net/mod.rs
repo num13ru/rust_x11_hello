@@ -2,8 +2,8 @@
 //! control.
 //!
 //! The Kindle connects out to PaperSpoon once at launch and keeps the
-//! connection for the run. Each activation writes one newline-terminated
-//! `event action=<semantic-id>;` line over the connection. A reader thread
+//! connection for the run. Each activation queues one newline-terminated
+//! `event action=<semantic-id>;` line for a bounded writer. A reader thread
 //! consumes inbound PaperSpoon lines (control commands such as
 //! `display <text>`) and publishes the latest into a mailbox the X11 event loop
 //! drains between events and on a bounded idle poll interval.
@@ -19,17 +19,19 @@ pub mod discover;
 
 use crate::config::PaperpadConfig;
 use anyhow::{Context, Result};
-use connection::ConnectionState;
+use connection::{ConnectionState, ConnectionToken};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
 const TCP_CONNECT_TIMEOUT: Duration = Duration::from_millis(150);
 const TCP_WRITE_TIMEOUT: Duration = Duration::from_millis(150);
+const ACTION_QUEUE_CAPACITY: usize = 16;
+const MAX_ACTION_LINE_BYTES: usize = 256;
 /// Maximum complete inbound TCP line, including its newline when present.
 /// Status rendering policy remains separate; this limit only bounds framing.
 const MAX_INBOUND_LINE_BYTES: usize = 8 * 1024;
@@ -62,9 +64,61 @@ pub struct Paperspoon {
     /// Shared with the reconnector thread; owns the active socket.
     connection: Arc<Mutex<ConnectionState>>,
     display: DisplayMailbox,
+    action_tx: Option<SyncSender<QueuedAction>>,
     wake_tx: Option<Sender<()>>,
     stopping: Arc<AtomicBool>,
+    writer: Option<JoinHandle<()>>,
     reconnector: Option<JoinHandle<()>>,
+}
+
+struct QueuedAction {
+    connection: ConnectionToken,
+    line: String,
+}
+
+fn write_action(connection: &Arc<Mutex<ConnectionState>>, action: &QueuedAction) -> Result<()> {
+    let mut write_stream = {
+        let guard = connection.lock().expect("shared stream lock");
+        guard.clone_stream_for(&action.connection)?
+    };
+    if let Err(error) = write_stream.stream_mut().write_all(action.line.as_bytes()) {
+        connection
+            .lock()
+            .expect("shared stream lock")
+            .disconnect_if_current(&write_stream);
+        return Err(error).context("failed to write action to PaperSpoon");
+    }
+    Ok(())
+}
+
+fn spawn_writer(
+    connection: Arc<Mutex<ConnectionState>>,
+    action_rx: Receiver<QueuedAction>,
+    stopping: Arc<AtomicBool>,
+) -> JoinHandle<()> {
+    std::thread::spawn(move || {
+        while let Ok(action) = action_rx.recv() {
+            if stopping.load(Ordering::Acquire) {
+                break;
+            }
+            match write_action(&connection, &action) {
+                Err(error) if !stopping.load(Ordering::Acquire) => {
+                    eprintln!("transport error: {error:#}");
+                }
+                _ => {}
+            }
+        }
+    })
+}
+
+fn enqueue_action<T>(action_tx: &SyncSender<T>, action: T) -> Result<()> {
+    match action_tx.try_send(action) {
+        Ok(()) => Ok(()),
+        Err(TrySendError::Full(_)) => Err(anyhow::anyhow!("PaperSpoon action queue full")),
+        Err(TrySendError::Disconnected(_)) => {
+            Err(anyhow::anyhow!("PaperSpoon action worker stopped"))
+        }
+    }
 }
 
 fn spawn_reader(stream: TcpStream, display: DisplayMailbox, wake_tx: Sender<()>) -> JoinHandle<()> {
@@ -131,8 +185,10 @@ impl Paperspoon {
         Self {
             connection: Arc::new(Mutex::new(ConnectionState::disconnected())),
             display: DisplayMailbox::default(),
+            action_tx: None,
             wake_tx: None,
             stopping: Arc::new(AtomicBool::new(false)),
+            writer: None,
             reconnector: None,
         }
     }
@@ -158,6 +214,7 @@ impl Paperspoon {
         // fresh socket — proactive auto-reconnect without user input.
         let connection = Arc::new(Mutex::new(ConnectionState::connected(stream)));
         let display = DisplayMailbox::default();
+        let (action_tx, action_rx) = mpsc::sync_channel(ACTION_QUEUE_CAPACITY);
         let (wake_tx, wake_rx) = mpsc::channel::<()>();
 
         let reader_stream = connection
@@ -171,6 +228,7 @@ impl Paperspoon {
         // install fresh socket + reader, then wait for the next EOF.
         let worker_connection = Arc::clone(&connection);
         let stopping = Arc::new(AtomicBool::new(false));
+        let writer = spawn_writer(Arc::clone(&connection), action_rx, Arc::clone(&stopping));
         let worker_stopping = Arc::clone(&stopping);
         let worker_display = display.clone();
         let worker_wake_tx = wake_tx.clone();
@@ -227,31 +285,34 @@ impl Paperspoon {
         Ok(Self {
             connection,
             display,
+            action_tx: Some(action_tx),
             wake_tx: Some(wake_tx),
             stopping,
+            writer: Some(writer),
             reconnector: Some(reconnector),
         })
     }
 
-    /// Send one semantic activation over the persistent connection.
+    /// Queue one semantic activation for ordered background delivery.
     ///
-    /// Writes to the shared stream; if the reconnector has not yet finished
-    /// restoring it, the write fails fast and the caller logs it (the
-    /// reconnector keeps retrying in the background).
+    /// Disconnected, oversized, full-queue, and stopped-worker states fail
+    /// immediately. Accepted actions are not retried, and shutdown discards
+    /// actions the writer has not started.
     pub fn send_action(&mut self, semantic_id: &str) -> Result<()> {
         let line = format_action_line(semantic_id);
-        let mut write_stream = {
+        anyhow::ensure!(
+            line.len() <= MAX_ACTION_LINE_BYTES,
+            "PaperSpoon action line exceeds {MAX_ACTION_LINE_BYTES} bytes"
+        );
+        let connection = {
             let guard = self.connection.lock().expect("shared stream lock");
-            guard.clone_stream()?
+            guard.current_token()?
         };
-        if let Err(error) = write_stream.stream_mut().write_all(line.as_bytes()) {
-            self.connection
-                .lock()
-                .expect("shared stream lock")
-                .disconnect_if_current(&write_stream);
-            return Err(error).context("failed to write action to PaperSpoon");
-        }
-        Ok(())
+        let action_tx = self
+            .action_tx
+            .as_ref()
+            .context("PaperSpoon action worker not running")?;
+        enqueue_action(action_tx, QueuedAction { connection, line })
     }
 
     /// Drain any display commands received since the last call.
@@ -274,6 +335,10 @@ impl Drop for Paperspoon {
         if let Some(wake_tx) = self.wake_tx.take() {
             let _ = wake_tx.send(());
         }
+        self.action_tx.take();
+        if let Some(writer) = self.writer.take() {
+            let _ = writer.join();
+        }
         if let Some(reconnector) = self.reconnector.take() {
             let _ = reconnector.join();
         }
@@ -290,7 +355,10 @@ mod tests {
         let deadline = std::time::Instant::now() + timeout;
         loop {
             match listener.accept() {
-                Ok((stream, _)) => return stream,
+                Ok((stream, _)) => {
+                    stream.set_nonblocking(false).expect("set peer blocking");
+                    return stream;
+                }
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                     assert!(std::time::Instant::now() < deadline, "accept timed out");
                     std::thread::sleep(Duration::from_millis(10));
@@ -327,6 +395,75 @@ mod tests {
         assert_eq!(
             transport_write_timeout(&paperspoon),
             Some(TCP_WRITE_TIMEOUT)
+        );
+    }
+
+    #[test]
+    fn writer_delivers_queued_action_line() {
+        use std::io::BufRead as _;
+
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind");
+        let mut paperspoon =
+            Paperspoon::connect_to(listener.local_addr().expect("addr")).expect("connect");
+        let peer = accept_before(&listener, Duration::from_secs(2));
+        peer.set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("set peer timeout");
+
+        paperspoon
+            .send_action("media.play_pause")
+            .expect("queue action");
+        paperspoon
+            .send_action("tmux.work")
+            .expect("queue second action");
+        let mut line = String::new();
+        let mut reader = BufReader::new(peer);
+        reader.read_line(&mut line).expect("read queued action");
+        assert_eq!(line, "event action=media.play_pause;\n");
+        line.clear();
+        reader
+            .read_line(&mut line)
+            .expect("read second queued action");
+        assert_eq!(line, "event action=tmux.work;\n");
+    }
+
+    #[test]
+    fn action_enqueue_rejects_full_and_stopped_queue() {
+        let (tx, rx) = mpsc::sync_channel(1);
+        enqueue_action(&tx, "first".to_string()).expect("fill queue");
+        assert!(
+            enqueue_action(&tx, "second".to_string())
+                .expect_err("full queue must reject")
+                .to_string()
+                .contains("action queue full")
+        );
+
+        drop(rx);
+        assert!(
+            enqueue_action(&tx, "third".to_string())
+                .expect_err("stopped queue must reject")
+                .to_string()
+                .contains("action worker stopped")
+        );
+    }
+
+    #[test]
+    fn send_action_rejects_disconnected_and_overlong_input() {
+        let mut paperspoon = Paperspoon::disconnected();
+        assert!(
+            paperspoon
+                .send_action("media.play_pause")
+                .expect_err("disconnected send must fail")
+                .to_string()
+                .contains("PaperSpoon not connected")
+        );
+
+        let overlong = "x".repeat(MAX_ACTION_LINE_BYTES);
+        assert!(
+            paperspoon
+                .send_action(&overlong)
+                .expect_err("overlong action must fail")
+                .to_string()
+                .contains("action line exceeds")
         );
     }
 
