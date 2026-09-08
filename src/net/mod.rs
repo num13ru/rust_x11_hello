@@ -14,8 +14,11 @@
 
 use paper_protocol::{format_action_line, parse_display_command};
 
+mod connection;
 pub mod discover;
+
 use anyhow::{Context, Result};
+use connection::ConnectionState;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -57,8 +60,8 @@ pub enum PaperspoonMsg {
 /// A persistent outbound connection to PaperSpoon with an inbound message
 /// queue drained by the X11 event loop.
 pub struct Paperspoon {
-    /// Shared with the reconnector thread; `None` = disconnected.
-    stream: Arc<Mutex<Option<TcpStream>>>,
+    /// Shared with the reconnector thread; owns the active socket.
+    connection: Arc<Mutex<ConnectionState>>,
     reader: Option<Receiver<PaperspoonMsg>>,
     /// Writer half cloned into the reader thread; kept alive here so writes
     /// from the main thread and reads share one socket.
@@ -114,7 +117,7 @@ impl Paperspoon {
     /// next activation. Startup failures are not fatal to the X11 loop.
     pub fn disconnected() -> Self {
         Self {
-            stream: Arc::new(Mutex::new(None)),
+            connection: Arc::new(Mutex::new(ConnectionState::disconnected())),
             reader: None,
             _reader_tx: None,
             wake_tx: None,
@@ -144,22 +147,19 @@ impl Paperspoon {
         // hits EOF, it clears the shared slot and wakes the reconnector,
         // which retries until PaperSpoon is reachable again and swaps in a
         // fresh socket — proactive auto-reconnect without user input.
-        let shared = Arc::new(Mutex::new(Some(stream)));
+        let connection = Arc::new(Mutex::new(ConnectionState::connected(stream)));
         let (tx, rx) = mpsc::channel::<PaperspoonMsg>();
         let (wake_tx, wake_rx) = mpsc::channel::<()>();
 
-        let reader_stream = shared
+        let reader_stream = connection
             .lock()
             .expect("shared stream lock")
-            .as_ref()
-            .expect("connected stream")
-            .try_clone()
-            .context("failed to clone PaperSpoon stream")?;
+            .clone_stream()?;
         let reader_handle = spawn_reader(reader_stream, tx.clone(), wake_tx.clone());
 
         // Reconnector: wake on EOF, clear slot, retry connect until success,
         // install fresh socket + reader, then wait for the next EOF.
-        let worker_shared = Arc::clone(&shared);
+        let worker_connection = Arc::clone(&connection);
         let stopping = Arc::new(AtomicBool::new(false));
         let worker_stopping = Arc::clone(&stopping);
         let worker_tx = tx.clone();
@@ -173,12 +173,10 @@ impl Paperspoon {
                 if let Some(reader) = active_reader.take() {
                     let _ = reader.join();
                 }
-                {
-                    let mut guard = worker_shared.lock().expect("shared stream lock");
-                    if let Some(stream) = guard.take() {
-                        let _ = stream.shutdown(Shutdown::Both);
-                    }
-                }
+                worker_connection
+                    .lock()
+                    .expect("shared stream lock")
+                    .disconnect();
                 if worker_stopping.load(Ordering::Acquire) {
                     break;
                 }
@@ -191,12 +189,13 @@ impl Paperspoon {
                             let _ = new_stream.set_nodelay(true);
                             let fresh_reader = new_stream.try_clone().expect("fresh clone");
                             {
-                                let mut guard = worker_shared.lock().expect("shared stream lock");
+                                let mut guard =
+                                    worker_connection.lock().expect("shared stream lock");
                                 if worker_stopping.load(Ordering::Acquire) {
                                     let _ = new_stream.shutdown(Shutdown::Both);
                                     break 'reconnector;
                                 }
-                                *guard = Some(new_stream);
+                                guard.reconnect(new_stream);
                             }
                             active_reader = Some(spawn_reader(
                                 fresh_reader,
@@ -212,7 +211,7 @@ impl Paperspoon {
         });
 
         Ok(Self {
-            stream: shared,
+            connection,
             reader: Some(rx),
             _reader_tx: Some(tx),
             wake_tx: Some(wake_tx),
@@ -229,12 +228,8 @@ impl Paperspoon {
     pub fn send_action(&mut self, semantic_id: &str) -> Result<()> {
         let line = format_action_line(semantic_id);
         let mut write_stream = {
-            let guard = self.stream.lock().expect("shared stream lock");
-            guard
-                .as_ref()
-                .context("PaperSpoon not connected")?
-                .try_clone()
-                .context("failed to clone PaperSpoon stream")?
+            let guard = self.connection.lock().expect("shared stream lock");
+            guard.clone_stream()?
         };
         write_stream
             .write_all(line.as_bytes())
@@ -263,9 +258,10 @@ impl Drop for Paperspoon {
     fn drop(&mut self) {
         self.stopping.store(true, Ordering::Release);
 
-        if let Some(stream) = self.stream.lock().expect("shared stream lock").take() {
-            let _ = stream.shutdown(Shutdown::Both);
-        }
+        self.connection
+            .lock()
+            .expect("shared stream lock")
+            .disconnect();
         if let Some(wake_tx) = self.wake_tx.take() {
             let _ = wake_tx.send(());
         }
