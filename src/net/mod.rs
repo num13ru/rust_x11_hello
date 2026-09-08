@@ -6,11 +6,11 @@
 //! `event action=<semantic-id>;` line over the connection. A reader thread
 //! consumes inbound PaperSpoon lines (control commands such as
 //! `display <text>`) and pushes them into a channel the X11 event loop
-//! drains between events, so the loop is never blocked on the network.
+//! drains between events and on a bounded idle poll interval.
 //!
-//! If the connection drops, the state goes disconnected, the next activation
-//! retries the connect, and a disconnected PaperSpoon never breaks the X11
-//! event loop or the on-device activation log.
+//! If an established connection drops, the background reconnector retries the
+//! same endpoint. A startup connection failure remains disconnected, but never
+//! breaks the X11 event loop or the on-device activation log.
 
 use paper_protocol::{format_action_line, parse_display_command};
 
@@ -93,8 +93,8 @@ fn paperspoon_addr(host: Option<&str>, port: u16) -> Result<SocketAddr> {
 }
 
 impl Paperspoon {
-    /// Create a disconnected PaperSpoon that will attempt to connect on the
-    /// next activation. Startup failures are not fatal to the X11 loop.
+    /// Create a disconnected PaperSpoon without a reconnect worker.
+    /// Startup failures and later sends remain non-fatal to the X11 loop.
     pub fn disconnected() -> Self {
         Self {
             connection: Arc::new(Mutex::new(ConnectionState::disconnected())),
