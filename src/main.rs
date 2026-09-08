@@ -12,6 +12,7 @@ use x11::display;
 use x11::events::{EventLoopExit, event_loop};
 
 mod app;
+mod config;
 mod discovery;
 mod net;
 mod ui;
@@ -45,7 +46,8 @@ fn run() -> Result<()> {
         size.1
     );
 
-    let mut paperspoon = match net::Paperspoon::connect() {
+    let paperpad_config = config::PaperpadConfig::from_env();
+    let mut paperspoon = match net::Paperspoon::connect(&paperpad_config) {
         Ok(paperspoon) => {
             eprintln!("transport: connected to PaperSpoon");
             paperspoon
