@@ -39,7 +39,7 @@ use paper_protocol::parse_action_line;
 mod discovery;
 
 /// Default TCP port. Must match `rust_x11_hello`'s `COMPANION_PORT`.
-const DEFAULT_PORT: u16 = 5581;
+const DEFAULT_PORT: u16 = paper_protocol::DEFAULT_TCP_PORT;
 /// Default log file name for received activation lines.
 const DEFAULT_LOG_FILE: &str = "paperspoon.log";
 /// Whether to forward actions to Hammerspoon via `open -g hammerspoon://`.

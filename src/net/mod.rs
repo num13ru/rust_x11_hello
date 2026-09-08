@@ -28,7 +28,7 @@ use std::time::Duration;
 /// Paperwhite 6) cannot run USBNetwork — no maintained package accepts it
 /// — so runs set
 /// `RUST_X11_HELLO_COMPANION` to the Mac's LAN address over Wi-Fi.
-pub const PAPERSPOON_PORT: u16 = 5581;
+pub const PAPERSPOON_PORT: u16 = paper_protocol::DEFAULT_TCP_PORT;
 
 /// Environment override for the PaperSpoon host, required for
 /// non-USBNetwork transports (this Kindle runs the Wi-Fi peer's address,
