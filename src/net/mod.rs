@@ -29,9 +29,17 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 const TCP_CONNECT_TIMEOUT: Duration = Duration::from_millis(150);
+const TCP_WRITE_TIMEOUT: Duration = Duration::from_millis(150);
 /// Maximum complete inbound TCP line, including its newline when present.
 /// Status rendering policy remains separate; this limit only bounds framing.
 const MAX_INBOUND_LINE_BYTES: usize = 8 * 1024;
+
+fn configure_stream(stream: &TcpStream) -> Result<()> {
+    let _ = stream.set_nodelay(true);
+    stream
+        .set_write_timeout(Some(TCP_WRITE_TIMEOUT))
+        .context("failed to set PaperSpoon write timeout")
+}
 
 #[derive(Clone, Default)]
 struct DisplayMailbox {
@@ -142,7 +150,7 @@ impl Paperspoon {
     pub(crate) fn connect_to(addr: SocketAddr) -> Result<Self> {
         let stream = TcpStream::connect_timeout(&addr, TCP_CONNECT_TIMEOUT)
             .context("failed to connect to PaperSpoon")?;
-        let _ = stream.set_nodelay(true);
+        configure_stream(&stream)?;
 
         // The socket is shared with a reconnector thread. When the reader
         // hits EOF, it clears the shared slot and wakes the reconnector,
@@ -188,7 +196,11 @@ impl Paperspoon {
                     }
                     match TcpStream::connect_timeout(&addr, TCP_CONNECT_TIMEOUT) {
                         Ok(new_stream) => {
-                            let _ = new_stream.set_nodelay(true);
+                            if configure_stream(&new_stream).is_err() {
+                                let _ = new_stream.shutdown(Shutdown::Both);
+                                std::thread::sleep(TCP_CONNECT_TIMEOUT);
+                                continue;
+                            }
                             let fresh_reader = new_stream.try_clone().expect("fresh clone");
                             {
                                 let mut guard =
@@ -288,10 +300,34 @@ mod tests {
         }
     }
 
+    fn transport_write_timeout(paperspoon: &Paperspoon) -> Option<Duration> {
+        paperspoon
+            .connection
+            .lock()
+            .expect("shared stream lock")
+            .clone_stream()
+            .expect("clone configured stream")
+            .into_stream()
+            .write_timeout()
+            .expect("read write timeout")
+    }
+
     #[test]
     fn explicit_host_resolves_directly() {
         let addr = paperspoon_addr(Some("127.0.0.1"), 6000).expect("explicit host must resolve");
         assert_eq!(addr, SocketAddr::from(([127, 0, 0, 1], 6000)));
+    }
+
+    #[test]
+    fn connected_transport_has_bounded_write_timeout() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind");
+        let paperspoon =
+            Paperspoon::connect_to(listener.local_addr().expect("addr")).expect("connect");
+        let _peer = accept_before(&listener, Duration::from_secs(2));
+        assert_eq!(
+            transport_write_timeout(&paperspoon),
+            Some(TCP_WRITE_TIMEOUT)
+        );
     }
 
     #[test]
@@ -426,6 +462,10 @@ mod tests {
         }
 
         // Drop must stop and join the reader even while its peer remains idle.
+        assert_eq!(
+            transport_write_timeout(&paperspoon),
+            Some(TCP_WRITE_TIMEOUT)
+        );
         reconnected_peer
             .set_read_timeout(Some(Duration::from_secs(2)))
             .expect("set peer deadline");
