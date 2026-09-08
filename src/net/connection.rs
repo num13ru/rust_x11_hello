@@ -2,10 +2,27 @@
 
 use anyhow::{Context, Result, anyhow};
 use std::net::{Shutdown, TcpStream};
+use std::sync::Arc;
 
 pub(super) enum ConnectionState {
     Disconnected,
-    Connected(TcpStream),
+    Connected { token: Arc<()>, stream: TcpStream },
+}
+
+#[derive(Debug)]
+pub(super) struct ConnectionStream {
+    token: Arc<()>,
+    stream: TcpStream,
+}
+
+impl ConnectionStream {
+    pub(super) fn stream_mut(&mut self) -> &mut TcpStream {
+        &mut self.stream
+    }
+
+    pub(super) fn into_stream(self) -> TcpStream {
+        self.stream
+    }
 }
 
 impl ConnectionState {
@@ -14,26 +31,43 @@ impl ConnectionState {
     }
 
     pub(super) fn connected(stream: TcpStream) -> Self {
-        Self::Connected(stream)
+        Self::Connected {
+            token: Arc::new(()),
+            stream,
+        }
     }
 
-    pub(super) fn clone_stream(&self) -> Result<TcpStream> {
-        let Self::Connected(stream) = self else {
+    pub(super) fn clone_stream(&self) -> Result<ConnectionStream> {
+        let Self::Connected { token, stream } = self else {
             return Err(anyhow!("PaperSpoon not connected"));
         };
-        stream
-            .try_clone()
-            .context("failed to clone PaperSpoon stream")
+        Ok(ConnectionStream {
+            token: Arc::clone(token),
+            stream: stream
+                .try_clone()
+                .context("failed to clone PaperSpoon stream")?,
+        })
     }
 
     pub(super) fn reconnect(&mut self, stream: TcpStream) {
         self.disconnect();
-        *self = Self::Connected(stream);
+        *self = Self::connected(stream);
+    }
+
+    pub(super) fn disconnect_if_current(&mut self, candidate: &ConnectionStream) -> bool {
+        let Self::Connected { token, .. } = self else {
+            return false;
+        };
+        if !Arc::ptr_eq(token, &candidate.token) {
+            return false;
+        }
+        self.disconnect();
+        true
     }
 
     pub(super) fn disconnect(&mut self) {
         let previous = std::mem::replace(self, Self::Disconnected);
-        if let Self::Connected(stream) = previous {
+        if let Self::Connected { stream, .. } = previous {
             let _ = stream.shutdown(Shutdown::Both);
         }
     }
@@ -80,6 +114,7 @@ mod tests {
         state
             .clone_stream()
             .expect("clone replacement")
+            .stream_mut()
             .write_all(b"x")
             .expect("write replacement");
         replacement_peer
@@ -102,5 +137,38 @@ mod tests {
         let mut byte = [0];
         assert_eq!(peer.read(&mut byte).expect("read EOF"), 0);
         state.clone_stream().expect_err("must remain disconnected");
+    }
+
+    #[test]
+    fn stale_stream_cannot_disconnect_replacement() {
+        let (first, _first_peer) = tcp_pair();
+        let (replacement, mut replacement_peer) = tcp_pair();
+        replacement_peer
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("set replacement peer timeout");
+
+        let mut state = ConnectionState::connected(first);
+        let stale = state.clone_stream().expect("clone first stream");
+        state.reconnect(replacement);
+
+        assert!(!state.disconnect_if_current(&stale));
+        let mut current = state.clone_stream().expect("clone replacement");
+        current
+            .stream_mut()
+            .write_all(b"x")
+            .expect("write replacement");
+        let mut byte = [0];
+        replacement_peer
+            .read_exact(&mut byte)
+            .expect("read replacement");
+        assert_eq!(byte, [b'x']);
+
+        assert!(state.disconnect_if_current(&current));
+        assert_eq!(
+            replacement_peer
+                .read(&mut byte)
+                .expect("read replacement EOF"),
+            0
+        );
     }
 }
