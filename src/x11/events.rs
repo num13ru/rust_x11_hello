@@ -1,17 +1,19 @@
-//! Event loop, raw event diagnostics, and rendering onto X11.
+//! Event loop and raw X11 event diagnostics.
 //!
 //! This is the boundary layer: it translates `x11rb::protocol::Event` into
-//! [`crate::ui::button::PointerEvent`] and renders logical layouts with
-//! core-X11 requests. The UI layer never sees X11 types.
+//! [`crate::ui::button::PointerEvent`]. Rendering is delegated to the sibling
+//! adapter, and the UI layer never sees X11 types.
+
+use super::render::draw;
 
 use crate::net::Paperspoon;
 use crate::ui::action::{SemanticAction, action_for_button};
 use crate::ui::button::{ContactTracker, PointerEvent, PointerEventKind, handle_pointer_event};
-use crate::ui::geometry::{Point, STATUS_BAR_HEIGHT, draw_layout};
+use crate::ui::geometry::Point;
 use anyhow::{Context, Result, anyhow};
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
-use x11rb::protocol::xproto::{ButtonPressEvent, ConnectionExt, Gcontext, Rectangle, Window};
+use x11rb::protocol::xproto::{ButtonPressEvent, ConnectionExt, Gcontext, Window};
 use x11rb::rust_connection::RustConnection;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -25,19 +27,6 @@ enum GeometryUpdate {
     Unchanged,
     Changed { width: u16, height: u16 },
 }
-/// Left inset of the status text drawn in the status strip.
-const STATUS_TEXT_X: u16 = 20;
-/// Vertical distance from the window's bottom edge to the status baseline.
-///
-/// The baseline sits inside the status strip (below the exit bar), with
-/// room for the text's ascent; the strip itself is `STATUS_BAR_HEIGHT`
-/// reference pixels tall.
-const STATUS_TEXT_BOTTOM_MARGIN: u16 = 10;
-// The status strip is what separates the exit bar from the status text.
-const _: () = {
-    assert!(STATUS_BAR_HEIGHT > STATUS_TEXT_BOTTOM_MARGIN);
-};
-
 /// Run the event loop until the window is destroyed or the connection fails.
 pub fn event_loop(
     conn: &RustConnection,
@@ -231,80 +220,6 @@ fn geometry_update(current: (u16, u16), reported: (u16, u16)) -> GeometryUpdate 
             height: reported.1,
         }
     }
-}
-
-fn draw(
-    conn: &RustConnection,
-    win: Window,
-    gc: Gcontext,
-    width: u16,
-    height: u16,
-    status_text: Option<&str>,
-) -> Result<()> {
-    let Some(layout) = draw_layout(width, height) else {
-        return Ok(());
-    };
-
-    conn.clear_area(false, win, 0, 0, width, height)
-        .context("failed to send clear-area request")?
-        .check()
-        .context("X11 server rejected clear-area request")?;
-
-    let rectangles: Vec<Rectangle> = layout
-        .rectangles
-        .iter()
-        .map(|rectangle| Rectangle {
-            x: rectangle.x,
-            y: rectangle.y,
-            width: rectangle.width,
-            height: rectangle.height,
-        })
-        .collect();
-    if !rectangles.is_empty() {
-        conn.poly_rectangle(win, gc, &rectangles)
-            .context("failed to send rectangle draw request")?
-            .check()
-            .context("X11 server rejected rectangle draw request")?;
-    }
-
-    for placement in layout.text {
-        if placement.y > 0 {
-            draw_text(conn, win, gc, placement.x, placement.y, placement.text)?;
-        }
-    }
-
-    if let Some(text) = status_text {
-        // Baseline inside the status strip, below the exit bar.
-        let status_y = height
-            .saturating_sub(STATUS_TEXT_BOTTOM_MARGIN)
-            .min(i16::MAX as u16) as i16;
-        draw_text(
-            conn,
-            win,
-            gc,
-            STATUS_TEXT_X as i16,
-            status_y,
-            text.as_bytes(),
-        )?;
-    }
-
-    conn.flush().context("failed to flush draw requests")?;
-    Ok(())
-}
-
-fn draw_text(
-    conn: &RustConnection,
-    win: Window,
-    gc: Gcontext,
-    x: i16,
-    y: i16,
-    text: &[u8],
-) -> Result<()> {
-    conn.image_text8(win, gc, x, y, text)
-        .context("failed to send text draw request")?
-        .check()
-        .context("X11 server rejected text draw request")?;
-    Ok(())
 }
 
 #[cfg(test)]
