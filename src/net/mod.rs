@@ -154,7 +154,8 @@ impl Paperspoon {
         let reader_stream = connection
             .lock()
             .expect("shared stream lock")
-            .clone_stream()?;
+            .clone_stream()?
+            .into_stream();
         let reader_handle = spawn_reader(reader_stream, tx.clone(), wake_tx.clone());
 
         // Reconnector: wake on EOF, clear slot, retry connect until success,
@@ -231,9 +232,13 @@ impl Paperspoon {
             let guard = self.connection.lock().expect("shared stream lock");
             guard.clone_stream()?
         };
-        write_stream
-            .write_all(line.as_bytes())
-            .context("failed to write action to PaperSpoon")?;
+        if let Err(error) = write_stream.stream_mut().write_all(line.as_bytes()) {
+            self.connection
+                .lock()
+                .expect("shared stream lock")
+                .disconnect_if_current(&write_stream);
+            return Err(error).context("failed to write action to PaperSpoon");
+        }
         Ok(())
     }
 
