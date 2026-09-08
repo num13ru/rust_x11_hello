@@ -6,7 +6,7 @@
 
 use super::render::draw;
 
-use crate::app::{Activation, AppState, GeometryUpdate};
+use crate::app::{Activation, AppState, GeometryUpdate, Redraw};
 use crate::net::Paperspoon;
 use crate::ui::button::{PointerEvent, PointerEventKind};
 use crate::ui::geometry::Point;
@@ -32,18 +32,14 @@ pub fn event_loop(
     let mut app = AppState::new(initial_size);
 
     if let Some(text) = paperspoon.poll_display() {
-        app.set_status_text(text);
-        let (width, height) = app.size();
-        draw(conn, win, gc, width, height, app.status_text())
+        draw_app(conn, win, gc, app.set_status_text(text))
             .context("failed to redraw status after PaperSpoon command")?;
     }
     loop {
         // Drain any PaperSpoon command received since the last X11 event.
         if let Some(text) = paperspoon.poll_display() {
             eprintln!("display: {text}");
-            app.set_status_text(text);
-            let (width, height) = app.size();
-            draw(conn, win, gc, width, height, app.status_text())
+            draw_app(conn, win, gc, app.set_status_text(text))
                 .context("failed to redraw status after PaperSpoon command")?;
         }
         let event = conn
@@ -52,8 +48,7 @@ pub fn event_loop(
 
         match event {
             Event::Expose(event) if event.window == win && event.count == 0 => {
-                let (width, height) = app.size();
-                draw(conn, win, gc, width, height, app.status_text())
+                draw_app(conn, win, gc, app.redraw())
                     .context("failed to redraw final Expose batch")?;
             }
             Event::Expose(_) => {}
@@ -66,12 +61,13 @@ pub fn event_loop(
                         );
                     }
                     GeometryUpdate::Unchanged => {}
-                    GeometryUpdate::Changed { width, height } => {
+                    GeometryUpdate::Redraw(redraw) => {
+                        let (width, height) = redraw.size();
                         eprintln!(
                             "event type=ConfigureNotify x={} y={} width={width} height={height} window=0x{:x}",
                             event.x, event.y, event.window
                         );
-                        draw(conn, win, gc, width, height, app.status_text())
+                        draw_app(conn, win, gc, redraw)
                             .context("failed to redraw after ConfigureNotify")?;
                     }
                 }
@@ -142,6 +138,11 @@ pub fn event_loop(
             _ => eprintln!("event type=Other"),
         }
     }
+}
+
+fn draw_app(conn: &RustConnection, win: Window, gc: Gcontext, redraw: Redraw<'_>) -> Result<()> {
+    let (width, height) = redraw.size();
+    draw(conn, win, gc, width, height, redraw.status_text())
 }
 
 /// One-line raw diagnostic for a press or release event.

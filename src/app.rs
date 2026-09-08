@@ -4,10 +4,26 @@ use crate::ui::action::{SemanticAction, action_for_button};
 use crate::ui::button::{ContactTracker, PointerEvent, handle_pointer_event};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum GeometryUpdate {
+pub(crate) struct Redraw<'a> {
+    size: (u16, u16),
+    status_text: Option<&'a str>,
+}
+
+impl<'a> Redraw<'a> {
+    pub(crate) fn size(self) -> (u16, u16) {
+        self.size
+    }
+
+    pub(crate) fn status_text(self) -> Option<&'a str> {
+        self.status_text
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum GeometryUpdate<'a> {
     IgnoredZero,
     Unchanged,
-    Changed { width: u16, height: u16 },
+    Redraw(Redraw<'a>),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -45,15 +61,19 @@ impl AppState {
         (self.width, self.height)
     }
 
-    pub(crate) fn status_text(&self) -> Option<&str> {
-        self.status_text.as_deref()
+    pub(crate) fn redraw(&self) -> Redraw<'_> {
+        Redraw {
+            size: self.size(),
+            status_text: self.status_text.as_deref(),
+        }
     }
 
-    pub(crate) fn set_status_text(&mut self, text: String) {
+    pub(crate) fn set_status_text(&mut self, text: String) -> Redraw<'_> {
         self.status_text = Some(text);
+        self.redraw()
     }
 
-    pub(crate) fn update_geometry(&mut self, reported: (u16, u16)) -> GeometryUpdate {
+    pub(crate) fn update_geometry(&mut self, reported: (u16, u16)) -> GeometryUpdate<'_> {
         if reported.0 == 0 || reported.1 == 0 {
             GeometryUpdate::IgnoredZero
         } else if reported == self.size() {
@@ -62,10 +82,7 @@ impl AppState {
             self.contact.cancel();
             self.width = reported.0;
             self.height = reported.1;
-            GeometryUpdate::Changed {
-                width: reported.0,
-                height: reported.1,
-            }
+            GeometryUpdate::Redraw(self.redraw())
         }
     }
 
@@ -159,14 +176,15 @@ mod tests {
         );
         assert_eq!(state.size(), SIZE);
         assert_eq!(state.update_geometry(SIZE), GeometryUpdate::Unchanged);
+        let _ = state.set_status_text("connected".into());
 
         let resized = (SIZE.0 / 2, SIZE.1 / 2);
         assert_eq!(
             state.update_geometry(resized),
-            GeometryUpdate::Changed {
-                width: resized.0,
-                height: resized.1,
-            }
+            GeometryUpdate::Redraw(Redraw {
+                size: resized,
+                status_text: Some("connected"),
+            })
         );
         assert_eq!(state.size(), resized);
         assert_eq!(
@@ -176,11 +194,28 @@ mod tests {
     }
 
     #[test]
-    fn status_text_is_replaced_without_transport_knowledge() {
+    fn status_update_requests_redraw_and_replaces_text_without_transport_knowledge() {
         let mut state = AppState::new(SIZE);
-        assert_eq!(state.status_text(), None);
-        state.set_status_text("first".into());
-        state.set_status_text("second".into());
-        assert_eq!(state.status_text(), Some("second"));
+        assert_eq!(
+            state.redraw(),
+            Redraw {
+                size: SIZE,
+                status_text: None,
+            }
+        );
+        assert_eq!(
+            state.set_status_text("first".into()),
+            Redraw {
+                size: SIZE,
+                status_text: Some("first"),
+            }
+        );
+        assert_eq!(
+            state.set_status_text("second".into()),
+            Redraw {
+                size: SIZE,
+                status_text: Some("second"),
+            }
+        );
     }
 }
