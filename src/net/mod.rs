@@ -5,7 +5,7 @@
 //! connection for the run. Each activation writes one newline-terminated
 //! `event action=<semantic-id>;` line over the connection. A reader thread
 //! consumes inbound PaperSpoon lines (control commands such as
-//! `display <text>`) and pushes them into a channel the X11 event loop
+//! `display <text>`) and publishes the latest into a mailbox the X11 event loop
 //! drains between events and on a bounded idle poll interval.
 //!
 //! If an established connection drops, the background reconnector retries the
@@ -23,7 +23,7 @@ use connection::ConnectionState;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -33,11 +33,19 @@ const TCP_CONNECT_TIMEOUT: Duration = Duration::from_millis(150);
 /// Status rendering policy remains separate; this limit only bounds framing.
 const MAX_INBOUND_LINE_BYTES: usize = 8 * 1024;
 
-/// Messages a PaperSpoon reader thread can deliver to the event loop.
-#[derive(Debug)]
-pub enum PaperspoonMsg {
-    Display(String),
-    Disconnected,
+#[derive(Clone, Default)]
+struct DisplayMailbox {
+    pending: Arc<Mutex<Option<String>>>,
+}
+
+impl DisplayMailbox {
+    fn publish(&self, text: String) {
+        *self.pending.lock().expect("display mailbox lock") = Some(text);
+    }
+
+    fn take(&self) -> Option<String> {
+        self.pending.lock().expect("display mailbox lock").take()
+    }
 }
 
 /// A persistent outbound connection to PaperSpoon with an inbound message
@@ -45,28 +53,20 @@ pub enum PaperspoonMsg {
 pub struct Paperspoon {
     /// Shared with the reconnector thread; owns the active socket.
     connection: Arc<Mutex<ConnectionState>>,
-    reader: Option<Receiver<PaperspoonMsg>>,
-    /// Writer half cloned into the reader thread; kept alive here so writes
-    /// from the main thread and reads share one socket.
-    _reader_tx: Option<Sender<PaperspoonMsg>>,
+    display: DisplayMailbox,
     wake_tx: Option<Sender<()>>,
     stopping: Arc<AtomicBool>,
     reconnector: Option<JoinHandle<()>>,
 }
 
-fn spawn_reader(
-    stream: TcpStream,
-    message_tx: Sender<PaperspoonMsg>,
-    wake_tx: Sender<()>,
-) -> JoinHandle<()> {
+fn spawn_reader(stream: TcpStream, display: DisplayMailbox, wake_tx: Sender<()>) -> JoinHandle<()> {
     std::thread::spawn(move || {
         let mut reader = BufReader::new(stream);
         while let Ok(Some(line)) = read_inbound_line(&mut reader) {
             if let Some(text) = parse_display_command(&line) {
-                let _ = message_tx.send(PaperspoonMsg::Display(text));
+                display.publish(text);
             }
         }
-        let _ = message_tx.send(PaperspoonMsg::Disconnected);
         let _ = wake_tx.send(());
     })
 }
@@ -122,8 +122,7 @@ impl Paperspoon {
     pub fn disconnected() -> Self {
         Self {
             connection: Arc::new(Mutex::new(ConnectionState::disconnected())),
-            reader: None,
-            _reader_tx: None,
+            display: DisplayMailbox::default(),
             wake_tx: None,
             stopping: Arc::new(AtomicBool::new(false)),
             reconnector: None,
@@ -150,7 +149,7 @@ impl Paperspoon {
         // which retries until PaperSpoon is reachable again and swaps in a
         // fresh socket — proactive auto-reconnect without user input.
         let connection = Arc::new(Mutex::new(ConnectionState::connected(stream)));
-        let (tx, rx) = mpsc::channel::<PaperspoonMsg>();
+        let display = DisplayMailbox::default();
         let (wake_tx, wake_rx) = mpsc::channel::<()>();
 
         let reader_stream = connection
@@ -158,14 +157,14 @@ impl Paperspoon {
             .expect("shared stream lock")
             .clone_stream()?
             .into_stream();
-        let reader_handle = spawn_reader(reader_stream, tx.clone(), wake_tx.clone());
+        let reader_handle = spawn_reader(reader_stream, display.clone(), wake_tx.clone());
 
         // Reconnector: wake on EOF, clear slot, retry connect until success,
         // install fresh socket + reader, then wait for the next EOF.
         let worker_connection = Arc::clone(&connection);
         let stopping = Arc::new(AtomicBool::new(false));
         let worker_stopping = Arc::clone(&stopping);
-        let worker_tx = tx.clone();
+        let worker_display = display.clone();
         let worker_wake_tx = wake_tx.clone();
         let reconnector = std::thread::spawn(move || {
             let mut active_reader = Some(reader_handle);
@@ -202,7 +201,7 @@ impl Paperspoon {
                             }
                             active_reader = Some(spawn_reader(
                                 fresh_reader,
-                                worker_tx.clone(),
+                                worker_display.clone(),
                                 worker_wake_tx.clone(),
                             ));
                             break;
@@ -215,8 +214,7 @@ impl Paperspoon {
 
         Ok(Self {
             connection,
-            reader: Some(rx),
-            _reader_tx: Some(tx),
+            display,
             wake_tx: Some(wake_tx),
             stopping,
             reconnector: Some(reconnector),
@@ -246,18 +244,10 @@ impl Paperspoon {
 
     /// Drain any display commands received since the last call.
     ///
-    /// Returns the first pending display text, if any. The event loop calls
-    /// this between X11 events; it never blocks. `Disconnected` messages are
-    /// consumed here so the reconnector's channel stays empty between cycles.
+    /// Returns the latest pending display text, if any, and empties the
+    /// single-slot mailbox. It never blocks on network I/O.
     pub fn poll_display(&mut self) -> Option<String> {
-        let rx = self.reader.as_ref()?;
-        loop {
-            match rx.try_recv() {
-                Ok(PaperspoonMsg::Display(text)) => return Some(text),
-                Ok(_) => continue,
-                Err(_) => return None,
-            }
-        }
+        self.display.take()
     }
 }
 
@@ -302,6 +292,16 @@ mod tests {
     fn explicit_host_resolves_directly() {
         let addr = paperspoon_addr(Some("127.0.0.1"), 6000).expect("explicit host must resolve");
         assert_eq!(addr, SocketAddr::from(([127, 0, 0, 1], 6000)));
+    }
+
+    #[test]
+    fn display_mailbox_coalesces_to_latest_unread_text() {
+        let mailbox = DisplayMailbox::default();
+        assert_eq!(mailbox.take(), None);
+        mailbox.publish("first".to_string());
+        mailbox.publish("second".to_string());
+        assert_eq!(mailbox.take(), Some("second".to_string()));
+        assert_eq!(mailbox.take(), None);
     }
 
     #[test]
