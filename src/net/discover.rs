@@ -5,8 +5,9 @@
 //! endpoint (source IP + advertised TCP port). Bounded: never loops
 //! indefinitely, finishes in a few seconds on failure.
 
-use crate::discovery::{CLIENT_PORT, DISCOVERY_PORT, parse_here, select_endpoint};
+use crate::discovery::select_endpoint;
 use anyhow::{Context, Result};
+use paper_protocol::{DISCOVERY_CLIENT_PORT, DISCOVERY_PORT, format_discover, parse_here};
 use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
@@ -21,7 +22,7 @@ pub const PROBE_WINDOW: Duration = Duration::from_millis(500);
 /// error describing the failure.
 pub fn discover_paperspoon() -> Result<SocketAddr> {
     discover_paperspoon_from_to(
-        SocketAddr::from((Ipv4Addr::UNSPECIFIED, CLIENT_PORT)),
+        SocketAddr::from((Ipv4Addr::UNSPECIFIED, DISCOVERY_CLIENT_PORT)),
         SocketAddr::from((Ipv4Addr::BROADCAST, DISCOVERY_PORT)),
     )
 }
@@ -50,7 +51,7 @@ fn discover_paperspoon_from_to(bind_addr: SocketAddr, target: SocketAddr) -> Res
     let deadline = Instant::now() + PROBE_COUNT * PROBE_WINDOW;
 
     'probe: for attempt in 1..=PROBE_COUNT {
-        let request = crate::discovery::format_discover(&nonce);
+        let request = format_discover(&nonce);
         eprintln!("discovery probe attempt={attempt} destination={target} nonce={nonce}");
         socket
             .send_to(request.as_bytes(), target)
@@ -120,6 +121,7 @@ fn fresh_nonce() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use paper_protocol::{DEFAULT_TCP_PORT, format_here, parse_discover};
     use std::net::UdpSocket;
 
     #[test]
@@ -134,16 +136,10 @@ mod tests {
         let responder_thread = std::thread::spawn(move || -> std::io::Result<()> {
             let mut buffer = [0u8; 256];
             let (count, source) = responder.recv_from(&mut buffer)?;
-            let datagram = std::str::from_utf8(&buffer[..count])
-                .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-            let nonce = datagram
-                .strip_prefix(crate::discovery::DISCOVER_PREFIX)
-                .ok_or_else(|| {
-                    std::io::Error::new(std::io::ErrorKind::InvalidData, "missing discovery prefix")
-                })?
-                .trim_end()
-                .to_string();
-            let here = format!("{} {nonce} 5581\n", crate::discovery::HERE_PREFIX);
+            let nonce = parse_discover(&buffer[..count]).ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid discovery request")
+            })?;
+            let here = format_here(&nonce, DEFAULT_TCP_PORT);
             responder.send_to(here.as_bytes(), source)?;
             Ok(())
         });
@@ -158,6 +154,6 @@ mod tests {
         let endpoint = endpoint.expect("discover");
 
         assert_eq!(endpoint.ip(), Ipv4Addr::LOCALHOST);
-        assert_eq!(endpoint.port(), 5581);
+        assert_eq!(endpoint.port(), DEFAULT_TCP_PORT);
     }
 }
