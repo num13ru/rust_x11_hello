@@ -34,7 +34,7 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use paper_protocol::parse_action_line;
+use paper_protocol::{DISCOVERY_PORT, parse_action_line};
 
 mod discovery;
 
@@ -102,10 +102,20 @@ fn main() -> io::Result<()> {
 
     let listener = TcpListener::bind(("0.0.0.0", opts.port))?;
     let tcp_port = listener.local_addr()?.port();
+    let discovery_socket = discovery::bind_discovery_socket()?;
+    let _discovery_worker = std::thread::Builder::new()
+        .name("paperspoon-discovery".to_string())
+        .spawn(move || {
+            if let Err(error) = discovery::run_discovery_listener(discovery_socket, tcp_port) {
+                eprintln!("discovery listener error: {error}");
+            }
+        })?;
+
     println!(
         "listening on 0.0.0.0:{}, logging to {}",
         tcp_port, opts.log_path
     );
+    println!("discovery listening address=0.0.0.0:{DISCOVERY_PORT}");
 
     println!("type 'display <text>' to send a control command");
     if opts.forward_url {
@@ -114,15 +124,6 @@ fn main() -> io::Result<()> {
         println!("action forwarding to Hammerspoon disabled");
     }
     io::stdout().flush()?;
-
-    // Discovery responder: serve confirmations on UDP 5580 regardless of the
-    // TCP accept loop. A bind failure here is fatal (PaperPad cannot find us
-    // without it).
-    std::thread::spawn(move || {
-        if let Err(error) = discovery::run_discovery_listener(tcp_port) {
-            eprintln!("discovery listener error: {error}");
-        }
-    });
 
     let current: Arc<Mutex<Option<TcpStream>>> = Arc::new(Mutex::new(None));
 
