@@ -32,6 +32,8 @@ fn print_environment() {
 }
 
 fn run() -> Result<()> {
+    let paperpad_config = config::PaperpadConfig::from_env()?;
+
     let (conn, screen_num) = RustConnection::connect(None)
         .context("failed to connect to X11 display; check DISPLAY and /tmp/.X11-unix/X0")?;
 
@@ -46,7 +48,6 @@ fn run() -> Result<()> {
         size.1
     );
 
-    let paperpad_config = config::PaperpadConfig::from_env();
     let mut paperspoon = net::Paperspoon::start(paperpad_config);
 
     let event_result = event_loop(&conn, win, gc, size, &mut paperspoon);
