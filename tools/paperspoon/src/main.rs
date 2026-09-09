@@ -7,13 +7,10 @@
 //!   file (default `paperspoon.log`);
 //! - lines typed on stdin are forwarded to the Kindle as control commands
 //!   (`display <text>`);
-//! - received action lines are also sent as UDP datagrams to a local
-//!   consumer (default `127.0.0.1:5584`) so Hammerspoon can dispatch them
-//!   without opening another TCP port. One datagram per action line: the
-//!   consumer fires exactly once per datagram, so actions never replay.
+//! - received action IDs are optionally forwarded to Hammerspoon with
+//!   `open -g hammerspoon://paperpad?action=<id>`.
 //!
-//! Usage: `paperspoon [<port> <log-file>] [--forward-udp <port> |
-//!         --no-forward-udp]`
+//! Usage: `paperspoon [<port> <log-file>] [--no-forward-url]`
 //!
 //! Only the most recently accepted connection receives stdin control lines.
 //! The Kindle reconnects across runs, and each accepted socket would get its
@@ -22,10 +19,8 @@
 //! One forwarder thread therefore writes every stdin line to the current
 //! connection, replaced on each accept.
 //!
-//! UDP forwarding is best-effort and stateless: if the consumer is not
-//! listening when an action arrives, the datagram is dropped (UDP semantics)
-//! and the next action is delivered normally. The Kindle-facing accept loop
-//! never blocks on the forward path.
+//! URL-forwarding failures are reported without discarding the already logged
+//! action. Passing `--no-forward-url` disables the Hammerspoon launch.
 
 use std::env;
 use std::fs::OpenOptions;

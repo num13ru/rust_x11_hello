@@ -1,4 +1,4 @@
-//! Kindle KUAL touch-input prototype.
+//! Paperpad Kindle/KUAL process entry point.
 //!
 //! Entry point only: connects to X11, runs the event loop, and tears down.
 //! Display/event handling lives in [`x11`]; logical UI concepts (geometry,

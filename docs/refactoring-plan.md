@@ -1,5 +1,12 @@
 # Refactoring plan
 
+## Progress
+
+Milestones 1–5 are complete on the `refactoring` branch. Their host gates
+pass, and each device-affecting step through bounded status rendering has been
+operator-verified on the Paperwhite 6. Milestone 6 documentation and final
+target-evidence consolidation remain in progress.
+
 Goal: a clean, maintainable Rust project with clear ownership, deterministic
 tests, and preserved Kindle behavior.
 
@@ -145,9 +152,9 @@ testing or ownership boundary needs it. Keep module internals private by default
    Exit criterion: host gates pass and device claims have checksum-matched logs
    and visual confirmation where rendering is involved.
 
-## Verification baseline and operating conditions
+## Original verification baseline and operating conditions
 
-On 2026-09-05, `make check` passed after allowing local socket access. The initial
+At plan creation on 2026-09-05, `make check` passed after allowing local socket access. The initial
 sandbox run passed 28 tests and could not bind sockets for two network tests.
 The companion's two tests and Clippy also passed separately. No source code was
 changed for this plan, and no ARM build or physical-device validation was run.

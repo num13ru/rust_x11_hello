@@ -1,8 +1,35 @@
-# rust_x11_hello
+# Paperpad
 
-A bounded Kindle/KUAL prototype for determining whether the Kindle X server translates touchscreen input into core X11 pointer events.
+Paperpad is a bounded Kindle/KUAL grid remote. It translates core X11 touch
+events into stable semantic actions, sends them over Wi-Fi to the PaperSpoon
+macOS companion, and renders short status commands returned by PaperSpoon.
 
-The current milestone opens a persistent override-redirect X11 window, redraws final `Expose` batches, tracks valid geometry changes, and writes one structured line per `ButtonPress`/`ButtonRelease`. Pointer motion is subscribed but deliberately not logged. The KUAL launcher serializes launch attempts with an owner-checked lock and stops the test after 90 seconds, with a five-second `TERM` grace followed by `KILL` only after revalidating the recorded PID and executable.
+The repository, Cargo package, device binary, environment variables, and
+extension path retain the MVP identifier `rust_x11_hello`. The KUAL launcher
+serializes launch attempts with an owner-checked lock and stops a run after 90
+seconds, with a five-second `TERM` grace followed by `KILL` only after
+revalidating the recorded PID and executable.
+
+## Ownership and module boundaries
+
+| Area | Owner |
+| --- | --- |
+| Process setup and teardown | `src/main.rs` |
+| Environment parsing and validation | `src/config.rs` |
+| UI state and activation decisions | `src/app.rs`, using pure logic from `src/ui/` |
+| X11 resources, event translation, and rendering | `src/x11/` |
+| Paperpad TCP lifecycle, workers, queues, and display mailbox | `src/net/` |
+| Unique-endpoint discovery policy | `src/discovery.rs` |
+| Shared wire constants, formatting, and parsing | `crates/paper-protocol/` |
+| PaperSpoon listener, current connection, discovery responder, and forwarding | `tools/paperspoon/` |
+| KUAL lifecycle and MTP packaging | `kindle-extension/` and `scripts/deploy-kindle-mtp.sh` |
+
+The dependency direction is deliberate: protocol code depends only on
+`std`; UI geometry and decisions know nothing about X11 or sockets; X11 and
+network modules adapt external events into those decisions. The X11 thread
+owns the window and `AppState`. Network workers own blocking connection work,
+with actions crossing a bounded queue and display updates crossing a
+single-slot latest-value mailbox.
 
 ## Conditions under which this works
 
@@ -48,9 +75,9 @@ Every activation also emits its stable semantic action id. The current grid maps
 | 9 | `stub.button_9` |
 | Exit (ID 10) | `app.exit` (closes the window locally) |
 
-Buttons 7–9 send placeholder action IDs for future companion bindings. The previous
-760×528 three-row layout was confirmed on the physical Kindle; the new full-screen
-layout still needs device verification.
+Buttons 7–9 send placeholder action IDs for future companion bindings. Rendering
+and touch behavior remain device-specific and must be rechecked after changes
+to geometry, event translation, or the X11 adapter.
 
 These dotted ids are the wire units of the semantic protocol; the transport
 that carries them is described below. USBNetwork itself is not used: no
@@ -224,11 +251,13 @@ exactly one action — no sockets to manage, no timers, no replay loops.
 
 ## Host checks and Kindle build
 
+Run the complete gate from the repository root, in this order:
 
 ```sh
 make check
 make build
 make verify
+git diff --check
 ```
 
 The verified package is `kindle-extension/rust_x11_hello`; its binary is:
@@ -237,9 +266,11 @@ The verified package is `kindle-extension/rust_x11_hello`; its binary is:
 kindle-extension/rust_x11_hello/bin/rust_x11_hello
 ```
 
-`make check` validates both Rust workspace members and requires the Rust toolchain,
-Bash, and `jq`. `make build` and `make verify` require Docker. Verification
-rejects a dynamic interpreter and GLIBC symbol requirements.
+`make check` formats, checks, lints, and tests the whole Rust workspace; it
+also validates the KUAL scripts, MTP deployment success/rollback/failure
+paths, and menu JSON. It requires the Rust toolchain, Bash, `jq`, and local
+loopback socket access. `make build` and `make verify` require Docker.
+Verification rejects a dynamic interpreter and GLIBC symbol requirements.
 
 ## Fresh MTP installation
 
