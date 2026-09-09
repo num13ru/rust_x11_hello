@@ -1,6 +1,6 @@
 //! PaperSpoon UDP discovery responder.
 //!
-//! Binds UDP `0.0.0.0:5580`; on a valid DISCOVER datagram, replies with a
+//! Serves UDP `0.0.0.0:5580`; on a valid DISCOVER datagram, replies with a
 //! single unicast HERE to the exact request source. No broadcast responses,
 //! multicast, or acknowledgements.
 
@@ -8,13 +8,19 @@ use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 
 use paper_protocol::{DISCOVERY_PORT, format_here, parse_discover};
 
-/// Bind and run the discovery responder forever.
+/// Bind the well-known discovery address before PaperSpoon reports ready.
+pub fn bind_discovery_socket() -> std::io::Result<UdpSocket> {
+    bind_discovery_socket_at(SocketAddr::from((Ipv4Addr::UNSPECIFIED, DISCOVERY_PORT)))
+}
+
+fn bind_discovery_socket_at(addr: SocketAddr) -> std::io::Result<UdpSocket> {
+    UdpSocket::bind(addr)
+}
+
+/// Run the discovery responder forever on an already-bound socket.
 ///
 /// Returns only on socket failure; malformed requests are logged and skipped.
-pub fn run_discovery_listener(tcp_port: u16) -> std::io::Result<()> {
-    let socket = UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, DISCOVERY_PORT)))?;
-    println!("discovery listening address=0.0.0.0:{DISCOVERY_PORT}");
-
+pub fn run_discovery_listener(socket: UdpSocket, tcp_port: u16) -> std::io::Result<()> {
     loop {
         respond_once(&socket, tcp_port)?;
     }
@@ -72,6 +78,14 @@ mod tests {
             parse_here(&buffer[..count]),
             Some((nonce.to_string(), 42_424))
         );
+    }
+
+    #[test]
+    fn bind_failure_is_returned_to_caller() {
+        let occupied = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind occupied socket");
+        let error = bind_discovery_socket_at(occupied.local_addr().expect("occupied address"))
+            .expect_err("second bind must fail");
+        assert_eq!(error.kind(), std::io::ErrorKind::AddrInUse);
     }
 
     #[test]
