@@ -85,6 +85,13 @@ the manual-terminal alias `display:<text>`; it trims surrounding payload
 whitespace and ignores empty commands or other strings beginning with
 `display`.
 
+Control lines must be valid UTF-8 and remain bounded by the 8 KiB inbound-line
+limit. For the Kindle core X11 font, Paperpad preserves printable ASCII
+(`U+0020..=U+007E`), renders control and non-ASCII Unicode scalars as `?`, and
+draws at most 255 output bytes. Longer status text is truncated at that
+rendering boundary without terminating the app; diagnostics retain the
+original received text.
+
 ### Zero-config discovery (verified on this Paperwhite 6)
 
 By default PaperPad locates PaperSpoon with a minimal custom UDP
