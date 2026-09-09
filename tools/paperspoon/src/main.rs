@@ -30,13 +30,15 @@
 use std::env;
 use std::fs::OpenOptions;
 use std::io::{self, BufRead, BufReader, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::sync::{Arc, Mutex};
+use std::net::{SocketAddr, TcpListener};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use paper_protocol::{DISCOVERY_PORT, parse_action_line};
 
 mod discovery;
+mod server;
+
+use server::CurrentConnection;
 
 /// Default TCP port. Must match `rust_x11_hello`'s `COMPANION_PORT`.
 const DEFAULT_PORT: u16 = paper_protocol::DEFAULT_TCP_PORT;
@@ -125,31 +127,26 @@ fn main() -> io::Result<()> {
     }
     io::stdout().flush()?;
 
-    let current: Arc<Mutex<Option<TcpStream>>> = Arc::new(Mutex::new(None));
+    let current = CurrentConnection::default();
 
     {
-        let current = Arc::clone(&current);
+        let current = current.clone();
         std::thread::spawn(move || {
             let stdin = io::stdin();
             for line in stdin.lock().lines() {
                 let line = match line {
                     Ok(line) => line,
-                    Err(_) => break,
+                    Err(error) => {
+                        eprintln!("stdin read error: {error}");
+                        break;
+                    }
                 };
                 let line = line.trim();
                 if line.is_empty() {
                     continue;
                 }
-                // Clone a fresh socket handle out of the lock: TcpStream is
-                // not Clone, and the lock must not be held across the write
-                // (the accept loop sets `current` under the same lock).
-                let write_stream = current
-                    .lock()
-                    .expect("current lock")
-                    .as_ref()
-                    .and_then(|stream| stream.try_clone().ok());
-                if let Some(mut stream) = write_stream {
-                    let _ = writeln!(stream, "{line}");
+                if let Err(error) = current.forward_line(line) {
+                    eprintln!("control write error: {error}");
                 }
             }
         });
@@ -170,14 +167,13 @@ fn main() -> io::Result<()> {
         let _ = io::stdout().flush();
 
         // This is now the active Kindle connection for control lines.
-        let write_stream = match stream.try_clone() {
-            Ok(s) => s,
+        let connection_token = match current.install(&stream) {
+            Ok(token) => token,
             Err(e) => {
                 eprintln!("clone error for {peer}: {e}");
                 continue;
             }
         };
-        *current.lock().expect("current lock") = Some(write_stream);
 
         let mut file = match OpenOptions::new()
             .create(true)
@@ -187,6 +183,7 @@ fn main() -> io::Result<()> {
             Ok(f) => f,
             Err(e) => {
                 eprintln!("log open error for {peer}: {e}");
+                current.clear_if_current(&connection_token);
                 continue;
             }
         };
@@ -220,15 +217,7 @@ fn main() -> io::Result<()> {
                 eprintln!("forward error to Hammerspoon: {error}");
             }
         }
-        let stale = current
-            .lock()
-            .expect("current lock")
-            .as_ref()
-            .and_then(|s| s.peer_addr().ok())
-            == Some(peer);
-        if stale {
-            *current.lock().expect("current lock") = None;
-        }
+        current.clear_if_current(&connection_token);
 
         println!("disconnected: {peer}");
         let _ = io::stdout().flush();
