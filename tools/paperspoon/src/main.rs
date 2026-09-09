@@ -101,9 +101,10 @@ fn main() -> io::Result<()> {
     let opts = parse_options(&args);
 
     let listener = TcpListener::bind(("0.0.0.0", opts.port))?;
+    let tcp_port = listener.local_addr()?.port();
     println!(
         "listening on 0.0.0.0:{}, logging to {}",
-        opts.port, opts.log_path
+        tcp_port, opts.log_path
     );
 
     println!("type 'display <text>' to send a control command");
@@ -117,8 +118,8 @@ fn main() -> io::Result<()> {
     // Discovery responder: serve confirmations on UDP 5580 regardless of the
     // TCP accept loop. A bind failure here is fatal (PaperPad cannot find us
     // without it).
-    std::thread::spawn(|| {
-        if let Err(error) = discovery::run_discovery_listener() {
+    std::thread::spawn(move || {
+        if let Err(error) = discovery::run_discovery_listener(tcp_port) {
             eprintln!("discovery listener error: {error}");
         }
     });

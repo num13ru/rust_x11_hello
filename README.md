@@ -95,8 +95,9 @@ PaperSpoon (UDP 5580) replies with a unicast HERE <nonce> <tcp-port>
 existing TCP connect
 ```
 
-- Fixed ports: **UDP 5580** (PaperSpoon discovery listener), **UDP 5582**
-  (PaperPad discovery client), **TCP 5581** (existing listener).
+- Fixed discovery ports: **UDP 5580** (PaperSpoon listener) and **UDP 5582**
+  (PaperPad client). PaperSpoon TCP defaults to **5581**; its discovery reply
+  advertises the actual bound TCP port when a different port is selected.
 - The wire format is newline-terminated ASCII: `PAPERPAD DISCOVER <nonce>`
   and `PAPERSPOON HERE <nonce> <tcp-port>`. The nonce distinguishes the
   current attempt from stale/unrelated datagrams; the response must echo it.
@@ -167,6 +168,9 @@ over the LAN. Wi-Fi and MTP can coexist over the USB link. USBNetwork is not
 available on this Paperwhite 6 — no maintained USBNetwork package accepts
 the device — so the USBNetwork
 interface setup and MTP/USBNetwork exclusivity rules do not apply.
+
+Passing TCP port `0` asks the OS for an ephemeral port; PaperSpoon prints and
+advertises that actual port rather than `0` or the default.
 
 ### Hammering actions into the Mac (Hammerspoon)
 
