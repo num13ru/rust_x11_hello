@@ -3,8 +3,8 @@
 //! This is the wire-independent unit of the small semantic protocol: a button
 //! activation maps to a stable dotted action id that a transport (TCP over
 //! Wi-Fi; USBNetwork is unavailable on this PW6) will carry verbatim to a
-//! macOS PaperSpoon. No transport exists yet; this module only defines the
-//! mapping and the IDs.
+//! macOS PaperSpoon. This module owns only the mapping and IDs; `crate::net`
+//! owns their delivery.
 
 /// A semantic action assignable to a grid button.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
