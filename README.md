@@ -105,8 +105,9 @@ existing TCP connect
   responses, no multicast.
 - The response payload never contains an IP address; the UDP source address
   is the discovered PaperSpoon address.
-- Discovery is bounded (3 probes, 500 ms window each) and the UI remains
-  usable even when PaperSpoon cannot be found.
+- Each discovery attempt is bounded (3 probes, 500 ms window each). After a
+  failed startup attempt, PaperPad waits two seconds and retries the whole
+  resolution/discovery and TCP connection path in the background.
 
 On the Kindle the firewall INPUT policy is restrictive, so the launcher
 installs a narrow temporary ACCEPT rule for the discovery response before
@@ -137,9 +138,10 @@ discovery chain (Test B), PaperPad restart (Test C), Mac DHCP address change
 `192.168.0.12 -> 192.168.0.50` with no configuration edit (Test D), and
 bounded failure with the UI alive when PaperSpoon is absent (Test E).
 
-A PaperSpoon that is unreachable costs bounded time and is logged as
-`transport error: ...` on the device; it never breaks the X11 event loop or
-the on-device activation log, and the Kindle retries on the next activation.
+A PaperSpoon that is unreachable costs bounded time per attempt and is logged
+on the device; it never breaks the X11 event loop or the on-device activation
+log. PaperPad retries in the background every two seconds. Actions made while
+disconnected fail immediately and are not queued or replayed after connection.
 The Kindle opens no listening TCP socket; only the action id leaves the
 device, and only `display` commands enter it.
 
