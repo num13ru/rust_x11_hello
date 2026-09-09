@@ -54,6 +54,11 @@ case "$command_name" in
             printf 'fake-mtp-rs: rm requires --yes\n' >&2
             exit 2
         }
+        if [[ "${FAKE_FAIL_RETIRED_REMOVAL:-0}" == 1 && \
+            "$1" == "/extensions/rust_x11_hello/bin/show.sh" ]]; then
+            printf 'fake-mtp-rs: forced retired-file cleanup failure\n' >&2
+            exit 1
+        fi
         rm -f -- "$destination_path"
         ;;
     mkdir)
