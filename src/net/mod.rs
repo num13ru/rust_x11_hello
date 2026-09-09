@@ -23,7 +23,7 @@ use connection::{ConnectionState, ConnectionToken};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TrySendError};
+use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TryRecvError, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -36,11 +36,20 @@ const MAX_ACTION_LINE_BYTES: usize = 256;
 /// Status rendering policy remains separate; this limit only bounds framing.
 const MAX_INBOUND_LINE_BYTES: usize = 8 * 1024;
 
+type StartupResult = Result<(SocketAddr, TcpStream)>;
+
 fn configure_stream(stream: &TcpStream) -> Result<()> {
     let _ = stream.set_nodelay(true);
     stream
         .set_write_timeout(Some(TCP_WRITE_TIMEOUT))
         .context("failed to set PaperSpoon write timeout")
+}
+
+fn connect_stream(addr: SocketAddr) -> Result<TcpStream> {
+    let stream = TcpStream::connect_timeout(&addr, TCP_CONNECT_TIMEOUT)
+        .context("failed to connect to PaperSpoon")?;
+    configure_stream(&stream)?;
+    Ok(stream)
 }
 
 #[derive(Clone, Default)]
@@ -69,6 +78,7 @@ pub struct Paperspoon {
     stopping: Arc<AtomicBool>,
     writer: Option<JoinHandle<()>>,
     reconnector: Option<JoinHandle<()>>,
+    startup_rx: Option<Receiver<StartupResult>>,
 }
 
 struct QueuedAction {
@@ -190,24 +200,46 @@ impl Paperspoon {
             stopping: Arc::new(AtomicBool::new(false)),
             writer: None,
             reconnector: None,
+            startup_rx: None,
         }
     }
 
-    /// Connect to PaperSpoon and start the reader thread.
-    pub fn connect(config: &PaperpadConfig) -> Result<Self> {
-        let addr = paperspoon_addr(config.host(), config.port())?;
-        Self::connect_to(addr)
+    /// Start one PaperSpoon connection attempt without blocking the X11 loop.
+    pub fn start(config: PaperpadConfig) -> Self {
+        Self::start_with(move || {
+            let addr = paperspoon_addr(config.host(), config.port())?;
+            connect_stream(addr).map(|stream| (addr, stream))
+        })
+    }
+
+    fn start_with<F>(connect: F) -> Self
+    where
+        F: FnOnce() -> StartupResult + Send + 'static,
+    {
+        let (startup_tx, startup_rx) = mpsc::sync_channel(1);
+        // OS hostname resolution cannot be cancelled through std. Detaching
+        // keeps local Exit independent of a resolver that has not returned;
+        // a late result is dropped when this receiver no longer exists.
+        drop(std::thread::spawn(move || {
+            let _ = startup_tx.send(connect());
+        }));
+
+        let mut paperspoon = Self::disconnected();
+        paperspoon.startup_rx = Some(startup_rx);
+        paperspoon
     }
 
     /// Connect to a specific PaperSpoon address and start the reader thread.
     ///
     /// Internal and `pub(crate)`: tests inject an ephemeral listener this
     /// way so they never depend on process-global env vars.
+    #[cfg(test)]
     pub(crate) fn connect_to(addr: SocketAddr) -> Result<Self> {
-        let stream = TcpStream::connect_timeout(&addr, TCP_CONNECT_TIMEOUT)
-            .context("failed to connect to PaperSpoon")?;
-        configure_stream(&stream)?;
+        let stream = connect_stream(addr)?;
+        Self::from_stream(addr, stream)
+    }
 
+    fn from_stream(addr: SocketAddr, stream: TcpStream) -> Result<Self> {
         // The socket is shared with a reconnector thread. When the reader
         // hits EOF, it clears the shared slot and wakes the reconnector,
         // which retries until PaperSpoon is reachable again and swaps in a
@@ -290,7 +322,33 @@ impl Paperspoon {
             stopping,
             writer: Some(writer),
             reconnector: Some(reconnector),
+            startup_rx: None,
         })
+    }
+
+    fn promote_startup(&mut self) {
+        let result = match self.startup_rx.as_ref() {
+            None => return,
+            Some(startup_rx) => match startup_rx.try_recv() {
+                Ok(result) => result,
+                Err(TryRecvError::Empty) => return,
+                Err(TryRecvError::Disconnected) => {
+                    Err(anyhow::anyhow!("PaperSpoon startup worker stopped"))
+                }
+            },
+        };
+        self.startup_rx.take();
+
+        match result {
+            Ok((addr, stream)) => match Self::from_stream(addr, stream) {
+                Ok(paperspoon) => {
+                    *self = paperspoon;
+                    eprintln!("transport: connected to PaperSpoon");
+                }
+                Err(error) => eprintln!("transport error at startup: {error:#}"),
+            },
+            Err(error) => eprintln!("transport error at startup: {error:#}"),
+        }
     }
 
     /// Queue one semantic activation for ordered background delivery.
@@ -304,6 +362,7 @@ impl Paperspoon {
             line.len() <= MAX_ACTION_LINE_BYTES,
             "PaperSpoon action line exceeds {MAX_ACTION_LINE_BYTES} bytes"
         );
+        self.promote_startup();
         let connection = {
             let guard = self.connection.lock().expect("shared stream lock");
             guard.current_token()?
@@ -320,12 +379,14 @@ impl Paperspoon {
     /// Returns the latest pending display text, if any, and empties the
     /// single-slot mailbox. It never blocks on network I/O.
     pub fn poll_display(&mut self) -> Option<String> {
+        self.promote_startup();
         self.display.take()
     }
 }
 
 impl Drop for Paperspoon {
     fn drop(&mut self) {
+        self.startup_rx.take();
         self.stopping.store(true, Ordering::Release);
 
         self.connection
@@ -366,6 +427,102 @@ mod tests {
                 Err(error) => panic!("accept failed: {error}"),
             }
         }
+    }
+
+    #[test]
+    fn background_start_rejects_actions_and_drop_is_nonblocking() {
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let (finished_tx, finished_rx) = mpsc::channel();
+        let mut paperspoon = Paperspoon::start_with(move || {
+            started_tx.send(()).expect("announce resolver start");
+            let _ = release_rx.recv();
+            finished_tx.send(()).expect("announce resolver finish");
+            Err(anyhow::anyhow!("injected delayed startup"))
+        });
+        started_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("startup worker did not run");
+
+        assert!(
+            paperspoon
+                .send_action("media.play_pause")
+                .expect_err("pending startup must not accept actions")
+                .to_string()
+                .contains("PaperSpoon not connected")
+        );
+
+        let (dropped_tx, dropped_rx) = mpsc::channel();
+        let dropper = std::thread::spawn(move || {
+            drop(paperspoon);
+            dropped_tx.send(()).expect("announce drop");
+        });
+        dropped_rx
+            .recv_timeout(Duration::from_millis(500))
+            .expect("drop waited for unresolved startup");
+
+        release_tx.send(()).expect("release startup worker");
+        finished_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("startup worker did not finish");
+        dropper.join().expect("dropper join");
+    }
+
+    #[test]
+    fn background_start_promotes_connected_transport() {
+        use std::io::BufRead as _;
+
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let mut paperspoon =
+            Paperspoon::start_with(move || connect_stream(addr).map(|stream| (addr, stream)));
+        let peer = accept_before(&listener, Duration::from_secs(2));
+        peer.set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("set peer timeout");
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            match paperspoon.send_action("media.play_pause") {
+                Ok(()) => break,
+                Err(error) if error.to_string().contains("PaperSpoon not connected") => {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "startup result was not promoted"
+                    );
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => panic!("unexpected action error: {error:#}"),
+            }
+        }
+
+        let mut line = String::new();
+        BufReader::new(peer)
+            .read_line(&mut line)
+            .expect("read action after startup");
+        assert_eq!(line, "event action=media.play_pause;\n");
+    }
+
+    #[test]
+    fn background_start_failure_remains_disconnected() {
+        let mut paperspoon =
+            Paperspoon::start_with(|| Err(anyhow::anyhow!("injected startup failure")));
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while paperspoon.startup_rx.is_some() {
+            paperspoon.poll_display();
+            assert!(
+                std::time::Instant::now() < deadline,
+                "startup failure was not collected"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        assert!(
+            paperspoon
+                .send_action("media.play_pause")
+                .expect_err("failed startup must remain disconnected")
+                .to_string()
+                .contains("PaperSpoon not connected")
+        );
     }
 
     fn transport_write_timeout(paperspoon: &Paperspoon) -> Option<Duration> {

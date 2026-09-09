@@ -47,18 +47,7 @@ fn run() -> Result<()> {
     );
 
     let paperpad_config = config::PaperpadConfig::from_env();
-    let mut paperspoon = match net::Paperspoon::connect(&paperpad_config) {
-        Ok(paperspoon) => {
-            eprintln!("transport: connected to PaperSpoon");
-            paperspoon
-        }
-        Err(error) => {
-            // A PaperSpoon that is down at startup is not fatal: the event
-            // loop runs, and each activation attempts a (bounded) reconnect.
-            eprintln!("transport error at startup: {error:#}");
-            net::Paperspoon::disconnected()
-        }
-    };
+    let mut paperspoon = net::Paperspoon::start(paperpad_config);
 
     let event_result = event_loop(&conn, win, gc, size, &mut paperspoon);
 
