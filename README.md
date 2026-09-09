@@ -138,6 +138,13 @@ Setting `RUST_X11_HELLO_COMPANION` (e.g. to a Wi-Fi run where the Mac is at
 RUST_X11_HELLO_COMPANION=192.168.0.12
 ```
 
+The host value is trimmed. An absent or blank host selects discovery, which
+uses the TCP port advertised by PaperSpoon. With an explicit host,
+`RUST_X11_HELLO_COMPANION_PORT` optionally overrides the default TCP port
+5581 and must be a decimal value in `1..=65535`. Empty, zero, malformed, or
+out-of-range ports—and a port override without an explicit host—are startup
+configuration errors reported before Paperpad creates its X11 window.
+
 This remains the deterministic control path and debugging/recovery override.
 When unset, discovery runs and there is **no** fallback to a hard-coded IP.
 
