@@ -81,6 +81,11 @@ display <text>
 which renders `<text>` in the window's status strip (below the exit bar)
 and is logged on the device as `display: <text>`.
 
+Display commands are case-sensitive. Paperpad accepts `display <text>` and
+the manual-terminal alias `display:<text>`; it trims surrounding payload
+whitespace and ignores empty commands or other strings beginning with
+`display`.
+
 ### Zero-config discovery (verified on this Paperwhite 6)
 
 By default PaperPad locates PaperSpoon with a minimal custom UDP
