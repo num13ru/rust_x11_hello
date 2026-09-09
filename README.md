@@ -106,6 +106,9 @@ existing TCP connect
   responses, no multicast.
 - The response payload never contains an IP address; the UDP source address
   is the discovered PaperSpoon address.
+- PaperPad listens for the full bounded probe schedule and deduplicates offers
+  for the same source-IP/advertised-port endpoint. Exactly one distinct
+  endpoint is accepted; two or more are rejected as ambiguous.
 - Each discovery attempt is bounded (3 probes, 500 ms window each). After a
   failed startup attempt, PaperPad waits two seconds and retries the whole
   resolution/discovery and TCP connection path in the background.
