@@ -98,6 +98,13 @@ fn forward_url(action_id: &str) -> io::Result<()> {
         .status()?;
     Ok(())
 }
+
+fn flush_stdout(context: &str) {
+    if let Err(error) = io::stdout().flush() {
+        eprintln!("stdout flush error {context}: {error}");
+    }
+}
+
 fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().collect();
     let opts = parse_options(&args);
@@ -129,28 +136,30 @@ fn main() -> io::Result<()> {
 
     let current = CurrentConnection::default();
 
-    {
+    let _stdin_worker = {
         let current = current.clone();
-        std::thread::spawn(move || {
-            let stdin = io::stdin();
-            for line in stdin.lock().lines() {
-                let line = match line {
-                    Ok(line) => line,
-                    Err(error) => {
-                        eprintln!("stdin read error: {error}");
-                        break;
+        std::thread::Builder::new()
+            .name("paperspoon-stdin".to_string())
+            .spawn(move || {
+                let stdin = io::stdin();
+                for line in stdin.lock().lines() {
+                    let line = match line {
+                        Ok(line) => line,
+                        Err(error) => {
+                            eprintln!("stdin read error: {error}");
+                            break;
+                        }
+                    };
+                    let line = line.trim();
+                    if line.is_empty() {
+                        continue;
                     }
-                };
-                let line = line.trim();
-                if line.is_empty() {
-                    continue;
+                    if let Err(error) = current.forward_line(line) {
+                        eprintln!("control write error: {error}");
+                    }
                 }
-                if let Err(error) = current.forward_line(line) {
-                    eprintln!("control write error: {error}");
-                }
-            }
-        });
-    }
+            })?
+    };
 
     for conn in listener.incoming() {
         let mut stream = match conn {
@@ -164,7 +173,7 @@ fn main() -> io::Result<()> {
             .peer_addr()
             .unwrap_or_else(|_| SocketAddr::from(([0, 0, 0, 0], 0)));
         println!("connected: {peer}");
-        let _ = io::stdout().flush();
+        flush_stdout("after connected banner");
 
         // This is now the active Kindle connection for control lines.
         let connection_token = match current.install(&stream) {
@@ -191,24 +200,28 @@ fn main() -> io::Result<()> {
         for line in reader.lines() {
             let line = match line {
                 Ok(line) => line,
-                Err(_) => break, // EOF or read error: client went away.
+                Err(error) => {
+                    eprintln!("TCP read error from {peer}: {error}");
+                    break;
+                }
             };
             let line = line.trim();
             if line.is_empty() {
                 continue;
             }
             println!("received from {peer}: {line}");
-            let _ = io::stdout().flush();
+            flush_stdout("after received line");
 
             let ts = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
-            // Never let a log write failure tear down the connection.
+            // Never let a log write or flush failure tear down the connection.
             if let Err(error) = writeln!(file, "{ts} {peer} {line}") {
                 eprintln!("log write error: {error}");
+            } else if let Err(error) = file.flush() {
+                eprintln!("log flush error: {error}");
             }
-            let _ = file.flush();
 
             if opts.forward_url
                 && let Some(action_id) = parse_action_line(line)
@@ -220,7 +233,7 @@ fn main() -> io::Result<()> {
         current.clear_if_current(&connection_token);
 
         println!("disconnected: {peer}");
-        let _ = io::stdout().flush();
+        flush_stdout("after disconnected banner");
     }
     Ok(())
 }
