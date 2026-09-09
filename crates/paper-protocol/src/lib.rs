@@ -52,17 +52,15 @@ pub fn parse_action_line(line: &str) -> Option<&str> {
 
 /// Parse a PaperSpoon display command into its text payload.
 ///
-/// This intentionally preserves the existing permissive prefix behavior:
-/// every line beginning with `display` is treated as a display command.
-/// Canonical `display <text>` and tolerated `display: <text>` forms are both
-/// accepted. Empty payloads and unrelated lines return `None`.
+/// Canonical `display <text>` and the manual-terminal alias
+/// `display:<text>` are accepted. The prefix is case-sensitive. Empty
+/// payloads, concatenated prefixes, and unrelated lines return `None`.
 pub fn parse_display_command(line: &str) -> Option<String> {
     let line = line.trim_end_matches('\n');
-    let rest = line
-        .strip_prefix(DISPLAY_PREFIX)
-        .or_else(|| line.strip_prefix(&format!("{DISPLAY_PREFIX}{DISPLAY_COLON_SPECIFIER}")))
-        .or_else(|| line.strip_prefix(&format!("{DISPLAY_PREFIX}{DISPLAY_SPACE_SPECIFIER}")))?;
-    let rest = rest.strip_prefix(DISPLAY_COLON_SPECIFIER).unwrap_or(rest);
+    let rest = line.strip_prefix(DISPLAY_PREFIX)?;
+    let rest = rest
+        .strip_prefix(DISPLAY_SPACE_SPECIFIER)
+        .or_else(|| rest.strip_prefix(DISPLAY_COLON_SPECIFIER))?;
     let text = rest.trim();
     if text.is_empty() {
         None
@@ -137,16 +135,23 @@ mod tests {
             Some("world".to_string())
         );
         assert_eq!(
+            parse_display_command("display:compact"),
+            Some("compact".to_string())
+        );
+        assert_eq!(
             parse_display_command("display spaced "),
             Some("spaced".to_string())
         );
     }
 
     #[test]
-    fn display_parser_preserves_permissive_prefix_behavior() {
-        assert_eq!(parse_display_command("displayed"), Some("ed".to_string()));
+    fn display_parser_rejects_non_command_prefixes_and_empty_payloads() {
+        assert_eq!(parse_display_command("displayed"), None);
+        assert_eq!(parse_display_command("display-text"), None);
+        assert_eq!(parse_display_command("Display hello"), None);
         assert_eq!(parse_display_command("display\n"), None);
         assert_eq!(parse_display_command("display:\n"), None);
+        assert_eq!(parse_display_command("display \n"), None);
         assert_eq!(parse_display_command("event action=x;\n"), None);
     }
 
