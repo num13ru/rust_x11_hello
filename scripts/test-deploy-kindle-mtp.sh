@@ -20,7 +20,6 @@ chmod +x "$FAKE_MTP_BIN"
 mkdir -p "${LOCAL_PACKAGE}/bin"
 printf 'new-binary' >"${LOCAL_PACKAGE}/bin/rust_x11_hello"
 printf 'run' >"${LOCAL_PACKAGE}/bin/run.sh"
-printf 'show' >"${LOCAL_PACKAGE}/bin/show.sh"
 printf 'stop' >"${LOCAL_PACKAGE}/bin/stop.sh"
 printf 'config' >"${LOCAL_PACKAGE}/config.xml"
 printf 'menu' >"${LOCAL_PACKAGE}/menu.json"
@@ -29,6 +28,7 @@ prepare_remote() {
     local fake_root="$1"
     mkdir -p "${fake_root}/extensions/rust_x11_hello/bin"
     printf 'old-binary' >"${fake_root}/extensions/rust_x11_hello/bin/rust_x11_hello"
+    printf 'retired-show' >"${fake_root}/extensions/rust_x11_hello/bin/show.sh"
 }
 
 run_update() {
@@ -55,7 +55,9 @@ cmp "${LOCAL_PACKAGE}/bin/rust_x11_hello" \
 printf 'old-binary' | cmp - \
     "${SUCCESS_ROOT}/extensions/rust_x11_hello/bin/rust_x11_hello.previous"
 test ! -e "${SUCCESS_ROOT}/extensions/rust_x11_hello/bin/rust_x11_hello.new"
+test ! -e "${SUCCESS_ROOT}/extensions/rust_x11_hello/bin/show.sh"
 grep -Fq 'rm /extensions/rust_x11_hello/bin/rust_x11_hello.new --yes' "$SUCCESS_LOG"
+grep -Fq 'rm /extensions/rust_x11_hello/bin/show.sh --yes' "$SUCCESS_LOG"
 if grep -Fq 'rename ' "$SUCCESS_LOG"; then
     printf 'unexpected rename command in successful update\n' >&2
     exit 1
@@ -79,4 +81,17 @@ test "$(grep -Fc ' /extensions/rust_x11_hello/bin/rust_x11_hello --replace --ver
     "$FAILURE_LOG")" -eq 2
 grep -Fq 'Rollback restored the previous binary.' "$FAILURE_OUTPUT"
 
-printf 'deploy-kindle-mtp mock success and rollback checks passed\n'
+REMOVAL_FAILURE_ROOT="${TEST_TMP_DIR}/removal-failure-remote"
+REMOVAL_FAILURE_LOG="${TEST_TMP_DIR}/removal-failure.log"
+REMOVAL_FAILURE_OUTPUT="${TEST_TMP_DIR}/removal-failure.output"
+prepare_remote "$REMOVAL_FAILURE_ROOT"
+run_update "$REMOVAL_FAILURE_ROOT" "$REMOVAL_FAILURE_LOG" \
+    FAKE_FAIL_RETIRED_REMOVAL=1 >"$REMOVAL_FAILURE_OUTPUT" 2>&1
+
+cmp "${LOCAL_PACKAGE}/bin/rust_x11_hello" \
+    "${REMOVAL_FAILURE_ROOT}/extensions/rust_x11_hello/bin/rust_x11_hello"
+test -e "${REMOVAL_FAILURE_ROOT}/extensions/rust_x11_hello/bin/show.sh"
+grep -Fq 'WARNING: new menu installed, but retired show.sh cleanup failed.' \
+    "$REMOVAL_FAILURE_OUTPUT"
+
+printf 'deploy-kindle-mtp mock success, rollback, and retired-file checks passed\n'

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <extension>
     <information>
-        <name>Rust X11 Hello</name>
+        <name>Paperpad</name>
         <version>0.1.0</version>
         <author>local</author>
         <id>rust-x11-hello</id>

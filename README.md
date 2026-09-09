@@ -245,7 +245,8 @@ scripts/deploy-kindle-mtp.sh install
 
 The installer verifies each upload by reading it back and uploads `menu.json` last, so KUAL does not expose a partially transferred extension. It refuses to overwrite an existing canonical installation.
 
-For a later update, first let the watchdog stop the app (or use the validated stop action), confirm the window is gone, and run:
+For a later update, first let the watchdog stop the app (or use **Stop
+Paperpad**), confirm the window is gone, and run:
 
 ```sh
 scripts/deploy-kindle-mtp.sh update --confirm-stopped
@@ -257,7 +258,10 @@ MTP does not provide a multi-file transaction. If an update transfer fails befor
 
 ## Device test
 
-In KUAL, use **Run Rust X11 Hello (90s)**. Perform taps within the visible window, then allow the watchdog to end the run. If KUAL remains accessible, **Stop Rust X11 Hello** sends `TERM` only after verifying the PID belongs to the installed binary.
+In KUAL, use **Run Paperpad (90s)**. Perform taps within the visible window,
+then allow the watchdog to end the run. If KUAL remains accessible, **Stop
+Paperpad** sends `TERM` only after verifying the PID belongs to the installed
+binary.
 
 After the process ends, retrieve the log:
 

@@ -10,7 +10,7 @@ show_status() {
     DISPLAY_TEXT="$1"
 
     if command -v eips >/dev/null 2>&1; then
-        eips 1 5 "Rust X11 Hello:"
+        eips 1 5 "Paperpad:"
         eips 1 7 "$DISPLAY_TEXT"
     fi
 }

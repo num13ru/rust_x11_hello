@@ -9,7 +9,6 @@ check:
 	cargo clippy --workspace --all-targets -- -D warnings
 	cargo test --workspace
 	sh -n kindle-extension/rust_x11_hello/bin/run.sh
-	sh -n kindle-extension/rust_x11_hello/bin/show.sh
 	sh -n kindle-extension/rust_x11_hello/bin/stop.sh
 	bash -n scripts/deploy-kindle-mtp.sh
 	bash scripts/test-deploy-kindle-mtp.sh
