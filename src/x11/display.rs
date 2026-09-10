@@ -15,7 +15,7 @@ pub const WINDOW_BORDER_WIDTH: u16 = 0;
 /// X11 wire value meaning "inherit from parent" for the window visual.
 pub const VISUAL_COPY_FROM_PARENT: u32 = 0;
 
-/// Event mask selecting the core events the touch prototype consumes.
+/// Event mask selecting the core events Paperpad consumes.
 pub fn touch_event_mask() -> EventMask {
     EventMask::EXPOSURE
         | EventMask::STRUCTURE_NOTIFY

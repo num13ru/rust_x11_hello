@@ -1,8 +1,35 @@
-# rust_x11_hello
+# Paperpad
 
-A bounded Kindle/KUAL prototype for determining whether the Kindle X server translates touchscreen input into core X11 pointer events.
+Paperpad is a bounded Kindle/KUAL grid remote. It translates core X11 touch
+events into stable semantic actions, sends them over Wi-Fi to the PaperSpoon
+macOS companion, and renders short status commands returned by PaperSpoon.
 
-The current milestone opens a persistent override-redirect X11 window, redraws final `Expose` batches, tracks valid geometry changes, and writes one structured line per `ButtonPress`/`ButtonRelease`. Pointer motion is subscribed but deliberately not logged. The KUAL launcher serializes launch attempts with an owner-checked lock and stops the test after 90 seconds, with a five-second `TERM` grace followed by `KILL` only after revalidating the recorded PID and executable.
+The repository, Cargo package, device binary, environment variables, and
+extension path retain the MVP identifier `rust_x11_hello`. The KUAL launcher
+serializes launch attempts with an owner-checked lock and stops a run after 90
+seconds, with a five-second `TERM` grace followed by `KILL` only after
+revalidating the recorded PID and executable.
+
+## Ownership and module boundaries
+
+| Area | Owner |
+| --- | --- |
+| Process setup and teardown | `src/main.rs` |
+| Environment parsing and validation | `src/config.rs` |
+| UI state and activation decisions | `src/app.rs`, using pure logic from `src/ui/` |
+| X11 resources, event translation, and rendering | `src/x11/` |
+| Paperpad TCP lifecycle, workers, queues, and display mailbox | `src/net/` |
+| Unique-endpoint discovery policy | `src/discovery.rs` |
+| Shared wire constants, formatting, and parsing | `crates/paper-protocol/` |
+| PaperSpoon listener, current connection, discovery responder, and forwarding | `tools/paperspoon/` |
+| KUAL lifecycle and MTP packaging | `kindle-extension/` and `scripts/deploy-kindle-mtp.sh` |
+
+The dependency direction is deliberate: protocol code depends only on
+`std`; UI geometry and decisions know nothing about X11 or sockets; X11 and
+network modules adapt external events into those decisions. The X11 thread
+owns the window and `AppState`. Network workers own blocking connection work,
+with actions crossing a bounded queue and display updates crossing a
+single-slot latest-value mailbox.
 
 ## Conditions under which this works
 
@@ -48,9 +75,9 @@ Every activation also emits its stable semantic action id. The current grid maps
 | 9 | `stub.button_9` |
 | Exit (ID 10) | `app.exit` (closes the window locally) |
 
-Buttons 7–9 send placeholder action IDs for future companion bindings. The previous
-760×528 three-row layout was confirmed on the physical Kindle; the new full-screen
-layout still needs device verification.
+Buttons 7–9 send placeholder action IDs for future companion bindings. Rendering
+and touch behavior remain device-specific and must be rechecked after changes
+to geometry, event translation, or the X11 adapter.
 
 These dotted ids are the wire units of the semantic protocol; the transport
 that carries them is described below. USBNetwork itself is not used: no
@@ -80,6 +107,18 @@ display <text>
 which renders `<text>` in the window's status strip (below the exit bar)
 and is logged on the device as `display: <text>`.
 
+Display commands are case-sensitive. Paperpad accepts `display <text>` and
+the manual-terminal alias `display:<text>`; it trims surrounding payload
+whitespace and ignores empty commands or other strings beginning with
+`display`.
+
+Control lines must be valid UTF-8 and remain bounded by the 8 KiB inbound-line
+limit. For the Kindle core X11 font, Paperpad preserves printable ASCII
+(`U+0020..=U+007E`), renders control and non-ASCII Unicode scalars as `?`, and
+draws at most 255 output bytes. Longer status text is truncated at that
+rendering boundary without terminating the app; diagnostics retain the
+original received text.
+
 ### Zero-config discovery (verified on this Paperwhite 6)
 
 By default PaperPad locates PaperSpoon with a minimal custom UDP
@@ -95,8 +134,9 @@ PaperSpoon (UDP 5580) replies with a unicast HERE <nonce> <tcp-port>
 existing TCP connect
 ```
 
-- Fixed ports: **UDP 5580** (PaperSpoon discovery listener), **UDP 5582**
-  (PaperPad discovery client), **TCP 5581** (existing listener).
+- Fixed discovery ports: **UDP 5580** (PaperSpoon listener) and **UDP 5582**
+  (PaperPad client). PaperSpoon TCP defaults to **5581**; its discovery reply
+  advertises the actual bound TCP port when a different port is selected.
 - The wire format is newline-terminated ASCII: `PAPERPAD DISCOVER <nonce>`
   and `PAPERSPOON HERE <nonce> <tcp-port>`. The nonce distinguishes the
   current attempt from stale/unrelated datagrams; the response must echo it.
@@ -104,8 +144,12 @@ existing TCP connect
   responses, no multicast.
 - The response payload never contains an IP address; the UDP source address
   is the discovered PaperSpoon address.
-- Discovery is bounded (3 probes, 500 ms window each) and the UI remains
-  usable even when PaperSpoon cannot be found.
+- PaperPad listens for the full bounded probe schedule and deduplicates offers
+  for the same source-IP/advertised-port endpoint. Exactly one distinct
+  endpoint is accepted; two or more are rejected as ambiguous.
+- Each discovery attempt is bounded (3 probes, 500 ms window each). After a
+  failed startup attempt, PaperPad waits two seconds and retries the whole
+  resolution/discovery and TCP connection path in the background.
 
 On the Kindle the firewall INPUT policy is restrictive, so the launcher
 installs a narrow temporary ACCEPT rule for the discovery response before
@@ -127,6 +171,13 @@ Setting `RUST_X11_HELLO_COMPANION` (e.g. to a Wi-Fi run where the Mac is at
 RUST_X11_HELLO_COMPANION=192.168.0.12
 ```
 
+The host value is trimmed. An absent or blank host selects discovery, which
+uses the TCP port advertised by PaperSpoon. With an explicit host,
+`RUST_X11_HELLO_COMPANION_PORT` optionally overrides the default TCP port
+5581 and must be a decimal value in `1..=65535`. Empty, zero, malformed, or
+out-of-range ports—and a port override without an explicit host—are startup
+configuration errors reported before Paperpad creates its X11 window.
+
 This remains the deterministic control path and debugging/recovery override.
 When unset, discovery runs and there is **no** fallback to a hard-coded IP.
 
@@ -136,19 +187,19 @@ discovery chain (Test B), PaperPad restart (Test C), Mac DHCP address change
 `192.168.0.12 -> 192.168.0.50` with no configuration edit (Test D), and
 bounded failure with the UI alive when PaperSpoon is absent (Test E).
 
-A PaperSpoon that is unreachable costs bounded time and is logged as
-`transport error: ...` on the device; it never breaks the X11 event loop or
-the on-device activation log, and the Kindle retries on the next activation.
+A PaperSpoon that is unreachable costs bounded time per attempt and is logged
+on the device; it never breaks the X11 event loop or the on-device activation
+log. PaperPad retries in the background every two seconds. Actions made while
+disconnected fail immediately and are not queued or replayed after connection.
 The Kindle opens no listening TCP socket; only the action id leaves the
 device, and only `display` commands enter it.
 
 ### Running PaperSpoon
 
-Build and run the Rust listener (on the Mac):
+From the repository root, build and run the Rust listener on the Mac:
 
 ```sh
-cd tools/paperspoon
-cargo build --release
+cargo build --release --package paperspoon
 ./target/release/paperspoon 5581 /tmp/paperspoon.log
 ```
 
@@ -167,6 +218,9 @@ available on this Paperwhite 6 — no maintained USBNetwork package accepts
 the device — so the USBNetwork
 interface setup and MTP/USBNetwork exclusivity rules do not apply.
 
+Passing TCP port `0` asks the OS for an ephemeral port; PaperSpoon prints and
+advertises that actual port rather than `0` or the default.
+
 ### Hammering actions into the Mac (Hammerspoon)
 
 PaperSpoon forwards every received action line to Hammerspoon as a URL event:
@@ -174,8 +228,7 @@ it runs `open -g hammerspoon://paperpad?action=<id>` once per action.
 Forwarding is on by default; pass `--no-forward-url` to disable it:
 
 ```sh
-cd tools/paperspoon
-cargo build --release
+cargo build --release --package paperspoon
 ./target/release/paperspoon 5581 /tmp/paperspoon.log
 ```
 
@@ -198,11 +251,13 @@ exactly one action — no sockets to manage, no timers, no replay loops.
 
 ## Host checks and Kindle build
 
+Run the complete gate from the repository root, in this order:
 
 ```sh
 make check
 make build
 make verify
+git diff --check
 ```
 
 The verified package is `kindle-extension/rust_x11_hello`; its binary is:
@@ -211,7 +266,11 @@ The verified package is `kindle-extension/rust_x11_hello`; its binary is:
 kindle-extension/rust_x11_hello/bin/rust_x11_hello
 ```
 
-`make check` requires the Rust toolchain, Bash, and `jq`. `make build` and `make verify` require Docker. Verification rejects a dynamic interpreter and GLIBC symbol requirements.
+`make check` formats, checks, lints, and tests the whole Rust workspace; it
+also validates the KUAL scripts, MTP deployment success/rollback/failure
+paths, and menu JSON. It requires the Rust toolchain, Bash, `jq`, and local
+loopback socket access. `make build` and `make verify` require Docker.
+Verification rejects a dynamic interpreter and GLIBC symbol requirements.
 
 ## Fresh MTP installation
 
@@ -223,7 +282,8 @@ scripts/deploy-kindle-mtp.sh install
 
 The installer verifies each upload by reading it back and uploads `menu.json` last, so KUAL does not expose a partially transferred extension. It refuses to overwrite an existing canonical installation.
 
-For a later update, first let the watchdog stop the app (or use the validated stop action), confirm the window is gone, and run:
+For a later update, first use Paperpad's in-window **Exit** button or let the
+watchdog stop the app, confirm the window is gone, and run:
 
 ```sh
 scripts/deploy-kindle-mtp.sh update --confirm-stopped
@@ -235,7 +295,10 @@ MTP does not provide a multi-file transaction. If an update transfer fails befor
 
 ## Device test
 
-In KUAL, use **Run Rust X11 Hello (90s)**. Perform taps within the visible window, then allow the watchdog to end the run. If KUAL remains accessible, **Stop Rust X11 Hello** sends `TERM` only after verifying the PID belongs to the installed binary.
+In KUAL, use **Run Paperpad (90s)**. Perform taps within the visible window,
+then use Paperpad's in-window **Exit** button or allow the watchdog to end the
+run. There is no separate stop menu item because Paperpad covers KUAL while its
+full-screen window is open.
 
 After the process ends, retrieve the log:
 

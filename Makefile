@@ -4,16 +4,15 @@ WORKDIR := /work
 .PHONY: check
 
 check:
-	cargo fmt --check
-	cargo check
-	cargo clippy --all-targets -- -D warnings
-	cargo test
+	cargo fmt --all --check
+	cargo check --workspace
+	cargo clippy --workspace --all-targets -- -D warnings
+	cargo test --workspace
 	sh -n kindle-extension/rust_x11_hello/bin/run.sh
-	sh -n kindle-extension/rust_x11_hello/bin/show.sh
-	sh -n kindle-extension/rust_x11_hello/bin/stop.sh
 	bash -n scripts/deploy-kindle-mtp.sh
 	bash scripts/test-deploy-kindle-mtp.sh
-	jq empty kindle-extension/rust_x11_hello/menu.json
+	jq -e '.items == [{"name":"Run Paperpad (90s)","action":"sh bin/run.sh"}]' \
+		kindle-extension/rust_x11_hello/menu.json >/dev/null
 
 .PHONY: image build verify shell clean clean-gnu clean-target
 

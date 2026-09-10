@@ -8,7 +8,7 @@ OUT_BIN="target/${TARGET}/release/${BIN_NAME}"
 
 rustup target add "${TARGET}"
 
-cargo build --release --target "${TARGET}"
+cargo build --release --target "${TARGET}" --package "${BIN_NAME}"
 
 mkdir -p "${EXT_DIR}/bin"
 

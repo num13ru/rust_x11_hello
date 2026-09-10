@@ -58,12 +58,22 @@ trap cleanup_local_temp EXIT
 
 upload_package_files() {
     mtp put "${LOCAL_EXT}/bin/run.sh" "${REMOTE_BIN_DIR}/run.sh" --replace --verify
-    mtp put "${LOCAL_EXT}/bin/show.sh" "${REMOTE_BIN_DIR}/show.sh" --replace --verify
-    mtp put "${LOCAL_EXT}/bin/stop.sh" "${REMOTE_BIN_DIR}/stop.sh" --replace --verify
     mtp put "${LOCAL_EXT}/config.xml" "${REMOTE_EXT}/config.xml" --replace --verify
 
     # Upload menu.json last so KUAL does not expose a partially installed package.
     mtp put "${LOCAL_EXT}/menu.json" "${REMOTE_EXT}/menu.json" --replace --verify
+
+    # Retire support files only after the new menu no longer references them.
+    if remote_name_exists "${REMOTE_BIN_DIR}" stop.sh; then
+        if ! mtp rm "${REMOTE_BIN_DIR}/stop.sh" --yes; then
+            printf 'WARNING: new menu installed, but retired stop.sh cleanup failed.\n' >&2
+        fi
+    fi
+    if remote_name_exists "${REMOTE_BIN_DIR}" show.sh; then
+        if ! mtp rm "${REMOTE_BIN_DIR}/show.sh" --yes; then
+            printf 'WARNING: new menu installed, but retired show.sh cleanup failed.\n' >&2
+        fi
+    fi
 }
 
 case "$MODE" in
@@ -89,8 +99,6 @@ esac
 for required_file in \
     "$LOCAL_BIN" \
     "${LOCAL_EXT}/bin/run.sh" \
-    "${LOCAL_EXT}/bin/show.sh" \
-    "${LOCAL_EXT}/bin/stop.sh" \
     "${LOCAL_EXT}/config.xml" \
     "${LOCAL_EXT}/menu.json"
 do

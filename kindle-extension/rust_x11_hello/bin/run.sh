@@ -10,9 +10,8 @@ LOCK_DIR="$EXT_DIR/rust_x11_hello.lock"
 LOCK_OWNER_FILE="$LOCK_DIR/launcher.pid"
 WATCHDOG_SECONDS="${RUST_X11_HELLO_WATCHDOG_SECONDS:-90}"
 WATCHDOG_TERM_GRACE_SECONDS="${RUST_X11_HELLO_WATCHDOG_TERM_GRACE_SECONDS:-5}"
-# Default is the legacy USBNetwork static host; this PW6 cannot run USBNetwork
-#, so KUAL sets
-# RUST_X11_HELLO_COMPANION to the Mac's LAN address over Wi-Fi.
+# The normal KUAL action leaves this unset for UDP discovery. An explicit host
+# remains available as a manual diagnostic override.
 COMPANION_HOST="${RUST_X11_HELLO_COMPANION:-}"
 
 CHILD_PID=""
@@ -142,7 +141,7 @@ show_status() {
     DISPLAY_TEXT="$1"
 
     if command -v eips >/dev/null 2>&1; then
-        eips 1 5 "Rust X11 Hello:"
+        eips 1 5 "Paperpad:"
         eips 1 7 "$DISPLAY_TEXT"
     fi
 }
@@ -162,7 +161,7 @@ trap 'forward_signal TERM' TERM
 
 {
     echo "========================================"
-    echo "KUAL Rust X11 Hello launcher"
+    echo "KUAL Paperpad launcher"
     echo "Date: $(date)"
     echo "PWD: $(pwd)"
     echo "UID/GID: $(id 2>/dev/null || echo 'id unavailable')"

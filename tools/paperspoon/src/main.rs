@@ -7,13 +7,10 @@
 //!   file (default `paperspoon.log`);
 //! - lines typed on stdin are forwarded to the Kindle as control commands
 //!   (`display <text>`);
-//! - received action lines are also sent as UDP datagrams to a local
-//!   consumer (default `127.0.0.1:5584`) so Hammerspoon can dispatch them
-//!   without opening another TCP port. One datagram per action line: the
-//!   consumer fires exactly once per datagram, so actions never replay.
+//! - received action IDs are optionally forwarded to Hammerspoon with
+//!   `open -g hammerspoon://paperpad?action=<id>`.
 //!
-//! Usage: `paperspoon [<port> <log-file>] [--forward-udp <port> |
-//!         --no-forward-udp]`
+//! Usage: `paperspoon [<port> <log-file>] [--no-forward-url]`
 //!
 //! Only the most recently accepted connection receives stdin control lines.
 //! The Kindle reconnects across runs, and each accepted socket would get its
@@ -22,22 +19,24 @@
 //! One forwarder thread therefore writes every stdin line to the current
 //! connection, replaced on each accept.
 //!
-//! UDP forwarding is best-effort and stateless: if the consumer is not
-//! listening when an action arrives, the datagram is dropped (UDP semantics)
-//! and the next action is delivered normally. The Kindle-facing accept loop
-//! never blocks on the forward path.
+//! URL-forwarding failures are reported without discarding the already logged
+//! action. Passing `--no-forward-url` disables the Hammerspoon launch.
 
 use std::env;
 use std::fs::OpenOptions;
 use std::io::{self, BufRead, BufReader, Write};
-use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::sync::{Arc, Mutex};
+use std::net::{SocketAddr, TcpListener};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use paper_protocol::{DISCOVERY_PORT, parse_action_line};
+
 mod discovery;
+mod server;
+
+use server::CurrentConnection;
 
 /// Default TCP port. Must match `rust_x11_hello`'s `COMPANION_PORT`.
-const DEFAULT_PORT: u16 = 5581;
+const DEFAULT_PORT: u16 = paper_protocol::DEFAULT_TCP_PORT;
 /// Default log file name for received activation lines.
 const DEFAULT_LOG_FILE: &str = "paperspoon.log";
 /// Whether to forward actions to Hammerspoon via `open -g hammerspoon://`.
@@ -55,19 +54,19 @@ fn parse_options(args: &[String]) -> Options {
     let mut port = DEFAULT_PORT;
     let mut log_path = DEFAULT_LOG_FILE.to_string();
     let mut forward_url = FORWARD_TO_HAMMERSPOON;
-    let mut positional = args.iter().skip(1);
-    while let Some(arg) = positional.next() {
+    let positional = args.iter().skip(1);
+    for arg in positional {
         match arg.as_str() {
             "--no-forward-url" => {
                 forward_url = false;
             }
             _ => {
                 // Positional: try port first, then log file.
-                if port == DEFAULT_PORT {
-                    if let Ok(parsed) = arg.parse() {
-                        port = parsed;
-                        continue;
-                    }
+                if port == DEFAULT_PORT
+                    && let Ok(parsed) = arg.parse()
+                {
+                    port = parsed;
+                    continue;
                 }
                 if log_path == DEFAULT_LOG_FILE {
                     log_path = arg.clone();
@@ -94,12 +93,33 @@ fn forward_url(action_id: &str) -> io::Result<()> {
         .status()?;
     Ok(())
 }
+
+fn flush_stdout(context: &str) {
+    if let Err(error) = io::stdout().flush() {
+        eprintln!("stdout flush error {context}: {error}");
+    }
+}
+
 fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().collect();
     let opts = parse_options(&args);
 
     let listener = TcpListener::bind(("0.0.0.0", opts.port))?;
-    println!("listening on 0.0.0.0:{}, logging to {}", opts.port, opts.log_path);
+    let tcp_port = listener.local_addr()?.port();
+    let discovery_socket = discovery::bind_discovery_socket()?;
+    let _discovery_worker = std::thread::Builder::new()
+        .name("paperspoon-discovery".to_string())
+        .spawn(move || {
+            if let Err(error) = discovery::run_discovery_listener(discovery_socket, tcp_port) {
+                eprintln!("discovery listener error: {error}");
+            }
+        })?;
+
+    println!(
+        "listening on 0.0.0.0:{}, logging to {}",
+        tcp_port, opts.log_path
+    );
+    println!("discovery listening address=0.0.0.0:{DISCOVERY_PORT}");
 
     println!("type 'display <text>' to send a control command");
     if opts.forward_url {
@@ -109,44 +129,32 @@ fn main() -> io::Result<()> {
     }
     io::stdout().flush()?;
 
-    // Discovery responder: serve confirmations on UDP 5580 regardless of the
-    // TCP accept loop. A bind failure here is fatal (PaperPad cannot find us
-    // without it).
-    std::thread::spawn(|| {
-        if let Err(error) = discovery::run_discovery_listener() {
-            eprintln!("discovery listener error: {error}");
-        }
-    });
+    let current = CurrentConnection::default();
 
-    let current: Arc<Mutex<Option<TcpStream>>> = Arc::new(Mutex::new(None));
-
-    {
-        let current = Arc::clone(&current);
-        std::thread::spawn(move || {
-            let stdin = io::stdin();
-            for line in stdin.lock().lines() {
-                let line = match line {
-                    Ok(line) => line,
-                    Err(_) => break,
-                };
-                let line = line.trim();
-                if line.is_empty() {
-                    continue;
+    let _stdin_worker = {
+        let current = current.clone();
+        std::thread::Builder::new()
+            .name("paperspoon-stdin".to_string())
+            .spawn(move || {
+                let stdin = io::stdin();
+                for line in stdin.lock().lines() {
+                    let line = match line {
+                        Ok(line) => line,
+                        Err(error) => {
+                            eprintln!("stdin read error: {error}");
+                            break;
+                        }
+                    };
+                    let line = line.trim();
+                    if line.is_empty() {
+                        continue;
+                    }
+                    if let Err(error) = current.forward_line(line) {
+                        eprintln!("control write error: {error}");
+                    }
                 }
-                // Clone a fresh socket handle out of the lock: TcpStream is
-                // not Clone, and the lock must not be held across the write
-                // (the accept loop sets `current` under the same lock).
-                let write_stream = current
-                    .lock()
-                    .expect("current lock")
-                    .as_ref()
-                    .and_then(|stream| stream.try_clone().ok());
-                if let Some(mut stream) = write_stream {
-                    let _ = writeln!(stream, "{line}");
-                }
-            }
-        });
-    }
+            })?
+    };
 
     for conn in listener.incoming() {
         let mut stream = match conn {
@@ -160,17 +168,16 @@ fn main() -> io::Result<()> {
             .peer_addr()
             .unwrap_or_else(|_| SocketAddr::from(([0, 0, 0, 0], 0)));
         println!("connected: {peer}");
-        let _ = io::stdout().flush();
+        flush_stdout("after connected banner");
 
         // This is now the active Kindle connection for control lines.
-        let write_stream = match stream.try_clone() {
-            Ok(s) => s,
+        let connection_token = match current.install(&stream) {
+            Ok(token) => token,
             Err(e) => {
                 eprintln!("clone error for {peer}: {e}");
                 continue;
             }
         };
-        *current.lock().expect("current lock") = Some(write_stream);
 
         let mut file = match OpenOptions::new()
             .create(true)
@@ -180,6 +187,7 @@ fn main() -> io::Result<()> {
             Ok(f) => f,
             Err(e) => {
                 eprintln!("log open error for {peer}: {e}");
+                current.clear_if_current(&connection_token);
                 continue;
             }
         };
@@ -187,45 +195,40 @@ fn main() -> io::Result<()> {
         for line in reader.lines() {
             let line = match line {
                 Ok(line) => line,
-                Err(_) => break, // EOF or read error: client went away.
+                Err(error) => {
+                    eprintln!("TCP read error from {peer}: {error}");
+                    break;
+                }
             };
             let line = line.trim();
             if line.is_empty() {
                 continue;
             }
             println!("received from {peer}: {line}");
-            let _ = io::stdout().flush();
+            flush_stdout("after received line");
 
             let ts = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
-            // Never let a log write failure tear down the connection.
+            // Never let a log write or flush failure tear down the connection.
             if let Err(error) = writeln!(file, "{ts} {peer} {line}") {
                 eprintln!("log write error: {error}");
+            } else if let Err(error) = file.flush() {
+                eprintln!("log flush error: {error}");
             }
-            let _ = file.flush();
 
-            if opts.forward_url {
-                if let Some(action_id) = line.strip_prefix("event action=").and_then(|s| s.strip_suffix(';')) {
-                    if let Err(error) = forward_url(action_id) {
-                        eprintln!("forward error to Hammerspoon: {error}");
-                    }
-                }
+            if opts.forward_url
+                && let Some(action_id) = parse_action_line(line)
+                && let Err(error) = forward_url(action_id)
+            {
+                eprintln!("forward error to Hammerspoon: {error}");
             }
         }
-        let stale = current
-            .lock()
-            .expect("current lock")
-            .as_ref()
-            .and_then(|s| s.peer_addr().ok())
-            == Some(peer);
-        if stale {
-            *current.lock().expect("current lock") = None;
-        }
+        current.clear_if_current(&connection_token);
 
         println!("disconnected: {peer}");
-        let _ = io::stdout().flush();
+        flush_stdout("after disconnected banner");
     }
     Ok(())
 }
@@ -233,8 +236,6 @@ fn main() -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-
 
     #[test]
     fn parse_options_keeps_backward_compatible_positional_args() {
@@ -256,10 +257,7 @@ mod tests {
 
     #[test]
     fn parse_options_without_forward_url_disables() {
-        let opts = parse_options(&[
-            "paperspoon".to_string(),
-            "--no-forward-url".to_string(),
-        ]);
+        let opts = parse_options(&["paperspoon".to_string(), "--no-forward-url".to_string()]);
         assert!(!opts.forward_url);
     }
 

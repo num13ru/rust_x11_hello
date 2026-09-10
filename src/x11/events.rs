@@ -1,17 +1,20 @@
-//! Event loop, raw event diagnostics, and rendering onto X11.
+//! Event loop and raw X11 event diagnostics.
 //!
 //! This is the boundary layer: it translates `x11rb::protocol::Event` into
-//! [`crate::ui::button::PointerEvent`] and renders logical layouts with
-//! core-X11 requests. The UI layer never sees X11 types.
+//! [`crate::ui::button::PointerEvent`]. Rendering is delegated to the sibling
+//! adapter, and the UI layer never sees X11 types.
 
+use super::render::draw;
+
+use crate::app::{Activation, AppState, GeometryUpdate, Redraw};
 use crate::net::Paperspoon;
-use crate::ui::action::{SemanticAction, action_for_button};
-use crate::ui::button::{ContactTracker, PointerEvent, PointerEventKind, handle_pointer_event};
-use crate::ui::geometry::{Point, STATUS_BAR_HEIGHT, draw_layout};
+use crate::ui::button::{PointerEvent, PointerEventKind};
+use crate::ui::geometry::Point;
 use anyhow::{Context, Result, anyhow};
+use std::time::Duration;
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
-use x11rb::protocol::xproto::{ButtonPressEvent, ConnectionExt, Gcontext, Rectangle, Window};
+use x11rb::protocol::xproto::{ButtonPressEvent, ConnectionExt, Gcontext, Window};
 use x11rb::rust_connection::RustConnection;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -19,24 +22,7 @@ pub enum EventLoopExit {
     WindowDestroyed,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum GeometryUpdate {
-    IgnoredZero,
-    Unchanged,
-    Changed { width: u16, height: u16 },
-}
-/// Left inset of the status text drawn in the status strip.
-const STATUS_TEXT_X: u16 = 20;
-/// Vertical distance from the window's bottom edge to the status baseline.
-///
-/// The baseline sits inside the status strip (below the exit bar), with
-/// room for the text's ascent; the strip itself is `STATUS_BAR_HEIGHT`
-/// reference pixels tall.
-const STATUS_TEXT_BOTTOM_MARGIN: u16 = 10;
-// The status strip is what separates the exit bar from the status text.
-const _: () = {
-    assert!(STATUS_BAR_HEIGHT > STATUS_TEXT_BOTTOM_MARGIN);
-};
+const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 /// Run the event loop until the window is destroyed or the connection fails.
 pub fn event_loop(
@@ -46,35 +32,35 @@ pub fn event_loop(
     initial_size: (u16, u16),
     paperspoon: &mut Paperspoon,
 ) -> Result<EventLoopExit> {
-    let (mut width, mut height) = initial_size;
-    let mut contact = ContactTracker::default();
-    let mut status_text: Option<String> = None;
+    let mut app = AppState::new(initial_size);
 
     if let Some(text) = paperspoon.poll_display() {
-        status_text = Some(text);
-        draw(conn, win, gc, width, height, status_text.as_deref())
+        draw_app(conn, win, gc, app.set_status_text(text))
             .context("failed to redraw status after PaperSpoon command")?;
     }
     loop {
         // Drain any PaperSpoon command received since the last X11 event.
         if let Some(text) = paperspoon.poll_display() {
             eprintln!("display: {text}");
-            status_text = Some(text);
-            draw(conn, win, gc, width, height, status_text.as_deref())
+            draw_app(conn, win, gc, app.set_status_text(text))
                 .context("failed to redraw status after PaperSpoon command")?;
         }
-        let event = conn
-            .wait_for_event()
-            .context("X11 connection failed while waiting for an event")?;
+        let Some(event) = conn
+            .poll_for_event()
+            .context("X11 connection failed while waiting for an event")?
+        else {
+            std::thread::sleep(EVENT_POLL_INTERVAL);
+            continue;
+        };
 
         match event {
             Event::Expose(event) if event.window == win && event.count == 0 => {
-                draw(conn, win, gc, width, height, status_text.as_deref())
+                draw_app(conn, win, gc, app.redraw())
                     .context("failed to redraw final Expose batch")?;
             }
             Event::Expose(_) => {}
             Event::ConfigureNotify(event) if event.window == win => {
-                match geometry_update((width, height), (event.width, event.height)) {
+                match app.update_geometry((event.width, event.height)) {
                     GeometryUpdate::IgnoredZero => {
                         eprintln!(
                             "event type=ConfigureNotify ignored=zero_geometry width={} height={}",
@@ -82,18 +68,13 @@ pub fn event_loop(
                         );
                     }
                     GeometryUpdate::Unchanged => {}
-                    GeometryUpdate::Changed {
-                        width: new_width,
-                        height: new_height,
-                    } => {
-                        contact.cancel();
-                        width = new_width;
-                        height = new_height;
+                    GeometryUpdate::Redraw(redraw) => {
+                        let (width, height) = redraw.size();
                         eprintln!(
                             "event type=ConfigureNotify x={} y={} width={width} height={height} window=0x{:x}",
                             event.x, event.y, event.window
                         );
-                        draw(conn, win, gc, width, height, status_text.as_deref())
+                        draw_app(conn, win, gc, redraw)
                             .context("failed to redraw after ConfigureNotify")?;
                     }
                 }
@@ -101,22 +82,17 @@ pub fn event_loop(
             Event::ConfigureNotify(_) => {}
             Event::ButtonPress(event) if event.event == win => {
                 eprintln!("{}", format_pointer_event("ButtonPress", &event));
-                let Some(button_id) = handle_pointer_event(
-                    &mut contact,
-                    PointerEvent {
-                        kind: PointerEventKind::Press,
-                        detail: event.detail,
-                        point: Point {
-                            x: event.event_x,
-                            y: event.event_y,
-                        },
+                let Some(activation) = app.handle_pointer(PointerEvent {
+                    kind: PointerEventKind::Press,
+                    detail: event.detail,
+                    point: Point {
+                        x: event.event_x,
+                        y: event.event_y,
                     },
-                    width,
-                    height,
-                ) else {
+                }) else {
                     continue;
                 };
-                if log_activation(button_id, paperspoon) {
+                if dispatch_activation(activation, paperspoon) {
                     conn.destroy_window(win)
                         .context("failed to destroy window after exit")?
                         .check()
@@ -126,22 +102,17 @@ pub fn event_loop(
             Event::ButtonPress(_) => {}
             Event::ButtonRelease(event) if event.event == win => {
                 eprintln!("{}", format_pointer_event("ButtonRelease", &event));
-                let Some(button_id) = handle_pointer_event(
-                    &mut contact,
-                    PointerEvent {
-                        kind: PointerEventKind::Release,
-                        detail: event.detail,
-                        point: Point {
-                            x: event.event_x,
-                            y: event.event_y,
-                        },
+                let Some(activation) = app.handle_pointer(PointerEvent {
+                    kind: PointerEventKind::Release,
+                    detail: event.detail,
+                    point: Point {
+                        x: event.event_x,
+                        y: event.event_y,
                     },
-                    width,
-                    height,
-                ) else {
+                }) else {
                     continue;
                 };
-                if log_activation(button_id, paperspoon) {
+                if dispatch_activation(activation, paperspoon) {
                     conn.destroy_window(win)
                         .context("failed to destroy window after exit")?
                         .check()
@@ -158,7 +129,7 @@ pub fn event_loop(
             }
             Event::MapNotify(_) => {}
             Event::UnmapNotify(event) if event.window == win => {
-                contact.cancel();
+                app.cancel_contact();
                 eprintln!("event type=UnmapNotify window=0x{:x}", event.window);
             }
             Event::UnmapNotify(_) => {}
@@ -174,6 +145,11 @@ pub fn event_loop(
             _ => eprintln!("event type=Other"),
         }
     }
+}
+
+fn draw_app(conn: &RustConnection, win: Window, gc: Gcontext, redraw: Redraw<'_>) -> Result<()> {
+    let (width, height) = redraw.size();
+    draw(conn, win, gc, width, height, redraw.status_text())
 }
 
 /// One-line raw diagnostic for a press or release event.
@@ -199,114 +175,31 @@ pub fn format_pointer_event(event_type: &str, event: &ButtonPressEvent) -> Strin
 /// Returns `true` when the activated action requests window teardown
 /// (the exit button). The caller then destroys the window to end the loop
 /// cleanly instead of waiting for the watchdog.
-fn log_activation(button_id: u8, paperspoon: &mut Paperspoon) -> bool {
-    match action_for_button(button_id) {
-        Some(action) => {
+fn dispatch_activation(activation: Activation, paperspoon: &mut Paperspoon) -> bool {
+    match activation {
+        Activation::Send { button_id, action } => {
             eprintln!(
                 "ui action=activate button={button_id} semantic={}",
                 action.id()
             );
-            if action == SemanticAction::Exit {
-                return true;
-            }
             if let Err(error) = paperspoon.send_action(action.id()) {
                 eprintln!("transport error: {error:#}");
             }
             false
         }
-        None => {
+        Activation::Exit { button_id } => {
+            eprintln!(
+                "ui action=activate button={button_id} semantic={}",
+                crate::ui::action::SemanticAction::Exit.id()
+            );
+            true
+        }
+        Activation::Unknown { button_id } => {
             eprintln!("ui action=activate button={button_id} semantic=unknown");
             false
         }
     }
 }
-fn geometry_update(current: (u16, u16), reported: (u16, u16)) -> GeometryUpdate {
-    if reported.0 == 0 || reported.1 == 0 {
-        GeometryUpdate::IgnoredZero
-    } else if reported == current {
-        GeometryUpdate::Unchanged
-    } else {
-        GeometryUpdate::Changed {
-            width: reported.0,
-            height: reported.1,
-        }
-    }
-}
-
-fn draw(
-    conn: &RustConnection,
-    win: Window,
-    gc: Gcontext,
-    width: u16,
-    height: u16,
-    status_text: Option<&str>,
-) -> Result<()> {
-    let Some(layout) = draw_layout(width, height) else {
-        return Ok(());
-    };
-
-    conn.clear_area(false, win, 0, 0, width, height)
-        .context("failed to send clear-area request")?
-        .check()
-        .context("X11 server rejected clear-area request")?;
-
-    let rectangles: Vec<Rectangle> = layout
-        .rectangles
-        .iter()
-        .map(|rectangle| Rectangle {
-            x: rectangle.x,
-            y: rectangle.y,
-            width: rectangle.width,
-            height: rectangle.height,
-        })
-        .collect();
-    if !rectangles.is_empty() {
-        conn.poly_rectangle(win, gc, &rectangles)
-            .context("failed to send rectangle draw request")?
-            .check()
-            .context("X11 server rejected rectangle draw request")?;
-    }
-
-    for placement in layout.text {
-        if placement.y > 0 {
-            draw_text(conn, win, gc, placement.x, placement.y, placement.text)?;
-        }
-    }
-
-    if let Some(text) = status_text {
-        // Baseline inside the status strip, below the exit bar.
-        let status_y = height
-            .saturating_sub(STATUS_TEXT_BOTTOM_MARGIN)
-            .min(i16::MAX as u16) as i16;
-        draw_text(
-            conn,
-            win,
-            gc,
-            STATUS_TEXT_X as i16,
-            status_y,
-            text.as_bytes(),
-        )?;
-    }
-
-    conn.flush().context("failed to flush draw requests")?;
-    Ok(())
-}
-
-fn draw_text(
-    conn: &RustConnection,
-    win: Window,
-    gc: Gcontext,
-    x: i16,
-    y: i16,
-    text: &[u8],
-) -> Result<()> {
-    conn.image_text8(win, gc, x, y, text)
-        .context("failed to send text draw request")?
-        .check()
-        .context("X11 server rejected text draw request")?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -335,140 +228,4 @@ mod tests {
             "input type=ButtonRelease detail=3 event_x=-1 event_y=360 root_x=79 root_y=480 time=123456 window=0x2600001 root=0x50d child=0x0 state=0x0101 same_screen=true"
         );
     }
-
-    #[test]
-    fn geometry_updates_reject_zero_and_distinguish_actual_changes() {
-        assert_eq!(
-            geometry_update((WINDOW_WIDTH, WINDOW_HEIGHT), (0, WINDOW_HEIGHT)),
-            GeometryUpdate::IgnoredZero
-        );
-        assert_eq!(
-            geometry_update((WINDOW_WIDTH, WINDOW_HEIGHT), (WINDOW_WIDTH, 0)),
-            GeometryUpdate::IgnoredZero
-        );
-        assert_eq!(
-            geometry_update((WINDOW_WIDTH, WINDOW_HEIGHT), (WINDOW_WIDTH, WINDOW_HEIGHT)),
-            GeometryUpdate::Unchanged
-        );
-        assert_eq!(
-            geometry_update(
-                (WINDOW_WIDTH, WINDOW_HEIGHT),
-                (WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2)
-            ),
-            GeometryUpdate::Changed {
-                width: WINDOW_WIDTH / 2,
-                height: WINDOW_HEIGHT / 2,
-            }
-        );
-    }
-
-    #[test]
-    fn pointer_events_activate_only_within_the_same_button() {
-        let (width, height) = (WINDOW_WIDTH, WINDOW_HEIGHT);
-        let mut contact = ContactTracker::default();
-
-        // Primary press inside button 1, release inside button 2: no activation.
-        let button_1 = Point {
-            x: (GRID_RECT_LEFT + GRID_ROWS_CELL_WIDTH / 2) as i16,
-            y: (GRID_RECT_TOP + GRID_ROWS_CELL_HEIGHT / 2) as i16,
-        };
-        let button_2 = Point {
-            x: (GRID_RECT_LEFT + GRID_ROWS_CELL_WIDTH + CELL_MARGIN * 2 + GRID_ROWS_CELL_WIDTH / 2)
-                as i16,
-            y: (GRID_RECT_TOP + GRID_ROWS_CELL_HEIGHT / 2) as i16,
-        };
-        assert_eq!(
-            handle_pointer_event(
-                &mut contact,
-                PointerEvent {
-                    kind: PointerEventKind::Press,
-                    detail: 1,
-                    point: button_1,
-                },
-                width,
-                height,
-            ),
-            None
-        );
-        assert_eq!(
-            handle_pointer_event(
-                &mut contact,
-                PointerEvent {
-                    kind: PointerEventKind::Release,
-                    detail: 1,
-                    point: button_2,
-                },
-                width,
-                height,
-            ),
-            None
-        );
-
-        // Press outside the grid: no activation.
-        let outside = Point { x: 5, y: 5 };
-        assert_eq!(
-            handle_pointer_event(
-                &mut contact,
-                PointerEvent {
-                    kind: PointerEventKind::Press,
-                    detail: 1,
-                    point: outside,
-                },
-                width,
-                height,
-            ),
-            None
-        );
-        assert_eq!(
-            handle_pointer_event(
-                &mut contact,
-                PointerEvent {
-                    kind: PointerEventKind::Release,
-                    detail: 1,
-                    point: outside,
-                },
-                width,
-                height,
-            ),
-            None
-        );
-
-        // Same-button press/release in button 4: exactly one activation.
-        let inside_4 = Point {
-            x: (GRID_RECT_LEFT + GRID_ROWS_CELL_WIDTH / 2) as i16,
-            y: (GRID_RECT_TOP + GRID_ROWS_CELL_HEIGHT + CELL_MARGIN * 2 + GRID_ROWS_CELL_HEIGHT / 2)
-                as i16,
-        };
-        assert_eq!(
-            handle_pointer_event(
-                &mut contact,
-                PointerEvent {
-                    kind: PointerEventKind::Press,
-                    detail: 1,
-                    point: inside_4,
-                },
-                width,
-                height,
-            ),
-            None
-        );
-        assert_eq!(
-            handle_pointer_event(
-                &mut contact,
-                PointerEvent {
-                    kind: PointerEventKind::Release,
-                    detail: 1,
-                    point: inside_4,
-                },
-                width,
-                height,
-            ),
-            Some(4)
-        );
-    }
-
-    use crate::ui::geometry::{
-        CELL_MARGIN, GRID_RECT_LEFT, GRID_RECT_TOP, GRID_ROWS_CELL_HEIGHT, GRID_ROWS_CELL_WIDTH,
-        Point, WINDOW_HEIGHT, WINDOW_WIDTH,
-    };
 }

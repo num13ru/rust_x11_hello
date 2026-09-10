@@ -1,95 +1,123 @@
 //! PaperSpoon UDP discovery responder.
 //!
-//! Binds UDP `0.0.0.0:5580`; on a valid DISCOVER datagram, replies with a
+//! Serves UDP `0.0.0.0:5580`; on a valid DISCOVER datagram, replies with a
 //! single unicast HERE to the exact request source. No broadcast responses,
-//! no multicast, no ACKs.
-//!
-//! Wire format (newline-terminated ASCII):
-//!
-//! ```text
-//! PAPERPAD DISCOVER <nonce>
-//! PAPERSPOON HERE <nonce> <tcp-port>
-//! ```
+//! multicast, or acknowledgements.
 
 use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 
-/// UDP discovery listener port.
-pub const DISCOVERY_PORT: u16 = 5580;
-/// The TCP port advertised to discoverers.
-pub const TCP_PORT: u16 = 5581;
-/// Prefix of the request datagram.
-const DISCOVER_PREFIX: &str = "PAPERPAD DISCOVER ";
-/// Prefix of the response datagram.
-const HERE_PREFIX: &str = "PAPERSPOON HERE ";
+use paper_protocol::{DISCOVERY_PORT, format_here, parse_discover};
 
-/// Parse a DISCOVER request datagram into its nonce.
-fn parse_discover(datagram: &[u8]) -> Option<String> {
-    let text = std::str::from_utf8(datagram).ok()?.trim_end();
-    let nonce = text.strip_prefix(DISCOVER_PREFIX)?;
-    if nonce.is_empty() {
-        return None;
-    }
-    Some(nonce.to_string())
+/// Bind the well-known discovery address before PaperSpoon reports ready.
+pub fn bind_discovery_socket() -> std::io::Result<UdpSocket> {
+    bind_discovery_socket_at(SocketAddr::from((Ipv4Addr::UNSPECIFIED, DISCOVERY_PORT)))
 }
 
-/// Parse a HERE response datagram into nonce and TCP port.
-#[cfg(test)]
-fn parse_here(datagram: &[u8]) -> Option<(String, u16)> {
-    let text = std::str::from_utf8(datagram).ok()?.trim_end();
-    let rest = text.strip_prefix(HERE_PREFIX)?;
-    let mut parts = rest.split_whitespace();
-    let nonce = parts.next()?.to_string();
-    let port = parts.next()?.parse::<u16>().ok()?;
-    if port == 0 || parts.next().is_some() {
-        return None;
-    }
-    Some((nonce, port))
-}
-/// Build a HERE response datagram.
-fn format_here(nonce: &str, tcp_port: u16) -> String {
-    format!("{HERE_PREFIX}{nonce} {tcp_port}\n")
+fn bind_discovery_socket_at(addr: SocketAddr) -> std::io::Result<UdpSocket> {
+    UdpSocket::bind(addr)
 }
 
-/// Bind and run the discovery responder forever.
+/// Run the discovery responder forever on an already-bound socket.
 ///
-/// Returns only on bind failure; the loop skips malformed requests.
-pub fn run_discovery_listener() -> std::io::Result<()> {
-    let socket = UdpSocket::bind(SocketAddr::from((Ipv4Addr::UNSPECIFIED, DISCOVERY_PORT)))?;
-    println!("discovery listening address=0.0.0.0:{DISCOVERY_PORT}");
-    let mut buffer = [0u8; 256];
+/// Returns only on socket failure; malformed requests are logged and skipped.
+pub fn run_discovery_listener(socket: UdpSocket, tcp_port: u16) -> std::io::Result<()> {
     loop {
-        let (count, source) = socket.recv_from(&mut buffer)?;
-        let Some(nonce) = parse_discover(&buffer[..count]) else {
-            eprintln!("discovery request invalid from={source}");
-            continue;
-        };
-        eprintln!("discovery request from={source} nonce={nonce}");
-        let response = format_here(&nonce, TCP_PORT);
-        socket.send_to(response.as_bytes(), source)?;
-        eprintln!("discovery response sent to={source}");
+        respond_once(&socket, tcp_port)?;
     }
+}
+
+fn respond_once(socket: &UdpSocket, tcp_port: u16) -> std::io::Result<()> {
+    if tcp_port == 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "discovery cannot advertise TCP port 0",
+        ));
+    }
+    let mut buffer = [0u8; 256];
+    let (count, source) = socket.recv_from(&mut buffer)?;
+    let Some(nonce) = parse_discover(&buffer[..count]) else {
+        eprintln!("discovery request invalid from={source}");
+        return Ok(());
+    };
+    eprintln!("discovery request from={source} nonce={nonce}");
+    let response = format_here(&nonce, tcp_port);
+    socket.send_to(response.as_bytes(), source)?;
+    eprintln!("discovery response sent to={source} tcp_port={tcp_port}");
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use paper_protocol::{format_discover, parse_here};
+    use std::time::Duration;
 
     #[test]
-    fn responder_parses_and_formats_roundtrip() {
-        let nonce = "cafe1234";
-        let request = format!("{DISCOVER_PREFIX}{nonce}\n");
-        assert_eq!(parse_discover(request.as_bytes()), Some(nonce.to_string()));
-        let response = format_here(nonce, TCP_PORT);
+    fn responder_advertises_injected_tcp_port() {
+        let responder = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind responder");
+        responder
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("set responder timeout");
+        let client = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind client");
+        client
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("set client timeout");
+        let nonce = "actual-port-test";
+        client
+            .send_to(
+                format_discover(nonce).as_bytes(),
+                responder.local_addr().expect("responder address"),
+            )
+            .expect("send discovery request");
+
+        respond_once(&responder, 42_424).expect("respond");
+
+        let mut buffer = [0u8; 256];
+        let (count, _) = client.recv_from(&mut buffer).expect("receive response");
         assert_eq!(
-            parse_here(response.as_bytes()),
-            Some((nonce.to_string(), TCP_PORT))
+            parse_here(&buffer[..count]),
+            Some((nonce.to_string(), 42_424))
         );
     }
 
     #[test]
-    fn responder_rejects_malformed_requests() {
-        assert_eq!(parse_discover(b""), None);
-        assert_eq!(parse_discover(b"BOGUS xyz"), None);
-        assert_eq!(parse_discover(b"PAPERPAD DISCOVER"), None);
+    fn bind_failure_is_returned_to_caller() {
+        let occupied = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind occupied socket");
+        let error = bind_discovery_socket_at(occupied.local_addr().expect("occupied address"))
+            .expect_err("second bind must fail");
+        assert_eq!(error.kind(), std::io::ErrorKind::AddrInUse);
+    }
+
+    #[test]
+    fn responder_rejects_zero_tcp_port() {
+        let responder = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind responder");
+        let error = respond_once(&responder, 0).expect_err("zero port must fail");
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn malformed_request_is_ignored_without_response() {
+        let responder = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind responder");
+        responder
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("set responder timeout");
+        let client = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind client");
+        client
+            .send_to(
+                b"not a discovery request\n",
+                responder.local_addr().expect("responder address"),
+            )
+            .expect("send malformed request");
+
+        respond_once(&responder, 42_424).expect("ignore malformed request");
+
+        client
+            .set_nonblocking(true)
+            .expect("set client nonblocking");
+        let mut buffer = [0u8; 256];
+        let error = client
+            .recv_from(&mut buffer)
+            .expect_err("malformed request must not receive response");
+        assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
     }
 }

@@ -47,10 +47,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
+name = "paper-protocol"
+version = "0.1.0"
+
+[[package]]
+name = "paperspoon"
+version = "0.1.0"
+dependencies = [
+ "paper-protocol",
+]
+
+[[package]]
 name = "rust_x11_hello"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "paper-protocol",
  "x11rb",
 ]
 

@@ -1,4 +1,4 @@
-//! Kindle KUAL touch-input prototype.
+//! Paperpad Kindle/KUAL process entry point.
 //!
 //! Entry point only: connects to X11, runs the event loop, and tears down.
 //! Display/event handling lives in [`x11`]; logical UI concepts (geometry,
@@ -11,9 +11,10 @@ use x11rb::rust_connection::RustConnection;
 use x11::display;
 use x11::events::{EventLoopExit, event_loop};
 
+mod app;
+mod config;
 mod discovery;
 mod net;
-mod proto;
 mod ui;
 mod x11;
 
@@ -31,6 +32,8 @@ fn print_environment() {
 }
 
 fn run() -> Result<()> {
+    let paperpad_config = config::PaperpadConfig::from_env()?;
+
     let (conn, screen_num) = RustConnection::connect(None)
         .context("failed to connect to X11 display; check DISPLAY and /tmp/.X11-unix/X0")?;
 
@@ -45,18 +48,7 @@ fn run() -> Result<()> {
         size.1
     );
 
-    let mut paperspoon = match net::Paperspoon::connect() {
-        Ok(paperspoon) => {
-            eprintln!("transport: connected to PaperSpoon");
-            paperspoon
-        }
-        Err(error) => {
-            // A PaperSpoon that is down at startup is not fatal: the event
-            // loop runs, and each activation attempts a (bounded) reconnect.
-            eprintln!("transport error at startup: {error:#}");
-            net::Paperspoon::disconnected()
-        }
-    };
+    let mut paperspoon = net::Paperspoon::start(paperpad_config);
 
     let event_result = event_loop(&conn, win, gc, size, &mut paperspoon);
 

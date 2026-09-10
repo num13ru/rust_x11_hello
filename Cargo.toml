@@ -3,6 +3,11 @@ name = "rust_x11_hello"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = [".", "crates/paper-protocol", "tools/paperspoon"]
+resolver = "3"
+
 [dependencies]
 anyhow = "1"
+paper-protocol = { path = "crates/paper-protocol" }
 x11rb = "0.13"
