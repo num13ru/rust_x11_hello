@@ -283,8 +283,8 @@ scripts/deploy-kindle-mtp.sh install
 
 The installer verifies each upload by reading it back and uploads `menu.json` last, so KUAL does not expose a partially transferred extension. It refuses to overwrite an existing canonical installation.
 
-For a later update, first let the watchdog stop the app (or use **Stop
-Paperpad**), confirm the window is gone, and run:
+For a later update, first use Paperpad's in-window **Exit** button or let the
+watchdog stop the app, confirm the window is gone, and run:
 
 ```sh
 scripts/deploy-kindle-mtp.sh update --confirm-stopped
@@ -297,9 +297,9 @@ MTP does not provide a multi-file transaction. If an update transfer fails befor
 ## Device test
 
 In KUAL, use **Run Paperpad (90s)**. Perform taps within the visible window,
-then allow the watchdog to end the run. If KUAL remains accessible, **Stop
-Paperpad** sends `TERM` only after verifying the PID belongs to the installed
-binary.
+then use Paperpad's in-window **Exit** button or allow the watchdog to end the
+run. There is no separate stop menu item because Paperpad covers KUAL while its
+full-screen window is open.
 
 After the process ends, retrieve the log:
 
