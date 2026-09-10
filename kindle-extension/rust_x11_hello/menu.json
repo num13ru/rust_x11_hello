@@ -3,10 +3,6 @@
     {
       "name": "Run Paperpad (90s)",
       "action": "sh bin/run.sh"
-    },
-    {
-      "name": "Stop Paperpad",
-      "action": "sh bin/stop.sh"
     }
   ]
 }

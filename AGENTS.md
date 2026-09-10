@@ -9,7 +9,8 @@ steps an agent should follow, especially around physical-device work.
 - Rust binary (`src/`) builds for ARMv7 musl via Docker (`make build`, `make verify`).
 - Host artifact: `kindle-extension/rust_x11_hello/bin/rust_x11_hello` (untracked, rebuilt by `make build`).
 - Device extension root: `/extensions/rust_x11_hello` (MTP) = `/mnt/us/extensions/rust_x11_hello` (runtime).
-- KUAL actions: **Run Paperpad (90s)** and **Stop Paperpad**.
+- KUAL action: **Run Paperpad (90s)**. Stop from the in-window **Exit** button
+  or let the watchdog end the run; the full-screen window covers KUAL.
 - Physical device: Kindle Paperwhite 6 (Sangria / Bellatrix4), FW 5.17.1.0.4.
   USBNetwork is NOT available on this device; transport is Wi-Fi via `RUST_X11_HELLO_COMPANION`.
 
@@ -19,7 +20,8 @@ Prerequisites:
 
 - Kindle unlocked with USB accessory access allowed; `mtp-rs devices` lists it.
 - Binary built and verified first: `make check && make build && make verify`.
-- App stopped: watchdog ended the run, or **Stop Paperpad** used and window confirmed gone.
+- App stopped: in-window **Exit** used or watchdog ended the run, and window
+  confirmed gone.
   MTP cannot prove process state; `--confirm-stopped` is an operator assertion.
 
 Fresh install (only when `/extensions/rust_x11_hello` does not exist):
@@ -43,7 +45,7 @@ Rules the deploy script enforces:
   exposes a partially transferred extension.
 
 After a successful deploy, `mtp-rs ls /extensions/rust_x11_hello --recursive` shows:
-`rust_x11_hello.log`, `rust_x11_hello.status`, `bin/{rust_x11_hello, run.sh, stop.sh}`,
+`rust_x11_hello.log`, `rust_x11_hello.status`, `bin/{rust_x11_hello, run.sh}`,
 `config.xml`, `menu.json`, plus `bin/rust_x11_hello.previous` retained from the update.
 
 ## Log handling
