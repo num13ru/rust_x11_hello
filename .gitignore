@@ -4,7 +4,5 @@
 /target
 /logs
 
-# Keep human-readable Kindle run evidence, but not downloaded binary readbacks.
-!/artifacts/**/*.log
-/artifacts/**/*.deployed
-/artifacts/**/*.previous
+# Device run artifacts may contain sensitive data; keep the entire tree local.
+/artifacts/
