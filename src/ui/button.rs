@@ -5,7 +5,8 @@
 //! participate in activation; auxiliary details observed on the Kindle (6, 9)
 //! are ignored by the tracker.
 
-use super::geometry::{LogicalButton, Point, button_grid};
+use super::geometry::{LogicalButton, button_grid};
+use super::screen::{PhysicalPoint, RemotePoint};
 
 /// The core-X11 button detail that represents a primary touch contact.
 pub const PRIMARY_BUTTON_DETAIL: u8 = 1;
@@ -15,7 +16,7 @@ pub const PRIMARY_BUTTON_DETAIL: u8 = 1;
 pub struct PointerEvent {
     pub kind: PointerEventKind,
     pub detail: u8,
-    pub point: Point,
+    pub point: PhysicalPoint,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -43,32 +44,63 @@ pub struct ContactTracker {
     state: ContactState,
 }
 
-pub fn hit_button(buttons: &[LogicalButton], point: Point) -> Option<&LogicalButton> {
-    buttons.iter().find(|button| button.bounds.contains(point))
+pub fn hit_button(buttons: &[LogicalButton], point: RemotePoint) -> Option<&LogicalButton> {
+    buttons
+        .iter()
+        .find(|button| button.bounds.contains_remote(point))
 }
 
 impl ContactTracker {
-    pub fn press(&mut self, detail: u8, point: Point, buttons: &[LogicalButton]) {
+    #[cfg(test)]
+    pub fn press(&mut self, detail: u8, point: RemotePoint, buttons: &[LogicalButton]) {
+        self.press_optional(detail, Some(point), buttons);
+    }
+
+    fn press_optional(
+        &mut self,
+        detail: u8,
+        point: Option<RemotePoint>,
+        buttons: &[LogicalButton],
+    ) {
         if detail != PRIMARY_BUTTON_DETAIL {
             return;
         }
 
         self.state = match self.state {
-            ContactState::Idle => hit_button(buttons, point)
+            ContactState::Idle => point
+                .and_then(|point| hit_button(buttons, point))
                 .map(|button| ContactState::Armed(button.id))
                 .unwrap_or(ContactState::Cancelled),
             ContactState::Armed(_) | ContactState::Cancelled => ContactState::Cancelled,
         };
     }
 
-    pub fn release(&mut self, detail: u8, point: Point, buttons: &[LogicalButton]) -> Option<u8> {
+    #[cfg(test)]
+    pub fn release(
+        &mut self,
+        detail: u8,
+        point: RemotePoint,
+        buttons: &[LogicalButton],
+    ) -> Option<u8> {
+        self.release_optional(detail, Some(point), buttons)
+    }
+
+    fn release_optional(
+        &mut self,
+        detail: u8,
+        point: Option<RemotePoint>,
+        buttons: &[LogicalButton],
+    ) -> Option<u8> {
         if detail != PRIMARY_BUTTON_DETAIL {
             return None;
         }
 
         match std::mem::take(&mut self.state) {
             ContactState::Armed(armed_id)
-                if hit_button(buttons, point).map(|button| button.id) == Some(armed_id) =>
+                if point
+                    .and_then(|point| hit_button(buttons, point))
+                    .map(|button| button.id)
+                    == Some(armed_id) =>
             {
                 Some(armed_id)
             }
@@ -85,17 +117,19 @@ impl ContactTracker {
 /// activated button id on a matched primary release.
 pub fn handle_pointer_event(
     tracker: &mut ContactTracker,
-    event: PointerEvent,
+    kind: PointerEventKind,
+    detail: u8,
+    point: Option<RemotePoint>,
     width: u16,
     height: u16,
 ) -> Option<u8> {
     let buttons = button_grid(width, height);
-    match event.kind {
+    match kind {
         PointerEventKind::Press => {
-            tracker.press(event.detail, event.point, &buttons);
+            tracker.press_optional(detail, point, &buttons);
             None
         }
-        PointerEventKind::Release => tracker.release(event.detail, event.point, &buttons),
+        PointerEventKind::Release => tracker.release_optional(detail, point, &buttons),
     }
 }
 
@@ -104,26 +138,29 @@ mod tests {
     use super::*;
     use crate::ui::geometry::{
         CELL_MARGIN, GRID_RECT_LEFT, GRID_RECT_TOP, GRID_ROWS_CELL_HEIGHT, GRID_ROWS_CELL_WIDTH,
-        WINDOW_HEIGHT, WINDOW_WIDTH,
+        WINDOW_HEIGHT as PHYSICAL_HEIGHT, WINDOW_WIDTH,
     };
+    use crate::ui::screen::SYSTEM_UI_HEIGHT;
+
+    const WINDOW_HEIGHT: u16 = PHYSICAL_HEIGHT - SYSTEM_UI_HEIGHT;
 
     /// Center point of grid cell `(row, column)` at the reference size.
-    fn cell_center(row: u16, column: u16) -> Point {
-        Point {
+    fn cell_center(row: u16, column: u16) -> RemotePoint {
+        RemotePoint {
             x: (GRID_RECT_LEFT
                 + column * (GRID_ROWS_CELL_WIDTH + CELL_MARGIN * 2)
-                + GRID_ROWS_CELL_WIDTH / 2) as i16,
+                + GRID_ROWS_CELL_WIDTH / 2),
             y: (GRID_RECT_TOP
                 + row * (GRID_ROWS_CELL_HEIGHT + CELL_MARGIN * 2)
-                + GRID_ROWS_CELL_HEIGHT / 2) as i16,
+                + GRID_ROWS_CELL_HEIGHT / 2),
         }
     }
 
     /// A point inside the boundary of cell `(row, column)` at the reference size.
-    fn inside_cell(row: u16, column: u16) -> Point {
-        Point {
-            x: (GRID_RECT_LEFT + column * (GRID_ROWS_CELL_WIDTH + CELL_MARGIN * 2)) as i16,
-            y: (GRID_RECT_TOP + row * (GRID_ROWS_CELL_HEIGHT + CELL_MARGIN * 2)) as i16,
+    fn inside_cell(row: u16, column: u16) -> RemotePoint {
+        RemotePoint {
+            x: GRID_RECT_LEFT + column * (GRID_ROWS_CELL_WIDTH + CELL_MARGIN * 2),
+            y: GRID_RECT_TOP + row * (GRID_ROWS_CELL_HEIGHT + CELL_MARGIN * 2),
         }
     }
 
@@ -142,9 +179,9 @@ mod tests {
         assert_eq!(
             hit_button(
                 &buttons,
-                Point {
-                    x: (GRID_RECT_LEFT + GRID_ROWS_CELL_WIDTH / 2) as i16,
-                    y: (GRID_RECT_TOP + GRID_ROWS_CELL_HEIGHT + CELL_MARGIN * 2) as i16,
+                RemotePoint {
+                    x: GRID_RECT_LEFT + GRID_ROWS_CELL_WIDTH / 2,
+                    y: GRID_RECT_TOP + GRID_ROWS_CELL_HEIGHT + CELL_MARGIN * 2,
                 }
             )
             .unwrap()
@@ -155,30 +192,20 @@ mod tests {
         assert!(
             hit_button(
                 &buttons,
-                Point {
-                    x: GRID_RECT_LEFT as i16 - 1,
-                    y: GRID_RECT_TOP as i16,
+                RemotePoint {
+                    x: GRID_RECT_LEFT - 1,
+                    y: GRID_RECT_TOP,
                 }
             )
             .is_none()
         );
-        // Outside the window: no hit. (Negative x is a boundary sentinel.)
+        // The remote viewport's trailing edge is outside its half-open bounds.
         assert!(
             hit_button(
                 &buttons,
-                Point {
-                    x: WINDOW_WIDTH as i16,
+                RemotePoint {
+                    x: WINDOW_WIDTH,
                     y: cell_center(0, 0).y
-                }
-            )
-            .is_none()
-        );
-        assert!(
-            hit_button(
-                &buttons,
-                Point {
-                    x: -1,
-                    y: GRID_RECT_TOP as i16
                 }
             )
             .is_none()
@@ -190,20 +217,20 @@ mod tests {
         let buttons = button_grid(WINDOW_WIDTH, WINDOW_HEIGHT);
         let mut contact = ContactTracker::default();
         for point in [
-            Point {
-                x: (GRID_RECT_LEFT + GRID_ROWS_CELL_WIDTH) as i16,
+            RemotePoint {
+                x: GRID_RECT_LEFT + GRID_ROWS_CELL_WIDTH,
                 y: cell_center(0, 0).y,
             },
-            Point {
+            RemotePoint {
                 x: cell_center(0, 0).x,
-                y: (GRID_RECT_TOP + GRID_ROWS_CELL_HEIGHT) as i16,
+                y: GRID_RECT_TOP + GRID_ROWS_CELL_HEIGHT,
             },
-            Point {
+            RemotePoint {
                 x: 0,
                 y: cell_center(0, 0).y,
             },
-            Point {
-                x: (WINDOW_WIDTH - CELL_MARGIN) as i16,
+            RemotePoint {
+                x: WINDOW_WIDTH - CELL_MARGIN,
                 y: cell_center(0, 0).y,
             },
         ] {
@@ -238,7 +265,7 @@ mod tests {
 
             contact.press(PRIMARY_BUTTON_DETAIL, point, &buttons);
             assert_eq!(
-                contact.release(PRIMARY_BUTTON_DETAIL, Point { x: 5, y: 5 }, &buttons),
+                contact.release(PRIMARY_BUTTON_DETAIL, RemotePoint { x: 5, y: 5 }, &buttons),
                 None
             );
         }
@@ -274,7 +301,7 @@ mod tests {
         let buttons = button_grid(WINDOW_WIDTH, WINDOW_HEIGHT);
         let button_1 = cell_center(0, 0);
         let button_2 = cell_center(0, 1);
-        let outside = Point { x: 5, y: 5 };
+        let outside = RemotePoint { x: 5, y: 5 };
         let mut contact = ContactTracker::default();
 
         contact.press(PRIMARY_BUTTON_DETAIL, button_1, &buttons);
@@ -311,16 +338,14 @@ mod tests {
     fn pointer_events_wire_auxiliary_details_do_not_touch_primary_state() {
         let mut contact = ContactTracker::default();
         let inside = cell_center(1, 0);
-        let outside = Point { x: 5, y: 5 };
+        let outside = RemotePoint { x: 5, y: 5 };
 
         assert_eq!(
             handle_pointer_event(
                 &mut contact,
-                PointerEvent {
-                    kind: PointerEventKind::Press,
-                    detail: 6,
-                    point: inside,
-                },
+                PointerEventKind::Press,
+                6,
+                Some(inside),
                 WINDOW_WIDTH,
                 WINDOW_HEIGHT,
             ),
@@ -331,11 +356,9 @@ mod tests {
         assert_eq!(
             handle_pointer_event(
                 &mut contact,
-                PointerEvent {
-                    kind: PointerEventKind::Press,
-                    detail: PRIMARY_BUTTON_DETAIL,
-                    point: inside,
-                },
+                PointerEventKind::Press,
+                PRIMARY_BUTTON_DETAIL,
+                Some(inside),
                 WINDOW_WIDTH,
                 WINDOW_HEIGHT,
             ),
@@ -346,11 +369,9 @@ mod tests {
         assert_eq!(
             handle_pointer_event(
                 &mut contact,
-                PointerEvent {
-                    kind: PointerEventKind::Release,
-                    detail: 6,
-                    point: outside,
-                },
+                PointerEventKind::Release,
+                6,
+                Some(outside),
                 WINDOW_WIDTH,
                 WINDOW_HEIGHT,
             ),
@@ -361,15 +382,44 @@ mod tests {
         assert_eq!(
             handle_pointer_event(
                 &mut contact,
-                PointerEvent {
-                    kind: PointerEventKind::Release,
-                    detail: PRIMARY_BUTTON_DETAIL,
-                    point: inside,
-                },
+                PointerEventKind::Release,
+                PRIMARY_BUTTON_DETAIL,
+                Some(inside),
                 WINDOW_WIDTH,
                 WINDOW_HEIGHT,
             ),
             Some(4)
+        );
+        assert_eq!(contact.state, ContactState::Idle);
+    }
+
+    #[test]
+    fn release_outside_remote_viewport_cancels_application_contact() {
+        let mut contact = ContactTracker::default();
+        let inside = cell_center(0, 0);
+
+        assert_eq!(
+            handle_pointer_event(
+                &mut contact,
+                PointerEventKind::Press,
+                PRIMARY_BUTTON_DETAIL,
+                Some(inside),
+                WINDOW_WIDTH,
+                WINDOW_HEIGHT,
+            ),
+            None
+        );
+        assert_eq!(contact.state, ContactState::Armed(1));
+        assert_eq!(
+            handle_pointer_event(
+                &mut contact,
+                PointerEventKind::Release,
+                PRIMARY_BUTTON_DETAIL,
+                None,
+                WINDOW_WIDTH,
+                WINDOW_HEIGHT,
+            ),
+            None
         );
         assert_eq!(contact.state, ContactState::Idle);
     }

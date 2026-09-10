@@ -4,7 +4,7 @@
 //! button rectangles, scaled text positions, and text label placements. The X11
 //! layer maps these onto its own wire types.
 
-use super::screen::ScreenLayout;
+use super::screen::{PhysicalPoint, RemotePoint};
 
 pub const GRID_COLUMNS: u16 = 3;
 pub const GRID_ROWS: u16 = 3;
@@ -33,13 +33,6 @@ pub const GRID_RECT_TOP: u16 = GRID_TOP_INSET;
 pub const GRID_ROWS_CELL_WIDTH: u16 = WINDOW_WIDTH / GRID_COLUMNS - CELL_MARGIN * 2;
 #[cfg(test)]
 pub const GRID_ROWS_CELL_HEIGHT: u16 = GRID_ROWS_CELL_WIDTH;
-/// Integer 2-D point in window-relative coordinates.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Point {
-    pub x: i16,
-    pub y: i16,
-}
-
 /// Half-open axis-aligned rectangle in logical coordinates.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LogicalRect {
@@ -50,7 +43,7 @@ pub struct LogicalRect {
 }
 
 impl LogicalRect {
-    pub fn contains(self, point: Point) -> bool {
+    pub(crate) fn contains_physical(self, point: PhysicalPoint) -> bool {
         let point_x = i32::from(point.x);
         let point_y = i32::from(point.y);
         let left = i32::from(self.x);
@@ -60,6 +53,18 @@ impl LogicalRect {
             && point_y >= top
             && point_x < left + i32::from(self.width)
             && point_y < top + i32::from(self.height)
+    }
+
+    pub(crate) fn contains_remote(self, point: RemotePoint) -> bool {
+        let point_x = u32::from(point.x);
+        let point_y = u32::from(point.y);
+        let left = u32::from(self.x);
+        let top = u32::from(self.y);
+
+        point_x >= left
+            && point_y >= top
+            && point_x < left + u32::from(self.width)
+            && point_y < top + u32::from(self.height)
     }
 }
 
@@ -97,12 +102,13 @@ pub struct DrawLayout {
 /// Build square cells using `width / 3 - 2 * CELL_MARGIN` when height permits.
 /// Column gaps absorb integer-division remainders so Exit aligns with both
 /// outer grid edges. Short windows reduce the cell side, never stretch it.
-/// Extents unable to fit the margins, nine cells, Exit, and status strip have
-/// no interactive controls. Layout is capped at X11's signed coordinate limit.
+/// Extents unable to fit the margins, nine cells, and status strip have no
+/// interactive controls. The dimensions are relative to the remote viewport.
 pub(crate) fn grid_dimensions(width: u16, height: u16) -> Option<(u16, u16)> {
-    let remote_viewport = ScreenLayout::new(width, height)?.remote_viewport;
-    let width = remote_viewport.width;
-    let height = remote_viewport.height;
+    if width == 0 || height == 0 {
+        return None;
+    }
+
     let row_gap = CELL_MARGIN * 2;
     let fixed_vertical_overhead = GRID_TOP_INSET + (GRID_ROWS - 1) * row_gap + STATUS_BAR_HEIGHT;
     let side = (width / GRID_COLUMNS)
@@ -143,18 +149,12 @@ pub(crate) fn logical_coordinate(value: u32) -> i16 {
     value.min(i16::MAX as u32) as i16
 }
 
-/// Compute the layout to draw for a window extent, or `None` for zero extents.
+/// Compute a viewport-relative layout, or `None` for zero extents.
 pub fn draw_layout(width: u16, height: u16) -> Option<DrawLayout> {
-    let remote_viewport = ScreenLayout::new(width, height)?.remote_viewport;
-    if remote_viewport.width == 0 || remote_viewport.height == 0 {
-        return Some(DrawLayout {
-            rectangles: Vec::new(),
-            text: Vec::new(),
-        });
+    if width == 0 || height == 0 {
+        return None;
     }
     let buttons = button_grid(width, height);
-    let width = remote_viewport.width;
-    let height = remote_viewport.height;
 
     let rectangles = buttons
         .iter()
@@ -189,9 +189,12 @@ pub fn draw_layout(width: u16, height: u16) -> Option<DrawLayout> {
 mod tests {
     use super::*;
 
+    const PORTRAIT_REMOTE_WIDTH: u16 = 1272;
+    const PORTRAIT_REMOTE_HEIGHT: u16 = 1624;
+
     #[test]
-    fn portrait_screen_has_nine_square_application_cells() {
-        let buttons = button_grid(1272, 1696);
+    fn portrait_remote_viewport_has_nine_square_application_cells() {
+        let buttons = button_grid(PORTRAIT_REMOTE_WIDTH, PORTRAIT_REMOTE_HEIGHT);
         assert_eq!(buttons.len(), 9);
         for (index, button) in buttons[..9].iter().enumerate() {
             assert_eq!(button.id, index as u8 + 1);
@@ -205,7 +208,7 @@ mod tests {
                 }
             );
         }
-        let layout = draw_layout(1272, 1696).unwrap();
+        let layout = draw_layout(PORTRAIT_REMOTE_WIDTH, PORTRAIT_REMOTE_HEIGHT).unwrap();
         assert_eq!(layout.rectangles.len(), 9);
         assert_eq!(layout.text.len(), 10);
         assert_eq!(layout.text[0].text, TITLE_TEXT);
@@ -225,7 +228,7 @@ mod tests {
             (1696, 1272),
             (760, 528),
             (123, 263),
-            (u16::MAX, u16::MAX),
+            (i16::MAX as u16, i16::MAX as u16),
         ] {
             let buttons = button_grid(width, height);
             assert_eq!(buttons.len(), 9, "{width}x{height}");
@@ -268,22 +271,17 @@ mod tests {
             assert!(button_grid(width, height).is_empty());
             let layout = draw_layout(width, height).unwrap();
             assert!(layout.rectangles.is_empty());
-            assert!(layout.text.is_empty());
+            assert_eq!(layout.text.len(), 1);
+            assert!(layout.text[0].x >= 0 && layout.text[0].x < width as i16);
+            assert!(layout.text[0].y >= 0 && layout.text[0].y < height as i16);
         }
-        for (width, height) in [(122, 1696), (1272, 252)] {
+        for (width, height) in [(122, 1696), (1272, 180)] {
             assert!(button_grid(width, height).is_empty());
             let layout = draw_layout(width, height).unwrap();
             assert!(layout.rectangles.is_empty());
             assert_eq!(layout.text.len(), 1);
             assert!(layout.text[0].x >= 0 && layout.text[0].x < width as i16);
-            assert!(
-                layout.text[0].y >= 0
-                    && layout.text[0].y
-                        < ScreenLayout::new(width, height)
-                            .expect("screen layout")
-                            .remote_viewport
-                            .height as i16
-            );
+            assert!(layout.text[0].y >= 0 && layout.text[0].y < height as i16);
         }
     }
 }

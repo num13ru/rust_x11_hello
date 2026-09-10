@@ -56,6 +56,8 @@ Host tests cover the portrait layout, smaller and landscape windows, division re
 
 The remote viewport contains nine logical application buttons in a 3×3 grid. The bottom system strip contains a separate local Exit control. Their geometry is independent of X11 event structures and uses half-open bounds, so trailing edges and gaps do not activate a control.
 
+X11 pointer events use signed, physical window coordinates. Paperpad maps application contacts into unsigned coordinates relative to the remote viewport before application hit testing; physical points in the system strip or outside the window have no remote coordinate. A primary release without a remote coordinate cancels any armed application contact, while local Exit hit testing remains in physical coordinates.
+
 Only core-X11 `detail=1` participates in UI activation. A primary press arms the button under the initial coordinate; a matching primary release activates only when it remains inside that same button and emits:
 ```text
 ui action=activate button=4 semantic=terminal.new_window

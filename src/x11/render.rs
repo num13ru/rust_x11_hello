@@ -33,9 +33,8 @@ pub(super) fn draw(
     let Some(screen_layout) = ScreenLayout::new(width, height) else {
         return Ok(());
     };
-    let Some(layout) = draw_layout(width, height) else {
-        return Ok(());
-    };
+    let viewport = screen_layout.remote_viewport;
+    let application_layout = draw_layout(viewport.width, viewport.height);
     let system_layout = system::draw_layout(width, height);
 
     conn.clear_area(false, win, 0, 0, width, height)
@@ -43,16 +42,15 @@ pub(super) fn draw(
         .check()
         .context("X11 server rejected clear-area request")?;
 
-    let mut rectangles: Vec<Rectangle> = layout
-        .rectangles
-        .iter()
-        .map(|rectangle| Rectangle {
-            x: rectangle.x,
-            y: rectangle.y,
+    let mut rectangles = Vec::new();
+    if let Some(layout) = &application_layout {
+        rectangles.extend(layout.rectangles.iter().map(|rectangle| Rectangle {
+            x: physical_coordinate(viewport.x, rectangle.x),
+            y: physical_coordinate(viewport.y, rectangle.y),
             width: rectangle.width,
             height: rectangle.height,
-        })
-        .collect();
+        }));
+    }
     if let Some(system_layout) = system_layout {
         rectangles.push(Rectangle {
             x: system_layout.rectangle.x,
@@ -68,9 +66,18 @@ pub(super) fn draw(
             .context("X11 server rejected rectangle draw request")?;
     }
 
-    for placement in layout.text {
-        if placement.y > 0 {
-            draw_text(conn, win, gc, placement.x, placement.y, placement.text)?;
+    if let Some(layout) = application_layout {
+        for placement in layout.text {
+            if placement.y > 0 {
+                draw_text(
+                    conn,
+                    win,
+                    gc,
+                    physical_coordinate(viewport.x, placement.x),
+                    physical_coordinate(viewport.y, placement.y),
+                    placement.text,
+                )?;
+            }
         }
     }
     match system_layout {
@@ -87,7 +94,7 @@ pub(super) fn draw(
         Some(_) | None => {}
     }
 
-    if let Some(text) = status_text {
+    if let Some(text) = status_text.filter(|_| viewport.height > 0) {
         // Baseline inside the remote viewport's legacy status strip, above Exit.
         let status_y = status_baseline(screen_layout);
         let encoded = encode_status_text(text);
@@ -99,11 +106,18 @@ pub(super) fn draw(
 }
 
 fn status_baseline(screen_layout: ScreenLayout) -> i16 {
-    screen_layout
-        .remote_viewport
-        .height
-        .saturating_sub(STATUS_TEXT_BOTTOM_MARGIN)
-        .min(i16::MAX as u16) as i16
+    let viewport = screen_layout.remote_viewport;
+    physical_coordinate(
+        viewport.y,
+        viewport
+            .height
+            .saturating_sub(STATUS_TEXT_BOTTOM_MARGIN)
+            .min(i16::MAX as u16) as i16,
+    )
+}
+
+fn physical_coordinate(origin: u16, relative: i16) -> i16 {
+    (i32::from(origin) + i32::from(relative)).clamp(i16::MIN as i32, i16::MAX as i32) as i16
 }
 
 fn draw_text(

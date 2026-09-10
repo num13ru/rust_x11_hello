@@ -2,6 +2,7 @@
 
 use crate::ui::action::{SemanticAction, action_for_button};
 use crate::ui::button::{ContactTracker, PointerEvent, handle_pointer_event};
+use crate::ui::screen::ScreenLayout;
 use crate::ui::system::{SystemAction, SystemUi};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -92,11 +93,20 @@ impl AppState {
         let system_action = self
             .system_ui
             .handle_pointer(event, self.width, self.height);
+        let (remote_point, remote_size) = match ScreenLayout::new(self.width, self.height) {
+            Some(layout) => (
+                layout.physical_to_remote(event.point),
+                (layout.remote_viewport.width, layout.remote_viewport.height),
+            ),
+            None => (None, (0, 0)),
+        };
         let application_button = handle_pointer_event(
             &mut self.application_contact,
-            event,
-            self.width,
-            self.height,
+            event.kind,
+            event.detail,
+            remote_point,
+            remote_size.0,
+            remote_size.1,
         );
 
         match system_action {
@@ -122,23 +132,25 @@ fn activation_for_button(button_id: u8) -> Activation {
 mod tests {
     use super::*;
     use crate::ui::button::{PRIMARY_BUTTON_DETAIL, PointerEventKind};
-    use crate::ui::geometry::{Point, button_grid};
+    use crate::ui::geometry::button_grid;
+    use crate::ui::screen::PhysicalPoint;
     use crate::ui::system::exit_bounds;
 
     const SIZE: (u16, u16) = (1272, 1696);
 
-    fn center_of(button_id: u8, size: (u16, u16)) -> Point {
-        let button = button_grid(size.0, size.1)
+    fn center_of(button_id: u8, size: (u16, u16)) -> PhysicalPoint {
+        let screen = ScreenLayout::new(size.0, size.1).expect("screen layout");
+        let button = button_grid(screen.remote_viewport.width, screen.remote_viewport.height)
             .into_iter()
             .find(|button| button.id == button_id)
             .expect("button exists");
-        Point {
-            x: (button.bounds.x + button.bounds.width / 2) as i16,
-            y: (button.bounds.y + button.bounds.height / 2) as i16,
+        PhysicalPoint {
+            x: (screen.remote_viewport.x + button.bounds.x + button.bounds.width / 2) as i16,
+            y: (screen.remote_viewport.y + button.bounds.y + button.bounds.height / 2) as i16,
         }
     }
 
-    fn pointer(kind: PointerEventKind, point: Point) -> PointerEvent {
+    fn pointer(kind: PointerEventKind, point: PhysicalPoint) -> PointerEvent {
         PointerEvent {
             kind,
             detail: PRIMARY_BUTTON_DETAIL,
@@ -166,7 +178,7 @@ mod tests {
             })
         );
         let exit = exit_bounds(SIZE.0, SIZE.1).expect("Exit bounds");
-        let exit_point = Point {
+        let exit_point = PhysicalPoint {
             x: (exit.x + exit.width / 2) as i16,
             y: (exit.y + exit.height / 2) as i16,
         };
@@ -188,7 +200,7 @@ mod tests {
     fn application_and_exit_contacts_cannot_cross_activate() {
         let application_point = center_of(1, SIZE);
         let exit = exit_bounds(SIZE.0, SIZE.1).expect("Exit bounds");
-        let exit_point = Point {
+        let exit_point = PhysicalPoint {
             x: (exit.x + exit.width / 2) as i16,
             y: (exit.y + exit.height / 2) as i16,
         };

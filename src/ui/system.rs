@@ -52,7 +52,7 @@ impl SystemUi {
                 self.exit_contact = match self.exit_contact {
                     ExitContact::Idle
                         if exit_bounds(width, height)
-                            .is_some_and(|bounds| bounds.contains(event.point)) =>
+                            .is_some_and(|bounds| bounds.contains_physical(event.point)) =>
                     {
                         ExitContact::Armed
                     }
@@ -65,7 +65,7 @@ impl SystemUi {
             PointerEventKind::Release => {
                 let activated = self.exit_contact == ExitContact::Armed
                     && exit_bounds(width, height)
-                        .is_some_and(|bounds| bounds.contains(event.point));
+                        .is_some_and(|bounds| bounds.contains_physical(event.point));
                 self.exit_contact = ExitContact::Idle;
                 activated.then_some(SystemAction::Exit)
             }
@@ -116,9 +116,10 @@ pub(crate) fn draw_layout(width: u16, height: u16) -> Option<SystemDrawLayout> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::geometry::{Point, WINDOW_HEIGHT, WINDOW_WIDTH, button_grid};
+    use crate::ui::geometry::{WINDOW_HEIGHT, WINDOW_WIDTH, button_grid};
+    use crate::ui::screen::PhysicalPoint;
 
-    fn pointer(kind: PointerEventKind, point: Point) -> PointerEvent {
+    fn pointer(kind: PointerEventKind, point: PhysicalPoint) -> PointerEvent {
         PointerEvent {
             kind,
             detail: PRIMARY_BUTTON_DETAIL,
@@ -126,9 +127,9 @@ mod tests {
         }
     }
 
-    fn exit_center() -> Point {
+    fn exit_center() -> PhysicalPoint {
         let bounds = exit_bounds(WINDOW_WIDTH, WINDOW_HEIGHT).expect("Exit bounds");
-        Point {
+        PhysicalPoint {
             x: (bounds.x + bounds.width / 2) as i16,
             y: (bounds.y + bounds.height / 2) as i16,
         }
@@ -174,9 +175,9 @@ mod tests {
             (123, 263),
             (u16::MAX, u16::MAX),
         ] {
-            let buttons = button_grid(width, height);
             let exit = exit_bounds(width, height).expect("Exit bounds");
             let screen = ScreenLayout::new(width, height).expect("screen layout");
+            let buttons = button_grid(screen.remote_viewport.width, screen.remote_viewport.height);
 
             assert_eq!(buttons.len(), 9, "{width}x{height}");
             assert_eq!(exit.x, CELL_MARGIN);
@@ -206,7 +207,7 @@ mod tests {
     #[test]
     fn exit_requires_primary_down_and_up_inside() {
         let inside = exit_center();
-        let outside = Point { x: 5, y: 5 };
+        let outside = PhysicalPoint { x: 5, y: 5 };
         let mut ui = SystemUi::default();
 
         assert_eq!(

@@ -9,7 +9,7 @@ use super::render::draw;
 use crate::app::{Activation, AppState, GeometryUpdate, Redraw};
 use crate::net::Paperspoon;
 use crate::ui::button::{PointerEvent, PointerEventKind};
-use crate::ui::geometry::Point;
+use crate::ui::screen::PhysicalPoint;
 use anyhow::{Context, Result, anyhow};
 use std::time::Duration;
 use x11rb::connection::Connection;
@@ -85,7 +85,7 @@ pub fn event_loop(
                 let Some(activation) = app.handle_pointer(PointerEvent {
                     kind: PointerEventKind::Press,
                     detail: event.detail,
-                    point: Point {
+                    point: PhysicalPoint {
                         x: event.event_x,
                         y: event.event_y,
                     },
@@ -105,7 +105,7 @@ pub fn event_loop(
                 let Some(activation) = app.handle_pointer(PointerEvent {
                     kind: PointerEventKind::Release,
                     detail: event.detail,
-                    point: Point {
+                    point: PhysicalPoint {
                         x: event.event_x,
                         y: event.event_y,
                     },

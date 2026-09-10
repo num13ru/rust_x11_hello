@@ -3,12 +3,46 @@
 /// Height reserved for PaperPad-owned system UI at the bottom of the screen.
 pub(crate) const SYSTEM_UI_HEIGHT: u16 = 72;
 
+/// Signed X11 window-relative coordinate received from the device.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PhysicalPoint {
+    pub x: i16,
+    pub y: i16,
+}
+
+/// Unsigned coordinate relative to the PaperSpoon-owned remote viewport.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct RemotePoint {
+    pub(crate) x: u16,
+    pub(crate) y: u16,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct ScreenRect {
     pub(crate) x: u16,
     pub(crate) y: u16,
     pub(crate) width: u16,
     pub(crate) height: u16,
+}
+
+impl ScreenRect {
+    fn to_relative_point(self, physical: PhysicalPoint) -> Option<RemotePoint> {
+        let x = i32::from(physical.x);
+        let y = i32::from(physical.y);
+        let left = i32::from(self.x);
+        let top = i32::from(self.y);
+        let right = left + i32::from(self.width);
+        let bottom = top + i32::from(self.height);
+
+        if x < left || y < top || x >= right || y >= bottom {
+            return None;
+        }
+
+        Some(RemotePoint {
+            x: (x - left) as u16,
+            y: (y - top) as u16,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -54,6 +88,10 @@ impl ScreenLayout {
 
     pub(crate) fn physical_size(self) -> (u16, u16) {
         self.physical_size
+    }
+
+    pub(crate) fn physical_to_remote(self, physical: PhysicalPoint) -> Option<RemotePoint> {
+        self.remote_viewport.to_relative_point(physical)
     }
 }
 
@@ -117,5 +155,42 @@ mod tests {
 
         assert_eq!(ScreenLayout::new(0, 40), None);
         assert_eq!(ScreenLayout::new(100, 0), None);
+    }
+
+    #[test]
+    fn physical_to_remote_accepts_only_half_open_remote_viewport() {
+        let layout = ScreenLayout::new(1272, 1696).expect("screen layout");
+
+        assert_eq!(
+            layout.physical_to_remote(PhysicalPoint { x: 0, y: 0 }),
+            Some(RemotePoint { x: 0, y: 0 })
+        );
+        assert_eq!(
+            layout.physical_to_remote(PhysicalPoint { x: 1271, y: 1623 }),
+            Some(RemotePoint { x: 1271, y: 1623 })
+        );
+        for outside in [
+            PhysicalPoint { x: -1, y: 0 },
+            PhysicalPoint { x: 0, y: -1 },
+            PhysicalPoint { x: 1272, y: 0 },
+            PhysicalPoint { x: 0, y: 1624 },
+        ] {
+            assert_eq!(layout.physical_to_remote(outside), None);
+        }
+    }
+
+    #[test]
+    fn relative_mapping_subtracts_nonzero_viewport_origin() {
+        let viewport = ScreenRect {
+            x: 10,
+            y: 20,
+            width: 30,
+            height: 40,
+        };
+
+        assert_eq!(
+            viewport.to_relative_point(PhysicalPoint { x: 12, y: 23 }),
+            Some(RemotePoint { x: 2, y: 3 })
+        );
     }
 }
