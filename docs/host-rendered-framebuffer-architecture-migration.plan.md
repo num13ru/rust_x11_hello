@@ -260,7 +260,7 @@ If system UI later moves to another edge, the mapping must still be explicit rat
 
 PaperSpoon must receive coordinates relative to the framebuffer it rendered.
 
-Do not send physical Kindle coordinates and require PaperSpoon to understand PaperPad system chrome.
+Do not send physical Kindle coordinates and require PaperSpoon to understand PaperPad system UI.
 
 This preserves the architectural boundary:
 
@@ -1202,7 +1202,7 @@ Do not mark the task complete while the old semantic application architecture re
 
 💡 **Keep Exit processing independent from socket writes.** A stuck host connection must not make the local button unresponsive.
 
-💡 **Use different coordinate spaces deliberately.** PaperSpoon should work in remote framebuffer coordinates; it should not need knowledge of PaperPad's local system chrome.
+💡 **Use different coordinate spaces deliberately.** PaperSpoon should work in remote framebuffer coordinates; it should not need knowledge of PaperPad's local system UI.
 
 💡 **Retain only the minimum local hit-testing required for system controls.** Deleting the application grid does not mean deleting every rectangle test from PaperPad.
 

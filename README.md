@@ -43,9 +43,10 @@ single-slot latest-value mailbox.
 ## Geometry-aware rendering
 
 - The app opens a borderless window at `(0,0)` covering the selected X11 screen. The Paperwhite 6 reports `1272 x 1696` in portrait; runtime dimensions come from X11 rather than a fixed device resolution.
+- Paperpad partitions that physical extent into a top remote-content viewport and a fixed 72px Paperpad-owned system strip at the bottom. On the Paperwhite the remote viewport is `(0,0) 1272 x 1624`, and the system strip is `(0,1624) 1272 x 72`. PaperSpoon must render only the remote viewport.
 - Each of the nine grid cells is square, with side length `(screen width / 3) - (20 * 2)` using integer division. On this Kindle, cells are `384 x 384`, with 20px outer margins and 40px gaps between rows and columns. Any division remainder is absorbed by the column gaps so both outer edges stay aligned.
-- The title sits above the grid. Exit sits 8px below it, is 72px tall (twice its previous height), and spans `screen width - 40px` with the same outer margins. A 40px status strip remains reserved at the screen bottom for PaperSpoon `display` text.
-- Shorter windows reduce the cell side to fit the grid, Exit, and status strip without stretching the cells. Windows too small for the fixed margins and controls have no interactive buttons. Layout coordinates are capped at X11's signed-coordinate limit.
+- The title sits above the grid. Exit occupies the local bottom strip, spanning `screen width - 40px` with 20px horizontal margins. The transitional 40px PaperSpoon `display` status strip remains inside the bottom of the remote viewport, immediately above Exit.
+- Shorter windows reduce the cell side to fit the application grid and status strip inside the remote viewport without stretching the cells. Windows too small for the application layout have no application buttons; local Exit remains available whenever the window is at least 41px wide and 72px tall. Layout coordinates are capped at X11's signed-coordinate limit.
 - The final event in each `Expose` batch clears and redraws the current window extent.
 - A size-changing `ConfigureNotify` updates drawing and hit testing together and cancels an active contact. Duplicate geometry is ignored; a zero-width/zero-height report is logged without replacing the last valid extent.
 
@@ -53,7 +54,7 @@ Host tests cover the portrait layout, smaller and landscape windows, division re
 
 ## Logical hit testing
 
-The window contains nine logical buttons in a 3×3 grid, with a separate Exit button aligned below. Their geometry is independent of X11 event structures and uses half-open bounds, so the trailing edges and gaps do not activate a button.
+The remote viewport contains nine logical application buttons in a 3×3 grid. The bottom system strip contains a separate local Exit control. Their geometry is independent of X11 event structures and uses half-open bounds, so trailing edges and gaps do not activate a control.
 
 Only core-X11 `detail=1` participates in UI activation. A primary press arms the button under the initial coordinate; a matching primary release activates only when it remains inside that same button and emits:
 ```text

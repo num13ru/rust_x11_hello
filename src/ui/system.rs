@@ -5,9 +5,9 @@
 
 use super::button::{PRIMARY_BUTTON_DETAIL, PointerEvent, PointerEventKind};
 use super::geometry::{
-    CELL_MARGIN, EXIT_BAR_GAP, EXIT_BAR_HEIGHT, GRID_ROWS, GRID_TOP_INSET, LABEL_TEXT_Y_OFFSET,
-    LayoutRect, LogicalRect, TextPlacement, grid_dimensions, logical_coordinate,
+    CELL_MARGIN, LABEL_TEXT_Y_OFFSET, LayoutRect, LogicalRect, TextPlacement, logical_coordinate,
 };
+use super::screen::{SYSTEM_UI_HEIGHT, ScreenLayout};
 
 const EXIT_TEXT_X_OFFSET: u16 = 18;
 const EXIT_TEXT: &[u8] = b"EXIT";
@@ -78,14 +78,18 @@ impl SystemUi {
 }
 
 pub(crate) fn exit_bounds(width: u16, height: u16) -> Option<LogicalRect> {
-    let (width, side) = grid_dimensions(width, height)?;
-    let row_gap = CELL_MARGIN * 2;
+    let screen = ScreenLayout::new(width, height)?;
+    let region = screen.system_ui_region;
+    let (physical_width, _) = screen.physical_size();
+    if region.height < SYSTEM_UI_HEIGHT || region.width <= CELL_MARGIN * 2 {
+        return None;
+    }
 
     Some(LogicalRect {
         x: CELL_MARGIN,
-        y: GRID_TOP_INSET + GRID_ROWS * side + (GRID_ROWS - 1) * row_gap + EXIT_BAR_GAP,
-        width: width - CELL_MARGIN * 2,
-        height: EXIT_BAR_HEIGHT,
+        y: region.y,
+        width: physical_width - CELL_MARGIN * 2,
+        height: region.height,
     })
 }
 
@@ -112,7 +116,7 @@ pub(crate) fn draw_layout(width: u16, height: u16) -> Option<SystemDrawLayout> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::geometry::{Point, STATUS_BAR_HEIGHT, WINDOW_HEIGHT, WINDOW_WIDTH, button_grid};
+    use crate::ui::geometry::{Point, WINDOW_HEIGHT, WINDOW_WIDTH, button_grid};
 
     fn pointer(kind: PointerEventKind, point: Point) -> PointerEvent {
         PointerEvent {
@@ -131,12 +135,12 @@ mod tests {
     }
 
     #[test]
-    fn portrait_exit_geometry_and_drawing_are_unchanged() {
+    fn portrait_exit_occupies_bottom_system_strip() {
         assert_eq!(
             exit_bounds(WINDOW_WIDTH, WINDOW_HEIGHT),
             Some(LogicalRect {
                 x: 20,
-                y: 1300,
+                y: 1624,
                 width: 1232,
                 height: 72,
             })
@@ -146,13 +150,13 @@ mod tests {
             Some(SystemDrawLayout {
                 rectangle: LayoutRect {
                     x: 20,
-                    y: 1300,
+                    y: 1624,
                     width: 1232,
                     height: 72,
                 },
                 text: TextPlacement {
                     x: 618,
-                    y: 1341,
+                    y: 1665,
                     text: b"EXIT",
                 },
             })
@@ -160,7 +164,7 @@ mod tests {
     }
 
     #[test]
-    fn exit_stays_aligned_below_application_grid_for_supported_extents() {
+    fn exit_stays_inside_system_region_below_remote_viewport() {
         for (width, height) in [
             (636, 848),
             (1273, 1696),
@@ -172,37 +176,31 @@ mod tests {
         ] {
             let buttons = button_grid(width, height);
             let exit = exit_bounds(width, height).expect("Exit bounds");
+            let screen = ScreenLayout::new(width, height).expect("screen layout");
 
             assert_eq!(buttons.len(), 9, "{width}x{height}");
-            assert_eq!(exit.x, buttons[0].bounds.x);
-            assert_eq!(
-                exit.x + exit.width,
-                buttons[2].bounds.x + buttons[2].bounds.width
-            );
-            assert_eq!(exit.height, EXIT_BAR_HEIGHT);
-            assert_eq!(
-                exit.y,
-                buttons[8].bounds.y + buttons[8].bounds.height + EXIT_BAR_GAP
-            );
-            assert!(
-                u32::from(exit.y) + u32::from(exit.height) <= u32::from(height - STATUS_BAR_HEIGHT)
-            );
+            assert_eq!(exit.x, CELL_MARGIN);
+            assert_eq!(exit.y, screen.system_ui_region.y);
+            assert_eq!(exit.height, SYSTEM_UI_HEIGHT);
+            assert_eq!(exit.x + exit.width + CELL_MARGIN, screen.physical_size().0);
+            assert_eq!(exit.y, screen.remote_viewport.height);
+            assert_eq!(exit.y + exit.height, screen.physical_size().1);
+            assert!(buttons.iter().all(|button| {
+                button.bounds.y + button.bounds.height <= screen.remote_viewport.height
+            }));
         }
     }
 
     #[test]
-    fn exit_is_absent_when_layout_cannot_fit_controls() {
-        for (width, height) in [
-            (0, 1696),
-            (1272, 0),
-            (1, 1),
-            (3, 3),
-            (122, 1696),
-            (1272, 262),
-        ] {
+    fn exit_requires_nonzero_margined_width_and_full_system_height() {
+        for (width, height) in [(0, 1696), (1272, 0), (40, 1696), (1272, 71)] {
             assert_eq!(exit_bounds(width, height), None);
             assert_eq!(draw_layout(width, height), None);
         }
+
+        assert!(exit_bounds(41, 72).is_some());
+        assert!(exit_bounds(122, 1696).is_some());
+        assert!(exit_bounds(1272, 262).is_some());
     }
 
     #[test]

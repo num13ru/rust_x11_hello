@@ -380,7 +380,7 @@ shasum -a 256 \
 - **Motion but no button events**: record that exact result; it is evidence for later XInput investigation, not permission to rewrite the renderer.
 - **Only press or only release**: record action-by-action ordering and whether leaving the window changes the result.
 - **Coordinates fixed, inverted, rotated, negative, or outside bounds**: retain raw event and root coordinates with orientation and geometry. Do not normalize them in this phase.
-- **System UI reacts instead of the app**: confirm the touch was inside the app window and note whether Kindle chrome/window-manager behavior intercepted it.
+- **System UI reacts instead of the app**: confirm the touch was inside the app window and note whether Kindle system UI/window-manager behavior intercepted it.
 - **Event flood**: disable normal motion logging while keeping the motion subscription; repeat the test with press/release lines visible.
 - **Connection/process failure during touch**: preserve the first error and exact action. Treat this as a Phase 1/3 defect before evaluating the input backend.
 

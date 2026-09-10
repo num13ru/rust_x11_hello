@@ -4,14 +4,13 @@
 //! button rectangles, scaled text positions, and text label placements. The X11
 //! layer maps these onto its own wire types.
 
+use super::screen::ScreenLayout;
+
 pub const GRID_COLUMNS: u16 = 3;
 pub const GRID_ROWS: u16 = 3;
 /// Each cell has this much space on each side of its column slot.
 pub const CELL_MARGIN: u16 = 20;
 pub const GRID_TOP_INSET: u16 = 60;
-pub const EXIT_BAR_GAP: u16 = 8;
-/// Twice the original 36-pixel exit bar height.
-pub const EXIT_BAR_HEIGHT: u16 = 72;
 /// Reserved at the bottom for PaperSpoon display commands.
 pub const STATUS_BAR_HEIGHT: u16 = 40;
 pub const TITLE_X: u16 = CELL_MARGIN;
@@ -101,17 +100,14 @@ pub struct DrawLayout {
 /// Extents unable to fit the margins, nine cells, Exit, and status strip have
 /// no interactive controls. Layout is capped at X11's signed coordinate limit.
 pub(crate) fn grid_dimensions(width: u16, height: u16) -> Option<(u16, u16)> {
-    let width = width.min(i16::MAX as u16);
-    let height = height.min(i16::MAX as u16);
+    let remote_viewport = ScreenLayout::new(width, height)?.remote_viewport;
+    let width = remote_viewport.width;
+    let height = remote_viewport.height;
     let row_gap = CELL_MARGIN * 2;
-    let chrome_height = GRID_TOP_INSET
-        + (GRID_ROWS - 1) * row_gap
-        + EXIT_BAR_GAP
-        + EXIT_BAR_HEIGHT
-        + STATUS_BAR_HEIGHT;
+    let fixed_vertical_overhead = GRID_TOP_INSET + (GRID_ROWS - 1) * row_gap + STATUS_BAR_HEIGHT;
     let side = (width / GRID_COLUMNS)
         .saturating_sub(CELL_MARGIN * 2)
-        .min(height.saturating_sub(chrome_height) / GRID_ROWS);
+        .min(height.saturating_sub(fixed_vertical_overhead) / GRID_ROWS);
 
     (side > 0).then_some((width, side))
 }
@@ -149,11 +145,17 @@ pub(crate) fn logical_coordinate(value: u32) -> i16 {
 
 /// Compute the layout to draw for a window extent, or `None` for zero extents.
 pub fn draw_layout(width: u16, height: u16) -> Option<DrawLayout> {
-    if width == 0 || height == 0 {
-        return None;
+    let remote_viewport = ScreenLayout::new(width, height)?.remote_viewport;
+    if remote_viewport.width == 0 || remote_viewport.height == 0 {
+        return Some(DrawLayout {
+            rectangles: Vec::new(),
+            text: Vec::new(),
+        });
     }
-
     let buttons = button_grid(width, height);
+    let width = remote_viewport.width;
+    let height = remote_viewport.height;
+
     let rectangles = buttons
         .iter()
         .map(|button| LayoutRect {
@@ -262,13 +264,26 @@ mod tests {
     fn zero_or_insufficient_space_has_no_interactive_controls() {
         assert!(draw_layout(0, 1696).is_none());
         assert!(draw_layout(1272, 0).is_none());
-        for (width, height) in [(1, 1), (3, 3), (122, 1696), (1272, 262)] {
+        for (width, height) in [(1, 1), (3, 3)] {
+            assert!(button_grid(width, height).is_empty());
+            let layout = draw_layout(width, height).unwrap();
+            assert!(layout.rectangles.is_empty());
+            assert!(layout.text.is_empty());
+        }
+        for (width, height) in [(122, 1696), (1272, 252)] {
             assert!(button_grid(width, height).is_empty());
             let layout = draw_layout(width, height).unwrap();
             assert!(layout.rectangles.is_empty());
             assert_eq!(layout.text.len(), 1);
             assert!(layout.text[0].x >= 0 && layout.text[0].x < width as i16);
-            assert!(layout.text[0].y >= 0 && layout.text[0].y < height as i16);
+            assert!(
+                layout.text[0].y >= 0
+                    && layout.text[0].y
+                        < ScreenLayout::new(width, height)
+                            .expect("screen layout")
+                            .remote_viewport
+                            .height as i16
+            );
         }
     }
 }

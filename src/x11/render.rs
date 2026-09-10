@@ -1,6 +1,7 @@
 //! X11 rendering adapter for the wire-independent UI layout.
 
 use crate::ui::geometry::{STATUS_BAR_HEIGHT, draw_layout};
+use crate::ui::screen::ScreenLayout;
 use crate::ui::system;
 use anyhow::{Context, Result, ensure};
 use x11rb::connection::Connection;
@@ -29,6 +30,9 @@ pub(super) fn draw(
     height: u16,
     status_text: Option<&str>,
 ) -> Result<()> {
+    let Some(screen_layout) = ScreenLayout::new(width, height) else {
+        return Ok(());
+    };
     let Some(layout) = draw_layout(width, height) else {
         return Ok(());
     };
@@ -84,16 +88,22 @@ pub(super) fn draw(
     }
 
     if let Some(text) = status_text {
-        // Baseline inside the status strip, below the exit bar.
-        let status_y = height
-            .saturating_sub(STATUS_TEXT_BOTTOM_MARGIN)
-            .min(i16::MAX as u16) as i16;
+        // Baseline inside the remote viewport's legacy status strip, above Exit.
+        let status_y = status_baseline(screen_layout);
         let encoded = encode_status_text(text);
         draw_text(conn, win, gc, STATUS_TEXT_X as i16, status_y, &encoded)?;
     }
 
     conn.flush().context("failed to flush draw requests")?;
     Ok(())
+}
+
+fn status_baseline(screen_layout: ScreenLayout) -> i16 {
+    screen_layout
+        .remote_viewport
+        .height
+        .saturating_sub(STATUS_TEXT_BOTTOM_MARGIN)
+        .min(i16::MAX as u16) as i16
 }
 
 fn draw_text(
@@ -140,6 +150,14 @@ mod tests {
             encode_status_text("PaperSpoon: connected!"),
             b"PaperSpoon: connected!"
         );
+    }
+
+    #[test]
+    fn portrait_status_baseline_stays_inside_remote_viewport() {
+        let layout = ScreenLayout::new(1272, 1696).expect("screen layout");
+
+        assert_eq!(status_baseline(layout), 1614);
+        assert!(status_baseline(layout) < layout.system_ui_region.y as i16);
     }
 
     #[test]
