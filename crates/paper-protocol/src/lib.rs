@@ -1,4 +1,4 @@
-//! Shared, std-only wire protocol for PaperPad and PaperSpoon.
+//! Shared, std-only protocol primitives for PaperPad and PaperSpoon.
 //!
 //! Kindle activations are newline-terminated action lines:
 //!
@@ -11,6 +11,10 @@
 //! ```text
 //! display <text>
 //! ```
+
+mod framebuffer;
+
+pub use framebuffer::{Mono1Frame, Mono1FrameError, Mono1Pixel, mono1_payload_len, mono1_stride};
 
 /// Prefix of a Kindle-to-PaperSpoon activation line.
 pub const EVENT_PREFIX: &str = "event action=";

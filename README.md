@@ -20,7 +20,7 @@ revalidating the recorded PID and executable.
 | X11 resources, event translation, and rendering | `src/x11/` |
 | Paperpad TCP lifecycle, workers, queues, and display mailbox | `src/net/` |
 | Unique-endpoint discovery policy | `src/discovery.rs` |
-| Shared wire constants, formatting, and parsing | `crates/paper-protocol/` |
+| Shared wire constants, framebuffer representation, formatting, and parsing | `crates/paper-protocol/` |
 | PaperSpoon listener, current connection, discovery responder, and forwarding | `tools/paperspoon/` |
 | KUAL lifecycle and MTP packaging | `kindle-extension/` and `scripts/deploy-kindle-mtp.sh` |
 
@@ -93,6 +93,12 @@ maintained USBNetwork package targets this Paperwhite 6, so the transport is
 Wi-Fi.
 
 Presses outside the grid, releases in another button or outside the grid, repeated primary presses, geometry changes, and window unmapping cancel the contact. Unmatched releases do nothing. Auxiliary details such as the observed Kindle `detail=6` and `detail=9` pairs retain their raw diagnostic lines but neither activate nor cancel the armed primary contact. Pointer motion remains unlogged.
+
+## Framebuffer protocol primitives
+
+The shared protocol crate defines a transport-independent `Mono1Frame` for the remote content viewport. It is row-major and MSB-first within each byte: `0` is white and `1` is black. Each row occupies `ceil(width / 8)` bytes with no extra bytes between rows. For widths not divisible by eight, unused low bits in the final byte are required to be white. Frames require nonzero dimensions and an exact `stride * height` payload.
+
+This representation is not connected to the TCP stream or X11 renderer yet. The current line-oriented semantic protocol remains active until the framed-protocol and framebuffer receive/render steps are implemented and verified.
 
 ## TCP transport (Wi-Fi)
 
