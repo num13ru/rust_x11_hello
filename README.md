@@ -76,9 +76,9 @@ action. The current application grid maps buttons 1–9 to:
 | 8 | `stub.button_8` |
 | 9 | `stub.button_9` |
 
-Exit still uses logical button ID 10 internally during this migration stage,
-but its activation is logged as `ui action=activate button=10 system=exit` and
-closes the window without writing to PaperSpoon.
+Exit has its own Paperpad `SystemUi` geometry and contact state rather than an
+application button ID. Its activation is logged as `ui action=activate
+system=exit` and closes the window without writing to PaperSpoon.
 
 Buttons 7–9 send placeholder action IDs for future companion bindings. Rendering
 and touch behavior remain device-specific and must be rechecked after changes

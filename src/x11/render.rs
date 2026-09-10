@@ -1,6 +1,7 @@
 //! X11 rendering adapter for the wire-independent UI layout.
 
 use crate::ui::geometry::{STATUS_BAR_HEIGHT, draw_layout};
+use crate::ui::system;
 use anyhow::{Context, Result, ensure};
 use x11rb::connection::Connection;
 use x11rb::protocol::xproto::{ConnectionExt, Gcontext, Rectangle, Window};
@@ -31,13 +32,14 @@ pub(super) fn draw(
     let Some(layout) = draw_layout(width, height) else {
         return Ok(());
     };
+    let system_layout = system::draw_layout(width, height);
 
     conn.clear_area(false, win, 0, 0, width, height)
         .context("failed to send clear-area request")?
         .check()
         .context("X11 server rejected clear-area request")?;
 
-    let rectangles: Vec<Rectangle> = layout
+    let mut rectangles: Vec<Rectangle> = layout
         .rectangles
         .iter()
         .map(|rectangle| Rectangle {
@@ -47,6 +49,14 @@ pub(super) fn draw(
             height: rectangle.height,
         })
         .collect();
+    if let Some(system_layout) = system_layout {
+        rectangles.push(Rectangle {
+            x: system_layout.rectangle.x,
+            y: system_layout.rectangle.y,
+            width: system_layout.rectangle.width,
+            height: system_layout.rectangle.height,
+        });
+    }
     if !rectangles.is_empty() {
         conn.poly_rectangle(win, gc, &rectangles)
             .context("failed to send rectangle draw request")?
@@ -58,6 +68,19 @@ pub(super) fn draw(
         if placement.y > 0 {
             draw_text(conn, win, gc, placement.x, placement.y, placement.text)?;
         }
+    }
+    match system_layout {
+        Some(system_layout) if system_layout.text.y > 0 => {
+            draw_text(
+                conn,
+                win,
+                gc,
+                system_layout.text.x,
+                system_layout.text.y,
+                system_layout.text.text,
+            )?;
+        }
+        Some(_) | None => {}
     }
 
     if let Some(text) = status_text {

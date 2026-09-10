@@ -2,7 +2,7 @@
 
 use crate::ui::action::{SemanticAction, action_for_button};
 use crate::ui::button::{ContactTracker, PointerEvent, handle_pointer_event};
-use crate::ui::geometry::EXIT_BUTTON_ID;
+use crate::ui::system::{SystemAction, SystemUi};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct Redraw<'a> {
@@ -33,9 +33,7 @@ pub(crate) enum Activation {
         button_id: u8,
         action: SemanticAction,
     },
-    Exit {
-        button_id: u8,
-    },
+    Exit,
     Unknown {
         button_id: u8,
     },
@@ -44,7 +42,8 @@ pub(crate) enum Activation {
 pub(crate) struct AppState {
     width: u16,
     height: u16,
-    contact: ContactTracker,
+    application_contact: ContactTracker,
+    system_ui: SystemUi,
     status_text: Option<String>,
 }
 
@@ -53,7 +52,8 @@ impl AppState {
         Self {
             width,
             height,
-            contact: ContactTracker::default(),
+            application_contact: ContactTracker::default(),
+            system_ui: SystemUi::default(),
             status_text: None,
         }
     }
@@ -80,7 +80,8 @@ impl AppState {
         } else if reported == self.size() {
             GeometryUpdate::Unchanged
         } else {
-            self.contact.cancel();
+            self.application_contact.cancel();
+            self.system_ui.cancel_contact();
             self.width = reported.0;
             self.height = reported.1;
             GeometryUpdate::Redraw(self.redraw())
@@ -88,20 +89,29 @@ impl AppState {
     }
 
     pub(crate) fn handle_pointer(&mut self, event: PointerEvent) -> Option<Activation> {
-        let button_id = handle_pointer_event(&mut self.contact, event, self.width, self.height)?;
-        Some(activation_for_button(button_id))
+        let system_action = self
+            .system_ui
+            .handle_pointer(event, self.width, self.height);
+        let application_button = handle_pointer_event(
+            &mut self.application_contact,
+            event,
+            self.width,
+            self.height,
+        );
+
+        match system_action {
+            Some(SystemAction::Exit) => Some(Activation::Exit),
+            None => application_button.map(activation_for_button),
+        }
     }
 
     pub(crate) fn cancel_contact(&mut self) {
-        self.contact.cancel();
+        self.application_contact.cancel();
+        self.system_ui.cancel_contact();
     }
 }
 
 fn activation_for_button(button_id: u8) -> Activation {
-    if button_id == EXIT_BUTTON_ID {
-        return Activation::Exit { button_id };
-    }
-
     match action_for_button(button_id) {
         Some(action) => Activation::Send { button_id, action },
         None => Activation::Unknown { button_id },
@@ -112,7 +122,8 @@ fn activation_for_button(button_id: u8) -> Activation {
 mod tests {
     use super::*;
     use crate::ui::button::{PRIMARY_BUTTON_DETAIL, PointerEventKind};
-    use crate::ui::geometry::{EXIT_BUTTON_ID, Point, button_grid};
+    use crate::ui::geometry::{Point, button_grid};
+    use crate::ui::system::exit_bounds;
 
     const SIZE: (u16, u16) = (1272, 1696);
 
@@ -154,15 +165,50 @@ mod tests {
                 action: SemanticAction::MediaPlayPause,
             })
         );
+        let exit = exit_bounds(SIZE.0, SIZE.1).expect("Exit bounds");
+        let exit_point = Point {
+            x: (exit.x + exit.width / 2) as i16,
+            y: (exit.y + exit.height / 2) as i16,
+        };
         assert_eq!(
-            activate(&mut state, EXIT_BUTTON_ID),
-            Some(Activation::Exit {
-                button_id: EXIT_BUTTON_ID,
-            })
+            state.handle_pointer(pointer(PointerEventKind::Press, exit_point)),
+            None
+        );
+        assert_eq!(
+            state.handle_pointer(pointer(PointerEventKind::Release, exit_point)),
+            Some(Activation::Exit)
         );
         assert_eq!(
             activation_for_button(u8::MAX),
             Activation::Unknown { button_id: u8::MAX }
+        );
+    }
+
+    #[test]
+    fn application_and_exit_contacts_cannot_cross_activate() {
+        let application_point = center_of(1, SIZE);
+        let exit = exit_bounds(SIZE.0, SIZE.1).expect("Exit bounds");
+        let exit_point = Point {
+            x: (exit.x + exit.width / 2) as i16,
+            y: (exit.y + exit.height / 2) as i16,
+        };
+        let mut state = AppState::new(SIZE);
+
+        assert_eq!(
+            state.handle_pointer(pointer(PointerEventKind::Press, application_point)),
+            None
+        );
+        assert_eq!(
+            state.handle_pointer(pointer(PointerEventKind::Release, exit_point)),
+            None
+        );
+        assert_eq!(
+            state.handle_pointer(pointer(PointerEventKind::Press, exit_point)),
+            None
+        );
+        assert_eq!(
+            state.handle_pointer(pointer(PointerEventKind::Release, application_point)),
+            None
         );
     }
 

@@ -20,9 +20,6 @@ pub const TITLE_TEXT: &[u8] = b"Core X11 button grid: tap 1-9";
 pub const BUTTON_LABELS: [&[u8]; 9] = [b"1", b"2", b"3", b"4", b"5", b"6", b"7", b"8", b"9"];
 pub const LABEL_TEXT_X_OFFSET: u16 = 3;
 pub const LABEL_TEXT_Y_OFFSET: u16 = 5;
-pub const EXIT_TEXT_X_OFFSET: u16 = 18;
-pub const EXIT_BUTTON_ID: u8 = 10;
-pub const EXIT_TEXT: &[u8] = b"EXIT";
 
 // Portrait Kindle fixture for input tests; runtime uses the selected X11 screen.
 #[cfg(test)]
@@ -37,12 +34,6 @@ pub const GRID_RECT_TOP: u16 = GRID_TOP_INSET;
 pub const GRID_ROWS_CELL_WIDTH: u16 = WINDOW_WIDTH / GRID_COLUMNS - CELL_MARGIN * 2;
 #[cfg(test)]
 pub const GRID_ROWS_CELL_HEIGHT: u16 = GRID_ROWS_CELL_WIDTH;
-#[cfg(test)]
-pub const EXIT_BAR_RECT_TOP: u16 = GRID_TOP_INSET
-    + GRID_ROWS * GRID_ROWS_CELL_HEIGHT
-    + (GRID_ROWS - 1) * CELL_MARGIN * 2
-    + EXIT_BAR_GAP;
-
 /// Integer 2-D point in window-relative coordinates.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Point {
@@ -109,7 +100,7 @@ pub struct DrawLayout {
 /// outer grid edges. Short windows reduce the cell side, never stretch it.
 /// Extents unable to fit the margins, nine cells, Exit, and status strip have
 /// no interactive controls. Layout is capped at X11's signed coordinate limit.
-pub fn button_grid(width: u16, height: u16) -> Vec<LogicalButton> {
+pub(crate) fn grid_dimensions(width: u16, height: u16) -> Option<(u16, u16)> {
     let width = width.min(i16::MAX as u16);
     let height = height.min(i16::MAX as u16);
     let row_gap = CELL_MARGIN * 2;
@@ -121,12 +112,19 @@ pub fn button_grid(width: u16, height: u16) -> Vec<LogicalButton> {
     let side = (width / GRID_COLUMNS)
         .saturating_sub(CELL_MARGIN * 2)
         .min(height.saturating_sub(chrome_height) / GRID_ROWS);
-    if side == 0 {
-        return Vec::new();
-    }
 
+    (side > 0).then_some((width, side))
+}
+
+/// Build the nine application buttons without PaperPad system controls.
+pub fn button_grid(width: u16, height: u16) -> Vec<LogicalButton> {
+    let Some((width, side)) = grid_dimensions(width, height) else {
+        return Vec::new();
+    };
+
+    let row_gap = CELL_MARGIN * 2;
     let inner_width = width - CELL_MARGIN * 2;
-    let mut buttons = Vec::with_capacity(usize::from(GRID_COLUMNS * GRID_ROWS) + 1);
+    let mut buttons = Vec::with_capacity(usize::from(GRID_COLUMNS * GRID_ROWS));
     for row in 0..GRID_ROWS {
         for column in 0..GRID_COLUMNS {
             let x = u32::from(CELL_MARGIN)
@@ -142,19 +140,10 @@ pub fn button_grid(width: u16, height: u16) -> Vec<LogicalButton> {
             });
         }
     }
-    buttons.push(LogicalButton {
-        id: EXIT_BUTTON_ID,
-        bounds: LogicalRect {
-            x: CELL_MARGIN,
-            y: GRID_TOP_INSET + GRID_ROWS * side + (GRID_ROWS - 1) * row_gap + EXIT_BAR_GAP,
-            width: inner_width,
-            height: EXIT_BAR_HEIGHT,
-        },
-    });
     buttons
 }
 
-fn logical_coordinate(value: u32) -> i16 {
+pub(crate) fn logical_coordinate(value: u32) -> i16 {
     value.min(i16::MAX as u32) as i16
 }
 
@@ -191,18 +180,6 @@ pub fn draw_layout(width: u16, height: u16) -> Option<DrawLayout> {
         });
     }
 
-    // Label the exit bar, which is not in BUTTON_LABELS.
-
-    if let Some(exit) = buttons.iter().find(|button| button.id == EXIT_BUTTON_ID) {
-        let center_x = u32::from(exit.bounds.x) + u32::from(exit.bounds.width) / 2;
-        let center_y = u32::from(exit.bounds.y) + u32::from(exit.bounds.height) / 2;
-        text.push(TextPlacement {
-            x: logical_coordinate(center_x.saturating_sub(u32::from(EXIT_TEXT_X_OFFSET))),
-            y: logical_coordinate(center_y + baseline_offset),
-            text: EXIT_TEXT,
-        });
-    }
-
     Some(DrawLayout { rectangles, text })
 }
 
@@ -211,9 +188,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn portrait_screen_has_square_cells_and_aligned_double_height_exit() {
+    fn portrait_screen_has_nine_square_application_cells() {
         let buttons = button_grid(1272, 1696);
-        assert_eq!(buttons.len(), 10);
+        assert_eq!(buttons.len(), 9);
         for (index, button) in buttons[..9].iter().enumerate() {
             assert_eq!(button.id, index as u8 + 1);
             assert_eq!(
@@ -226,37 +203,19 @@ mod tests {
                 }
             );
         }
-        assert_eq!(buttons[9].id, EXIT_BUTTON_ID);
-        assert_eq!(
-            buttons[9].bounds,
-            LogicalRect {
-                x: 20,
-                y: 1300,
-                width: 1232,
-                height: 72,
-            }
-        );
         let layout = draw_layout(1272, 1696).unwrap();
-        assert_eq!(layout.rectangles.len(), 10);
-        assert_eq!(layout.text.len(), 11);
+        assert_eq!(layout.rectangles.len(), 9);
+        assert_eq!(layout.text.len(), 10);
         assert_eq!(layout.text[0].text, TITLE_TEXT);
         for (index, label) in layout.text[1..10].iter().enumerate() {
             assert_eq!(label.text, BUTTON_LABELS[index]);
             assert_eq!(label.x, buttons[index].bounds.x as i16 + 192 - 3);
             assert_eq!(label.y, buttons[index].bounds.y as i16 + 192 + 5);
         }
-        assert_eq!(
-            layout.text[10],
-            TextPlacement {
-                x: 618,
-                y: 1341,
-                text: EXIT_TEXT
-            }
-        );
     }
 
     #[test]
-    fn resized_and_odd_extents_keep_squares_aligned_and_controls_separate() {
+    fn resized_and_odd_extents_keep_application_squares_aligned() {
         for (width, height) in [
             (636, 848),
             (1273, 1696),
@@ -267,7 +226,7 @@ mod tests {
             (u16::MAX, u16::MAX),
         ] {
             let buttons = button_grid(width, height);
-            assert_eq!(buttons.len(), 10, "{width}x{height}");
+            assert_eq!(buttons.len(), 9, "{width}x{height}");
             for (index, button) in buttons.iter().enumerate() {
                 let rect = button.bounds;
                 assert!(rect.width > 0 && rect.height > 0);
@@ -276,9 +235,7 @@ mod tests {
                     u32::from(rect.y) + u32::from(rect.height)
                         <= u32::from(height - STATUS_BAR_HEIGHT)
                 );
-                if index < 9 {
-                    assert_eq!(rect.width, rect.height);
-                }
+                assert_eq!(rect.width, rect.height);
                 for other in &buttons[index + 1..] {
                     let other = other.bounds;
                     assert!(
@@ -289,17 +246,6 @@ mod tests {
                     );
                 }
             }
-            let exit = buttons[9].bounds;
-            assert_eq!(exit.x, buttons[0].bounds.x);
-            assert_eq!(
-                exit.x + exit.width,
-                buttons[2].bounds.x + buttons[2].bounds.width
-            );
-            assert_eq!(exit.height, 72);
-            assert_eq!(
-                exit.y,
-                buttons[8].bounds.y + buttons[8].bounds.height + EXIT_BAR_GAP
-            );
             let layout = draw_layout(width, height).unwrap();
             for (rect, button) in layout.rectangles.iter().zip(&buttons) {
                 assert_eq!(rect.x as u16, button.bounds.x);

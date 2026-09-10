@@ -187,8 +187,8 @@ fn dispatch_activation(activation: Activation, paperspoon: &mut Paperspoon) -> b
             }
             false
         }
-        Activation::Exit { button_id } => {
-            eprintln!("ui action=activate button={button_id} system=exit");
+        Activation::Exit => {
+            eprintln!("ui action=activate system=exit");
             true
         }
         Activation::Unknown { button_id } => {

@@ -103,8 +103,8 @@ pub fn handle_pointer_event(
 mod tests {
     use super::*;
     use crate::ui::geometry::{
-        CELL_MARGIN, EXIT_BAR_HEIGHT, EXIT_BAR_RECT_TOP, EXIT_BUTTON_ID, GRID_RECT_LEFT,
-        GRID_RECT_TOP, GRID_ROWS_CELL_HEIGHT, GRID_ROWS_CELL_WIDTH, WINDOW_HEIGHT, WINDOW_WIDTH,
+        CELL_MARGIN, GRID_RECT_LEFT, GRID_RECT_TOP, GRID_ROWS_CELL_HEIGHT, GRID_ROWS_CELL_WIDTH,
+        WINDOW_HEIGHT, WINDOW_WIDTH,
     };
 
     /// Center point of grid cell `(row, column)` at the reference size.
@@ -124,14 +124,6 @@ mod tests {
         Point {
             x: (GRID_RECT_LEFT + column * (GRID_ROWS_CELL_WIDTH + CELL_MARGIN * 2)) as i16,
             y: (GRID_RECT_TOP + row * (GRID_ROWS_CELL_HEIGHT + CELL_MARGIN * 2)) as i16,
-        }
-    }
-
-    /// center of the exit bar at the reference size.
-    fn exit_bar_center() -> Point {
-        Point {
-            x: (WINDOW_WIDTH / 2) as i16,
-            y: (EXIT_BAR_RECT_TOP + EXIT_BAR_HEIGHT / 2) as i16,
         }
     }
 
@@ -170,30 +162,13 @@ mod tests {
             )
             .is_none()
         );
-        // Exit bar: aligned with the grid, below its last row.
-        assert_eq!(
-            hit_button(&buttons, exit_bar_center()).unwrap().id,
-            EXIT_BUTTON_ID
-        );
-        assert_eq!(
-            hit_button(
-                &buttons,
-                Point {
-                    x: (WINDOW_WIDTH - CELL_MARGIN - 1) as i16,
-                    y: (EXIT_BAR_RECT_TOP + 1) as i16,
-                }
-            )
-            .unwrap()
-            .id,
-            EXIT_BUTTON_ID
-        );
         // Outside the window: no hit. (Negative x is a boundary sentinel.)
         assert!(
             hit_button(
                 &buttons,
                 Point {
                     x: WINDOW_WIDTH as i16,
-                    y: exit_bar_center().y
+                    y: cell_center(0, 0).y
                 }
             )
             .is_none()
@@ -211,7 +186,7 @@ mod tests {
     }
 
     #[test]
-    fn gaps_and_exit_margins_do_not_activate_buttons() {
+    fn gaps_and_outer_margins_do_not_activate_buttons() {
         let buttons = button_grid(WINDOW_WIDTH, WINDOW_HEIGHT);
         let mut contact = ContactTracker::default();
         for point in [
@@ -225,11 +200,11 @@ mod tests {
             },
             Point {
                 x: 0,
-                y: exit_bar_center().y,
+                y: cell_center(0, 0).y,
             },
             Point {
                 x: (WINDOW_WIDTH - CELL_MARGIN) as i16,
-                y: exit_bar_center().y,
+                y: cell_center(0, 0).y,
             },
         ] {
             assert!(hit_button(&buttons, point).is_none());
@@ -247,7 +222,7 @@ mod tests {
     }
 
     #[test]
-    fn third_row_and_exit_are_distinct_activation_targets() {
+    fn third_row_buttons_are_distinct_activation_targets() {
         let buttons = button_grid(WINDOW_WIDTH, WINDOW_HEIGHT);
         let mut contact = ContactTracker::default();
 
@@ -263,16 +238,10 @@ mod tests {
 
             contact.press(PRIMARY_BUTTON_DETAIL, point, &buttons);
             assert_eq!(
-                contact.release(PRIMARY_BUTTON_DETAIL, exit_bar_center(), &buttons),
+                contact.release(PRIMARY_BUTTON_DETAIL, Point { x: 5, y: 5 }, &buttons),
                 None
             );
         }
-
-        contact.press(PRIMARY_BUTTON_DETAIL, exit_bar_center(), &buttons);
-        assert_eq!(
-            contact.release(PRIMARY_BUTTON_DETAIL, exit_bar_center(), &buttons),
-            Some(EXIT_BUTTON_ID)
-        );
     }
 
     #[test]
