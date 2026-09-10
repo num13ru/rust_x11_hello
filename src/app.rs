@@ -2,6 +2,7 @@
 
 use crate::ui::action::{SemanticAction, action_for_button};
 use crate::ui::button::{ContactTracker, PointerEvent, handle_pointer_event};
+use crate::ui::geometry::EXIT_BUTTON_ID;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct Redraw<'a> {
@@ -97,8 +98,11 @@ impl AppState {
 }
 
 fn activation_for_button(button_id: u8) -> Activation {
+    if button_id == EXIT_BUTTON_ID {
+        return Activation::Exit { button_id };
+    }
+
     match action_for_button(button_id) {
-        Some(SemanticAction::Exit) => Activation::Exit { button_id },
         Some(action) => Activation::Send { button_id, action },
         None => Activation::Unknown { button_id },
     }

@@ -18,7 +18,6 @@ pub enum SemanticAction {
     StubButton7,
     StubButton8,
     StubButton9,
-    Exit,
 }
 
 impl SemanticAction {
@@ -34,17 +33,15 @@ impl SemanticAction {
             Self::StubButton7 => "stub.button_7",
             Self::StubButton8 => "stub.button_8",
             Self::StubButton9 => "stub.button_9",
-            Self::Exit => "app.exit",
         }
     }
 }
 
-/// Map a grid button id (1..=9, plus the exit bar id) to its semantic action.
+/// Map an application-grid button id (1..=9) to its semantic action.
 ///
 /// Returns `None` for any other id; the grid never produces one.
 pub fn action_for_button(button_id: u8) -> Option<SemanticAction> {
     match button_id {
-        crate::ui::geometry::EXIT_BUTTON_ID => Some(SemanticAction::Exit),
         1 => Some(SemanticAction::MediaPlayPause),
         2 => Some(SemanticAction::MediaNext),
         3 => Some(SemanticAction::MediaPrevious),
@@ -74,11 +71,6 @@ mod tests {
             (7, SemanticAction::StubButton7, "stub.button_7"),
             (8, SemanticAction::StubButton8, "stub.button_8"),
             (9, SemanticAction::StubButton9, "stub.button_9"),
-            (
-                crate::ui::geometry::EXIT_BUTTON_ID,
-                SemanticAction::Exit,
-                "app.exit",
-            ),
         ];
 
         for (button_id, action, id) in expected {
@@ -105,10 +97,9 @@ mod tests {
             SemanticAction::StubButton7.id(),
             SemanticAction::StubButton8.id(),
             SemanticAction::StubButton9.id(),
-            SemanticAction::Exit.id(),
         ];
         ids.sort_unstable();
         ids.dedup();
-        assert_eq!(ids.len(), 10);
+        assert_eq!(ids.len(), 9);
     }
 }

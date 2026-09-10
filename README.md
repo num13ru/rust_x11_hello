@@ -60,7 +60,9 @@ Only core-X11 `detail=1` participates in UI activation. A primary press arms the
 ui action=activate button=4 semantic=terminal.new_window
 ```
 
-Every activation also emits its stable semantic action id. The current grid maps buttons 1–9 and Exit to:
+Every application-grid activation also emits its stable semantic action id.
+Exit is a Paperpad-local lifecycle control and never produces a remote semantic
+action. The current application grid maps buttons 1–9 to:
 
 | Button | Semantic action id |
 | ------ | ------------------ |
@@ -73,7 +75,10 @@ Every activation also emits its stable semantic action id. The current grid maps
 | 7 | `stub.button_7` |
 | 8 | `stub.button_8` |
 | 9 | `stub.button_9` |
-| Exit (ID 10) | `app.exit` (closes the window locally) |
+
+Exit still uses logical button ID 10 internally during this migration stage,
+but its activation is logged as `ui action=activate button=10 system=exit` and
+closes the window without writing to PaperSpoon.
 
 Buttons 7–9 send placeholder action IDs for future companion bindings. Rendering
 and touch behavior remain device-specific and must be rechecked after changes
@@ -243,7 +248,6 @@ at `tools/hammerspoon/init.example.lua`) via `hs.urlevent.bind("paperpad",
   via in-process AppleScript (`hs.osascript`);
 - `terminal.new_window` and `zoom.toggle_mute` dispatch to keyboard
   shortcuts (`cmd+n`, `cmd+shift+a`);
-- `app.exit` is deliberately a no-op (the Kindle closes its own window);
 - unknown ids raise a notification.
 
 `hs.urlevent` fires exactly once per URL open, so every Kindle tap dispatches

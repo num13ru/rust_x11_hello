@@ -102,9 +102,6 @@ local ACTION_DISPATCH = {
         -- Zoom global mute: cmd+shift+a.
         hs.eventtap.keyStroke({ "cmd", "shift" }, "a")
     end,
-    ["app.exit"] = function()
-        -- Exiting the Kindle app is local; nothing to do on the Mac.
-    end,
 }
 
 local function dispatchAction(actionId)

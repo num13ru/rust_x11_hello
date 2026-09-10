@@ -188,10 +188,7 @@ fn dispatch_activation(activation: Activation, paperspoon: &mut Paperspoon) -> b
             false
         }
         Activation::Exit { button_id } => {
-            eprintln!(
-                "ui action=activate button={button_id} semantic={}",
-                crate::ui::action::SemanticAction::Exit.id()
-            );
+            eprintln!("ui action=activate button={button_id} system=exit");
             true
         }
         Activation::Unknown { button_id } => {
