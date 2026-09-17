@@ -5,11 +5,11 @@
 //! padding. Keeping this conversion separate prevents the stable wire format
 //! from accidentally depending on one X server's representation.
 
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use paper_protocol::validate_mono1_pixels;
 use std::fmt;
 use x11rb::connection::{Connection, RequestConnection};
-use x11rb::protocol::xproto::ImageOrder;
+use x11rb::protocol::xproto::{ConnectionExt, Drawable, Gcontext, ImageFormat, ImageOrder};
 use x11rb::rust_connection::RustConnection;
 
 /// Bytes preceding image data in a core X11 `PutImage` request.
@@ -147,11 +147,79 @@ impl X11BitmapAdapter {
         }
 
         Ok(PreparedBitmap {
+            width,
             height,
             stride,
             rows_per_chunk,
             encoded,
         })
+    }
+
+    /// Upload a prepared bitmap using checked, depth-1 XYBitmap requests.
+    ///
+    /// The target GC maps set bits to its foreground pixel and clear bits to
+    /// its background pixel. PaperPad's window GC uses black and white,
+    /// respectively. All issued cookies are checked even if one fails, keeping
+    /// X11 errors from leaking into the event loop as unrelated later events.
+    pub(super) fn blit(
+        &self,
+        conn: &RustConnection,
+        drawable: Drawable,
+        gc: Gcontext,
+        destination: (i16, i16),
+        bitmap: &PreparedBitmap,
+    ) -> Result<usize> {
+        let mut cookies = Vec::new();
+        let mut first_error = None;
+
+        for (y_offset, rows, data) in bitmap.chunks() {
+            let destination_y = match destination_y(destination.1, y_offset) {
+                Ok(destination_y) => destination_y,
+                Err(error) => {
+                    first_error = Some(error);
+                    break;
+                }
+            };
+            match conn.put_image(
+                ImageFormat::XY_BITMAP,
+                drawable,
+                gc,
+                bitmap.width,
+                rows,
+                destination.0,
+                destination_y,
+                0,
+                1,
+                data,
+            ) {
+                Ok(cookie) => cookies.push((y_offset, cookie)),
+                Err(error) => {
+                    first_error = Some(
+                        anyhow::Error::new(error)
+                            .context(format!("failed to send bitmap rows starting at {y_offset}")),
+                    );
+                    break;
+                }
+            }
+        }
+
+        let request_count = cookies.len();
+        for (y_offset, cookie) in cookies {
+            if let Err(error) = cookie
+                .check()
+                .with_context(|| format!("X11 server rejected bitmap rows starting at {y_offset}"))
+            {
+                record_upload_error(&mut first_error, error);
+            }
+        }
+        if let Err(error) = conn.flush().context("failed to flush bitmap upload") {
+            record_upload_error(&mut first_error, error);
+        }
+
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(request_count),
+        }
     }
 }
 
@@ -170,10 +238,24 @@ impl fmt::Display for X11BitmapAdapter {
 }
 
 pub(super) struct PreparedBitmap {
+    width: u16,
     height: u16,
     stride: usize,
     rows_per_chunk: usize,
     encoded: Vec<u8>,
+}
+
+fn destination_y(origin: i16, row_offset: u16) -> Result<i16> {
+    let y = i32::from(origin) + i32::from(row_offset);
+    i16::try_from(y).context("bitmap chunk destination exceeds X11 coordinate range")
+}
+
+fn record_upload_error(first_error: &mut Option<anyhow::Error>, error: anyhow::Error) {
+    if first_error.is_none() {
+        *first_error = Some(error);
+    } else {
+        eprintln!("additional framebuffer upload error: {error:#}");
+    }
 }
 
 impl PreparedBitmap {
@@ -385,5 +467,16 @@ mod tests {
             .prepare(17, 2, &[0x00; 6])
             .expect("one padded row fits");
         assert_eq!(bitmap.chunks().count(), 2);
+    }
+
+    #[test]
+    fn chunk_destination_y_is_checked_instead_of_wrapping() {
+        assert_eq!(destination_y(0, 0).expect("origin"), 0);
+        assert_eq!(destination_y(-10, 10).expect("offset"), 0);
+        assert_eq!(
+            destination_y(i16::MAX - 1, 1).expect("maximum coordinate"),
+            i16::MAX
+        );
+        assert!(destination_y(i16::MAX, 1).is_err());
     }
 }

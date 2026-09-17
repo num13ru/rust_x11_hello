@@ -52,27 +52,42 @@ pub fn event_loop(
     }
     loop {
         if let Some(frame) = paperspoon.poll_frame() {
-            match framebuffer_adapter
-                .as_ref()
-                .map(|adapter| adapter.prepare(frame.width(), frame.height(), frame.pixels()))
-            {
-                Some(Ok(bitmap)) => eprintln!(
-                    "frame prepared id={} width={} height={} wire_stride={} wire_bytes={} x11_stride={} x11_bytes={} chunks={} render=pending",
-                    frame.frame_id(),
-                    frame.width(),
-                    frame.height(),
-                    frame.stride(),
-                    frame.pixels().len(),
-                    bitmap.stride(),
-                    bitmap.bytes().len(),
-                    bitmap.chunks().count()
-                ),
-                Some(Err(error)) => eprintln!(
-                    "frame prepare error id={} width={} height={}: {error:#}",
-                    frame.frame_id(),
-                    frame.width(),
-                    frame.height()
-                ),
+            match framebuffer_adapter.as_ref() {
+                Some(adapter) => {
+                    match adapter.prepare(frame.width(), frame.height(), frame.pixels()) {
+                        Ok(bitmap) => match adapter.blit(
+                            conn,
+                            win,
+                            gc,
+                            remote_viewport_origin(app.size()),
+                            &bitmap,
+                        ) {
+                            Ok(chunks) => eprintln!(
+                                "frame uploaded id={} width={} height={} wire_stride={} wire_bytes={} x11_stride={} x11_bytes={} chunks={} cache=none",
+                                frame.frame_id(),
+                                frame.width(),
+                                frame.height(),
+                                frame.stride(),
+                                frame.pixels().len(),
+                                bitmap.stride(),
+                                bitmap.bytes().len(),
+                                chunks
+                            ),
+                            Err(error) => eprintln!(
+                                "frame upload error id={} width={} height={}: {error:#}",
+                                frame.frame_id(),
+                                frame.width(),
+                                frame.height()
+                            ),
+                        },
+                        Err(error) => eprintln!(
+                            "frame prepare error id={} width={} height={}: {error:#}",
+                            frame.frame_id(),
+                            frame.width(),
+                            frame.height()
+                        ),
+                    }
+                }
                 None => eprintln!(
                     "frame accepted id={} width={} height={} stride={} bytes={} render=unavailable",
                     frame.frame_id(),
@@ -198,6 +213,17 @@ fn remote_viewport_size(physical_size: (u16, u16)) -> (u16, u16) {
         .unwrap_or((0, 0))
 }
 
+fn remote_viewport_origin(physical_size: (u16, u16)) -> (i16, i16) {
+    ScreenLayout::new(physical_size.0, physical_size.1)
+        .map(|layout| {
+            (
+                layout.remote_viewport.x as i16,
+                layout.remote_viewport.y as i16,
+            )
+        })
+        .unwrap_or((0, 0))
+}
+
 fn draw_app(conn: &RustConnection, win: Window, gc: Gcontext, redraw: Redraw<'_>) -> Result<()> {
     let (width, height) = redraw.size();
     draw(conn, win, gc, width, height, redraw.status_text())
@@ -282,5 +308,6 @@ mod tests {
         assert_eq!(remote_viewport_size((1272, 1696)), (1272, 1624));
         assert_eq!(remote_viewport_size((100, 40)), (100, 0));
         assert_eq!(remote_viewport_size((0, 40)), (0, 0));
+        assert_eq!(remote_viewport_origin((1272, 1696)), (0, 0));
     }
 }
