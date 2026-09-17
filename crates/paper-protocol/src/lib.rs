@@ -13,8 +13,13 @@
 //! ```
 
 mod framebuffer;
+mod v2;
 
 pub use framebuffer::{Mono1Frame, Mono1FrameError, Mono1Pixel, mono1_payload_len, mono1_stride};
+pub use v2::{
+    V2_HEADER_LEN, V2_MAGIC, V2_MAX_PAYLOAD_LEN, V2_VERSION, V2DecodeError, V2DecodeResult,
+    V2EncodeError, V2Header, V2Message, V2MessageType, decode_v2_message, encode_v2_message,
+};
 
 /// Prefix of a Kindle-to-PaperSpoon activation line.
 pub const EVENT_PREFIX: &str = "event action=";
