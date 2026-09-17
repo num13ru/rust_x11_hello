@@ -102,7 +102,7 @@ Protocol v2 also defines a 12-byte, big-endian binary header containing `PPFB` m
 
 Typed, big-endian payloads cover `Hello` (version, Mono1 support, remote viewport), `PointerDown`/`PointerUp` (viewport-relative `x/y`), `ViewportChanged` (new remote extent), and `Frame` (`u64` frame ID, extent, Mono1 format, pixels). Reserved payload bytes must be zero. Frame payloads are validated as borrowed bytes without copying; pointer bounds and frame dimensions remain the receiving endpoint's responsibility against its current negotiated viewport.
 
-The Mono1 representation and v2 protocol are not connected to the TCP stream or X11 renderer yet. The current line-oriented semantic protocol remains active until the receive and framebuffer render steps are implemented and verified.
+PaperPad's inbound TCP reader now accepts complete `PPFB` v2 `Frame` messages alongside transitional `display` lines. Frames are validated against the current remote viewport and coalesced into a latest-frame mailbox. Corrupt or unexpected v2 messages end the connection and use the existing reconnect path; dimension mismatches are logged and skipped without replacing a valid pending frame. The X11 event loop drains and logs accepted frames as `render=pending` but does not blit them yet. The line-oriented semantic action path and local Exit remain active until framebuffer rendering is implemented and verified.
 
 ## TCP transport (Wi-Fi)
 
@@ -209,8 +209,9 @@ A PaperSpoon that is unreachable costs bounded time per attempt and is logged
 on the device; it never breaks the X11 event loop or the on-device activation
 log. PaperPad retries in the background every two seconds. Actions made while
 disconnected fail immediately and are not queued or replayed after connection.
-The Kindle opens no listening TCP socket; only the action id leaves the
-device, and only `display` commands enter it.
+The Kindle opens no listening TCP socket. During this transitional step,
+semantic action IDs leave the device while `display` commands and validated v2
+`Frame` messages can enter it.
 
 ### Running PaperSpoon
 

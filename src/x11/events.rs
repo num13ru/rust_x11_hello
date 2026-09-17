@@ -9,7 +9,7 @@ use super::render::draw;
 use crate::app::{Activation, AppState, GeometryUpdate, Redraw};
 use crate::net::Paperspoon;
 use crate::ui::button::{PointerEvent, PointerEventKind};
-use crate::ui::screen::PhysicalPoint;
+use crate::ui::screen::{PhysicalPoint, ScreenLayout};
 use anyhow::{Context, Result, anyhow};
 use std::time::Duration;
 use x11rb::connection::Connection;
@@ -33,12 +33,23 @@ pub fn event_loop(
     paperspoon: &mut Paperspoon,
 ) -> Result<EventLoopExit> {
     let mut app = AppState::new(initial_size);
+    paperspoon.set_remote_viewport(remote_viewport_size(initial_size));
 
     if let Some(text) = paperspoon.poll_display() {
         draw_app(conn, win, gc, app.set_status_text(text))
             .context("failed to redraw status after PaperSpoon command")?;
     }
     loop {
+        if let Some(frame) = paperspoon.poll_frame() {
+            eprintln!(
+                "frame accepted id={} width={} height={} stride={} bytes={} render=pending",
+                frame.frame_id(),
+                frame.width(),
+                frame.height(),
+                frame.stride(),
+                frame.pixels().len()
+            );
+        }
         // Drain any PaperSpoon command received since the last X11 event.
         if let Some(text) = paperspoon.poll_display() {
             eprintln!("display: {text}");
@@ -70,6 +81,7 @@ pub fn event_loop(
                     GeometryUpdate::Unchanged => {}
                     GeometryUpdate::Redraw(redraw) => {
                         let (width, height) = redraw.size();
+                        paperspoon.set_remote_viewport(remote_viewport_size((width, height)));
                         eprintln!(
                             "event type=ConfigureNotify x={} y={} width={width} height={height} window=0x{:x}",
                             event.x, event.y, event.window
@@ -145,6 +157,12 @@ pub fn event_loop(
             _ => eprintln!("event type=Other"),
         }
     }
+}
+
+fn remote_viewport_size(physical_size: (u16, u16)) -> (u16, u16) {
+    ScreenLayout::new(physical_size.0, physical_size.1)
+        .map(|layout| (layout.remote_viewport.width, layout.remote_viewport.height))
+        .unwrap_or((0, 0))
 }
 
 fn draw_app(conn: &RustConnection, win: Window, gc: Gcontext, redraw: Redraw<'_>) -> Result<()> {
@@ -224,5 +242,12 @@ mod tests {
             format_pointer_event("ButtonRelease", &event),
             "input type=ButtonRelease detail=3 event_x=-1 event_y=360 root_x=79 root_y=480 time=123456 window=0x2600001 root=0x50d child=0x0 state=0x0101 same_screen=true"
         );
+    }
+
+    #[test]
+    fn remote_viewport_size_excludes_local_system_ui() {
+        assert_eq!(remote_viewport_size((1272, 1696)), (1272, 1624));
+        assert_eq!(remote_viewport_size((100, 40)), (100, 0));
+        assert_eq!(remote_viewport_size((0, 40)), (0, 0));
     }
 }
