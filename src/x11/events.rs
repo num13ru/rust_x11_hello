@@ -4,6 +4,7 @@
 //! [`crate::ui::button::PointerEvent`]. Rendering is delegated to the sibling
 //! adapter, and the UI layer never sees X11 types.
 
+use super::framebuffer::X11BitmapAdapter;
 use super::render::draw;
 
 use crate::app::{Activation, AppState, GeometryUpdate, Redraw};
@@ -33,6 +34,16 @@ pub fn event_loop(
     paperspoon: &mut Paperspoon,
 ) -> Result<EventLoopExit> {
     let mut app = AppState::new(initial_size);
+    let framebuffer_adapter = match X11BitmapAdapter::from_connection(conn) {
+        Ok(adapter) => {
+            eprintln!("framebuffer adapter ready {adapter}");
+            Some(adapter)
+        }
+        Err(error) => {
+            eprintln!("framebuffer adapter unavailable: {error:#}");
+            None
+        }
+    };
     paperspoon.set_remote_viewport(remote_viewport_size(initial_size));
 
     if let Some(text) = paperspoon.poll_display() {
@@ -41,14 +52,36 @@ pub fn event_loop(
     }
     loop {
         if let Some(frame) = paperspoon.poll_frame() {
-            eprintln!(
-                "frame accepted id={} width={} height={} stride={} bytes={} render=pending",
-                frame.frame_id(),
-                frame.width(),
-                frame.height(),
-                frame.stride(),
-                frame.pixels().len()
-            );
+            match framebuffer_adapter
+                .as_ref()
+                .map(|adapter| adapter.prepare(frame.width(), frame.height(), frame.pixels()))
+            {
+                Some(Ok(bitmap)) => eprintln!(
+                    "frame prepared id={} width={} height={} wire_stride={} wire_bytes={} x11_stride={} x11_bytes={} chunks={} render=pending",
+                    frame.frame_id(),
+                    frame.width(),
+                    frame.height(),
+                    frame.stride(),
+                    frame.pixels().len(),
+                    bitmap.stride(),
+                    bitmap.bytes().len(),
+                    bitmap.chunks().count()
+                ),
+                Some(Err(error)) => eprintln!(
+                    "frame prepare error id={} width={} height={}: {error:#}",
+                    frame.frame_id(),
+                    frame.width(),
+                    frame.height()
+                ),
+                None => eprintln!(
+                    "frame accepted id={} width={} height={} stride={} bytes={} render=unavailable",
+                    frame.frame_id(),
+                    frame.width(),
+                    frame.height(),
+                    frame.stride(),
+                    frame.pixels().len()
+                ),
+            }
         }
         // Drain any PaperSpoon command received since the last X11 event.
         if let Some(text) = paperspoon.poll_display() {
