@@ -64,35 +64,7 @@ pub struct Mono1Frame {
 impl Mono1Frame {
     /// Validate and construct a non-empty Mono1 frame.
     pub fn new(width: u16, height: u16, pixels: Vec<u8>) -> Result<Self, Mono1FrameError> {
-        if width == 0 || height == 0 {
-            return Err(Mono1FrameError::ZeroDimension { width, height });
-        }
-
-        let stride = mono1_stride(width);
-        let expected = mono1_payload_len(width, height)
-            .ok_or(Mono1FrameError::PayloadSizeOverflow { width, height })?;
-        if pixels.len() != expected {
-            return Err(Mono1FrameError::PayloadLength {
-                expected,
-                actual: pixels.len(),
-            });
-        }
-
-        match width % 8 {
-            0 => {}
-            used_bits => {
-                let padding_mask = !(u8::MAX << (8 - used_bits));
-                for row in 0..height {
-                    let final_byte = pixels[(usize::from(row) + 1) * stride - 1];
-                    if final_byte & padding_mask != 0 {
-                        return Err(Mono1FrameError::NonWhitePadding {
-                            row,
-                            byte: final_byte,
-                        });
-                    }
-                }
-            }
-        }
+        let stride = validate_mono1_pixels(width, height, &pixels)?;
 
         Ok(Self {
             width,
@@ -136,6 +108,45 @@ impl Mono1Frame {
             Mono1Pixel::Black
         })
     }
+}
+
+/// Validate borrowed Mono1 pixels and return their row stride.
+pub fn validate_mono1_pixels(
+    width: u16,
+    height: u16,
+    pixels: &[u8],
+) -> Result<usize, Mono1FrameError> {
+    if width == 0 || height == 0 {
+        return Err(Mono1FrameError::ZeroDimension { width, height });
+    }
+
+    let stride = mono1_stride(width);
+    let expected = mono1_payload_len(width, height)
+        .ok_or(Mono1FrameError::PayloadSizeOverflow { width, height })?;
+    if pixels.len() != expected {
+        return Err(Mono1FrameError::PayloadLength {
+            expected,
+            actual: pixels.len(),
+        });
+    }
+
+    match width % 8 {
+        0 => {}
+        used_bits => {
+            let padding_mask = !(u8::MAX << (8 - used_bits));
+            for row in 0..height {
+                let final_byte = pixels[(usize::from(row) + 1) * stride - 1];
+                if final_byte & padding_mask != 0 {
+                    return Err(Mono1FrameError::NonWhitePadding {
+                        row,
+                        byte: final_byte,
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(stride)
 }
 
 /// Number of bytes occupied by one Mono1 row.

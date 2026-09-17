@@ -14,11 +14,19 @@
 
 mod framebuffer;
 mod v2;
+mod v2_payload;
 
-pub use framebuffer::{Mono1Frame, Mono1FrameError, Mono1Pixel, mono1_payload_len, mono1_stride};
+pub use framebuffer::{
+    Mono1Frame, Mono1FrameError, Mono1Pixel, mono1_payload_len, mono1_stride, validate_mono1_pixels,
+};
 pub use v2::{
     V2_HEADER_LEN, V2_MAGIC, V2_MAX_PAYLOAD_LEN, V2_VERSION, V2DecodeError, V2DecodeResult,
     V2EncodeError, V2Header, V2Message, V2MessageType, decode_v2_message, encode_v2_message,
+};
+pub use v2_payload::{
+    V2_FRAME_PREFIX_LEN, V2_HELLO_PAYLOAD_LEN, V2_POINTER_PAYLOAD_LEN, V2_VIEWPORT_PAYLOAD_LEN,
+    V2FramePayload, V2Hello, V2Payload, V2PayloadError, V2PixelFormat, V2Pointer, V2PointerPhase,
+    V2Viewport, decode_v2_payload, encode_v2_frame,
 };
 
 /// Prefix of a Kindle-to-PaperSpoon activation line.

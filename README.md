@@ -98,9 +98,11 @@ Presses outside the grid, releases in another button or outside the grid, repeat
 
 The shared protocol crate defines a transport-independent `Mono1Frame` for the remote content viewport. It is row-major and MSB-first within each byte: `0` is white and `1` is black. Each row occupies `ceil(width / 8)` bytes with no extra bytes between rows. For widths not divisible by eight, unused low bits in the final byte are required to be white. Frames require nonzero dimensions and an exact `stride * height` payload.
 
-Protocol v2 also defines a 12-byte, big-endian binary header containing `PPFB` magic, version, message type, zero-reserved flags, and a `u32` payload length. Payloads are capped at 16 MiB and rejected from the header before allocation. The initial message-type registry contains `Hello`, `PointerDown`, `PointerUp`, `ViewportChanged`, and `Frame`; their typed payload layouts are not defined yet. The borrowing decoder supports partial and consecutive messages without performing I/O.
+Protocol v2 also defines a 12-byte, big-endian binary header containing `PPFB` magic, version, message type, zero-reserved flags, and a `u32` payload length. Payloads are capped at 16 MiB and rejected from the header before allocation. The borrowing decoder supports partial and consecutive messages without performing I/O.
 
-The Mono1 representation and v2 framing are not connected to the TCP stream or X11 renderer yet. The current line-oriented semantic protocol remains active until the typed payload, receive, and framebuffer render steps are implemented and verified.
+Typed, big-endian payloads cover `Hello` (version, Mono1 support, remote viewport), `PointerDown`/`PointerUp` (viewport-relative `x/y`), `ViewportChanged` (new remote extent), and `Frame` (`u64` frame ID, extent, Mono1 format, pixels). Reserved payload bytes must be zero. Frame payloads are validated as borrowed bytes without copying; pointer bounds and frame dimensions remain the receiving endpoint's responsibility against its current negotiated viewport.
+
+The Mono1 representation and v2 protocol are not connected to the TCP stream or X11 renderer yet. The current line-oriented semantic protocol remains active until the receive and framebuffer render steps are implemented and verified.
 
 ## TCP transport (Wi-Fi)
 
