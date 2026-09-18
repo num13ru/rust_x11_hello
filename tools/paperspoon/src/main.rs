@@ -5,8 +5,9 @@
 //! - lines from the Kindle (`event action=<semantic-id>;`) are printed to
 //!   stdout and appended with a unix timestamp and peer address to a log
 //!   file (default `paperspoon.log`);
-//! - lines typed on stdin are forwarded to the Kindle as control commands
-//!   (`display <text>`);
+//! - `display <text>` lines typed on stdin are forwarded to the Kindle;
+//! - `frame <pattern> <width>x<height>` generates and sends a binary v2
+//!   diagnostic framebuffer;
 //! - received action IDs are optionally forwarded to Hammerspoon with
 //!   `open -g hammerspoon://paperpad?action=<id>`.
 //!
@@ -30,9 +31,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use paper_protocol::{DISCOVERY_PORT, parse_action_line};
 
+mod diagnostic;
 mod discovery;
 mod server;
 
+use diagnostic::{StdinCommand, parse_stdin_command};
 use server::CurrentConnection;
 
 /// Default TCP port. Must match `rust_x11_hello`'s `COMPANION_PORT`.
@@ -122,6 +125,9 @@ fn main() -> io::Result<()> {
     println!("discovery listening address=0.0.0.0:{DISCOVERY_PORT}");
 
     println!("type 'display <text>' to send a control command");
+    println!(
+        "type 'frame <white|black|horizontal|checkerboard|border|corners> <width>x<height>' to send a diagnostic framebuffer"
+    );
     if opts.forward_url {
         println!("forwarding actions to Hammerspoon via open -g hammerspoon://paperpad/...");
     } else {
@@ -137,6 +143,7 @@ fn main() -> io::Result<()> {
             .name("paperspoon-stdin".to_string())
             .spawn(move || {
                 let stdin = io::stdin();
+                let mut next_frame_id = 1_u64;
                 for line in stdin.lock().lines() {
                     let line = match line {
                         Ok(line) => line,
@@ -149,8 +156,38 @@ fn main() -> io::Result<()> {
                     if line.is_empty() {
                         continue;
                     }
-                    if let Err(error) = current.forward_line(line) {
-                        eprintln!("control write error: {error}");
+                    match parse_stdin_command(line) {
+                        Ok(StdinCommand::ForwardLine(line)) => {
+                            if let Err(error) = current.forward_line(line) {
+                                eprintln!("control write error: {error}");
+                            }
+                        }
+                        Ok(StdinCommand::Frame(frame)) => {
+                            let encoded = match frame.encode(next_frame_id) {
+                                Ok(encoded) => encoded,
+                                Err(error) => {
+                                    eprintln!("frame command error: {error}");
+                                    continue;
+                                }
+                            };
+                            match current.forward_bytes(&encoded) {
+                                Ok(true) => {
+                                    let (width, height) = frame.dimensions();
+                                    println!(
+                                        "sent frame id={next_frame_id} pattern={} width={width} height={height} bytes={}",
+                                        frame.pattern_name(),
+                                        encoded.len()
+                                    );
+                                    flush_stdout("after sent frame");
+                                    next_frame_id = next_frame_id.wrapping_add(1);
+                                }
+                                Ok(false) => {
+                                    eprintln!("frame not sent: no PaperPad connected");
+                                }
+                                Err(error) => eprintln!("frame write error: {error}"),
+                            }
+                        }
+                        Err(error) => eprintln!("frame command error: {error}"),
                     }
                 }
             })?

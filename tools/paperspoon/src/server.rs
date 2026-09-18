@@ -44,6 +44,16 @@ impl CurrentConnection {
     /// Returns `Ok(false)` when no PaperPad is connected. A failed write
     /// closes and clears only the generation used for that write.
     pub(crate) fn forward_line(&self, line: &str) -> io::Result<bool> {
+        let mut encoded = line.as_bytes().to_vec();
+        encoded.push(b'\n');
+        self.forward_bytes(&encoded)
+    }
+
+    /// Write exact binary bytes to the current connection.
+    ///
+    /// Returns `Ok(false)` when no PaperPad is connected. A failed write
+    /// closes and clears only the connection generation used for the write.
+    pub(crate) fn forward_bytes(&self, bytes: &[u8]) -> io::Result<bool> {
         let (token, mut stream) = {
             let guard = self.inner.lock().expect("current connection lock");
             let Some(active) = guard.as_ref() else {
@@ -55,7 +65,7 @@ impl CurrentConnection {
             )
         };
 
-        if let Err(error) = writeln!(stream, "{line}") {
+        if let Err(error) = stream.write_all(bytes) {
             let _ = stream.shutdown(Shutdown::Both);
             self.clear_if_current(&token);
             return Err(error);
@@ -67,7 +77,7 @@ impl CurrentConnection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{BufRead, BufReader};
+    use std::io::{BufRead, BufReader, Read};
     use std::net::TcpListener;
     use std::time::Duration;
 
@@ -141,5 +151,20 @@ mod tests {
                 .forward_line("display nobody")
                 .expect("cleared target")
         );
+    }
+
+    #[test]
+    fn binary_forwarding_preserves_exact_bytes_without_newline() {
+        let current = CurrentConnection::default();
+        let (stream, mut peer) = tcp_pair();
+        peer.set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("set timeout");
+        current.install(&stream).expect("install");
+
+        let expected = [b'P', b'P', b'F', b'B', 0, 2, 0xff];
+        assert!(current.forward_bytes(&expected).expect("forward bytes"));
+        let mut actual = [0; 7];
+        peer.read_exact(&mut actual).expect("read exact bytes");
+        assert_eq!(actual, expected);
     }
 }

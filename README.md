@@ -230,6 +230,32 @@ Then type a display command at its stdin:
 display hello
 ```
 
+To exercise framebuffer transport and the X11 blitter, send a diagnostic frame
+whose dimensions exactly match PaperPad's current remote viewport. The standard
+Paperwhite portrait viewport is `1272x1624`:
+
+```text
+frame corners 1272x1624
+frame border 1272x1624
+frame checkerboard 1272x1624
+frame horizontal 1272x1624
+frame black 1272x1624
+frame white 1272x1624
+```
+
+Patterns are generated as validated Mono1 frames and assigned increasing frame
+IDs. PaperSpoon prints `sent frame ...`; PaperPad logs `frame uploaded ...
+cache=none`. A mismatched extent is rejected by PaperPad without replacing a
+pending valid frame. This transitional implementation does not cache the
+uploaded image, so an X11 Expose or legacy redraw may replace it; resend the
+command when needed.
+
+For the manual device check, verify the four differently sized blocks in
+`corners` occupy the expected corners, the `border` reaches the remote
+viewport's rightmost pixel and bottom row, black/white polarity is correct, and
+no pattern overwrites the 72-pixel local Exit strip. Press Exit after a frame to
+confirm it remains device-local and responsive.
+
 For a Wi-Fi run, the listener binds `0.0.0.0` on TCP 5581 **and** starts the
 UDP discovery responder on `0.0.0.0:5580` (you should see both the TCP
 banner and `discovery listening address=0.0.0.0:5580`). With no
