@@ -7,11 +7,12 @@
 use super::framebuffer::{PreparedBitmap, X11BitmapAdapter};
 use super::render::draw;
 
-use crate::app::{Activation, AppState, GeometryUpdate, Redraw};
+use crate::app::{Activation, AppState, GeometryUpdate, Redraw, RemotePointerEvent};
 use crate::net::Paperspoon;
 use crate::ui::button::{PointerEvent, PointerEventKind};
 use crate::ui::screen::{PhysicalPoint, ScreenLayout};
 use anyhow::{Context, Result, anyhow};
+use paper_protocol::V2PointerPhase;
 use std::time::Duration;
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
@@ -230,14 +231,18 @@ pub fn event_loop(
             Event::ConfigureNotify(_) => {}
             Event::ButtonPress(event) if event.event == win => {
                 eprintln!("{}", format_pointer_event("ButtonPress", &event));
-                let Some(activation) = app.handle_pointer(PointerEvent {
+                let outcome = app.handle_pointer(PointerEvent {
                     kind: PointerEventKind::Press,
                     detail: event.detail,
                     point: PhysicalPoint {
                         x: event.event_x,
                         y: event.event_y,
                     },
-                }) else {
+                });
+                if let Some(pointer) = outcome.remote() {
+                    forward_remote_pointer(pointer, paperspoon);
+                }
+                let Some(activation) = outcome.activation() else {
                     continue;
                 };
                 if dispatch_activation(activation, paperspoon) {
@@ -250,14 +255,18 @@ pub fn event_loop(
             Event::ButtonPress(_) => {}
             Event::ButtonRelease(event) if event.event == win => {
                 eprintln!("{}", format_pointer_event("ButtonRelease", &event));
-                let Some(activation) = app.handle_pointer(PointerEvent {
+                let outcome = app.handle_pointer(PointerEvent {
                     kind: PointerEventKind::Release,
                     detail: event.detail,
                     point: PhysicalPoint {
                         x: event.event_x,
                         y: event.event_y,
                     },
-                }) else {
+                });
+                if let Some(pointer) = outcome.remote() {
+                    forward_remote_pointer(pointer, paperspoon);
+                }
+                let Some(activation) = outcome.activation() else {
                     continue;
                 };
                 if dispatch_activation(activation, paperspoon) {
@@ -388,6 +397,25 @@ fn dispatch_activation(activation: Activation, paperspoon: &mut Paperspoon) -> b
             eprintln!("ui action=activate button={button_id} semantic=unknown");
             false
         }
+    }
+}
+
+fn forward_remote_pointer(pointer: RemotePointerEvent, paperspoon: &mut Paperspoon) {
+    let phase = match pointer.kind() {
+        PointerEventKind::Press => V2PointerPhase::Down,
+        PointerEventKind::Release => V2PointerPhase::Up,
+    };
+    let point = pointer.point();
+    if let Err(error) = paperspoon.send_pointer(phase, point.x, point.y) {
+        eprintln!(
+            "pointer transport error phase={phase:?} x={} y={}: {error:#}",
+            point.x, point.y
+        );
+    } else {
+        eprintln!(
+            "remote pointer queued phase={phase:?} x={} y={}",
+            point.x, point.y
+        );
     }
 }
 #[cfg(test)]

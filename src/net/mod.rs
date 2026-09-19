@@ -650,10 +650,6 @@ impl Paperspoon {
     ///
     /// Disconnected, full-queue, and stopped-worker states fail immediately.
     /// Accepted pointer events are not retried after reconnect.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "wired to X11 events in the next migration slice")
-    )]
     pub fn send_pointer(&mut self, phase: V2PointerPhase, x: u16, y: u16) -> Result<()> {
         let encoded = V2Pointer::new(phase, x, y).encode_message()?;
         self.enqueue_bytes(encoded, "pointer event")
