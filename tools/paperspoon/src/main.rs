@@ -40,7 +40,7 @@ mod inbound;
 mod server;
 
 use diagnostic::{StdinCommand, parse_stdin_command};
-use inbound::{read_session_hello, read_session_pointer};
+use inbound::{SessionMessage, read_session_hello, read_session_message};
 use server::CurrentConnection;
 
 /// Default TCP port. Must match `rust_x11_hello`'s `COMPANION_PORT`.
@@ -106,6 +106,13 @@ fn flush_stdout(context: &str) {
     if let Err(error) = io::stdout().flush() {
         eprintln!("stdout flush error {context}: {error}");
     }
+}
+
+fn matching_application_viewport(
+    reported_viewport: (u16, u16),
+    rendered_application_viewport: Option<(u16, u16)>,
+) -> Option<(u16, u16)> {
+    rendered_application_viewport.filter(|viewport| *viewport == reported_viewport)
 }
 
 fn main() -> io::Result<()> {
@@ -294,17 +301,54 @@ fn main() -> io::Result<()> {
         };
         let application_ui = ApplicationUi::default();
         let mut application_input = ApplicationInput::default();
+        let mut reported_viewport = (hello.viewport_width(), hello.viewport_height());
+        let mut rendered_application_viewport = None;
         loop {
-            let pointer = match read_session_pointer(&mut reader) {
-                Ok(Some(pointer)) => pointer,
+            let message = match read_session_message(&mut reader) {
+                Ok(Some(message)) => message,
                 Ok(None) => break,
                 Err(error) => {
                     eprintln!("TCP read error from {peer}: {error}");
                     break;
                 }
             };
+            let mut rendered_viewport_changed = false;
             for viewport in application_viewport_rx.try_iter() {
-                application_input.set_viewport(viewport);
+                rendered_application_viewport = viewport;
+                rendered_viewport_changed = true;
+            }
+            let pointer = match message {
+                SessionMessage::ViewportChanged(viewport) => {
+                    reported_viewport = (viewport.width(), viewport.height());
+                    application_input.set_viewport(matching_application_viewport(
+                        reported_viewport,
+                        rendered_application_viewport,
+                    ));
+                    let record = format!(
+                        "viewport changed width={} height={}",
+                        viewport.width(),
+                        viewport.height()
+                    );
+                    println!("received from {peer}: {record}");
+                    flush_stdout("after received viewport change");
+                    let ts = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map(|duration| duration.as_secs())
+                        .unwrap_or(0);
+                    if let Err(error) = writeln!(file, "{ts} {peer} {record}") {
+                        eprintln!("log write error: {error}");
+                    } else if let Err(error) = file.flush() {
+                        eprintln!("log flush error: {error}");
+                    }
+                    continue;
+                }
+                SessionMessage::Pointer(pointer) => pointer,
+            };
+            if rendered_viewport_changed {
+                application_input.set_viewport(matching_application_viewport(
+                    reported_viewport,
+                    rendered_application_viewport,
+                ));
             }
             let phase = match pointer.phase() {
                 V2PointerPhase::Down => "down",
@@ -362,6 +406,19 @@ fn main() -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn application_input_activates_only_for_frame_matching_reported_viewport() {
+        assert_eq!(
+            matching_application_viewport((1272, 1624), Some((1272, 1624))),
+            Some((1272, 1624))
+        );
+        assert_eq!(
+            matching_application_viewport((800, 600), Some((1272, 1624))),
+            None
+        );
+        assert_eq!(matching_application_viewport((800, 600), None), None);
+    }
 
     #[test]
     fn parse_options_keeps_backward_compatible_positional_args() {

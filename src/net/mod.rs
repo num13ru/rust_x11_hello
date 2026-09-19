@@ -15,7 +15,7 @@
 
 use paper_protocol::{
     V2_HEADER_LEN, V2DecodeResult, V2Hello, V2MessageType, V2Payload, V2Pointer, V2PointerPhase,
-    decode_v2_message, decode_v2_payload,
+    V2Viewport, decode_v2_message, decode_v2_payload,
 };
 
 mod connection;
@@ -596,6 +596,55 @@ impl Paperspoon {
         self.enqueue_bytes(encoded, "pointer event")
     }
 
+    /// Retain a changed remote viewport and queue it ahead of later pointers.
+    ///
+    /// A disconnected transport keeps the dimensions for the next `Hello`.
+    /// If a connected transport cannot queue the state change, it is closed so
+    /// later pointers cannot reach PaperSpoon with stale coordinate geometry.
+    pub(crate) fn send_viewport_changed(&mut self, viewport: (u16, u16)) -> Result<()> {
+        let previous = {
+            let mut current = self.remote_viewport.lock().expect("remote viewport lock");
+            let previous = *current;
+            *current = viewport;
+            previous
+        };
+        self.frames.set_viewport(viewport);
+        if previous == viewport {
+            return Ok(());
+        }
+
+        self.promote_startup();
+        let connection = {
+            let guard = self.connection.lock().expect("shared stream lock");
+            match guard.current_token() {
+                Ok(connection) => connection,
+                Err(_) => return Ok(()),
+            }
+        };
+        let encoded = V2Viewport::new(viewport.0, viewport.1).encode_message()?;
+        let result = self
+            .outbound_tx
+            .as_ref()
+            .context("PaperSpoon outbound worker not running")
+            .and_then(|outbound_tx| {
+                enqueue_outbound(
+                    outbound_tx,
+                    QueuedOutbound {
+                        connection,
+                        bytes: encoded,
+                        description: "viewport change",
+                    },
+                )
+            });
+        if result.is_err() {
+            self.connection
+                .lock()
+                .expect("shared stream lock")
+                .disconnect();
+        }
+        result
+    }
+
     fn enqueue_bytes(&mut self, bytes: Vec<u8>, description: &'static str) -> Result<()> {
         self.promote_startup();
         let connection = {
@@ -708,6 +757,25 @@ mod tests {
         assert_eq!(
             decode_v2_payload(message),
             Ok(V2Payload::Hello(V2Hello::new(expected.0, expected.1)))
+        );
+    }
+
+    fn read_expected_viewport(peer: &mut TcpStream, expected: (u16, u16)) {
+        let message_len = V2_HEADER_LEN + paper_protocol::V2_VIEWPORT_PAYLOAD_LEN;
+        let mut encoded = vec![0; message_len];
+        peer.read_exact(&mut encoded)
+            .expect("read ViewportChanged message");
+        let V2DecodeResult::Complete { message, consumed } =
+            decode_v2_message(&encoded).expect("decode ViewportChanged message")
+        else {
+            panic!("complete ViewportChanged message expected");
+        };
+        assert_eq!(consumed, message_len);
+        assert_eq!(
+            decode_v2_payload(message),
+            Ok(V2Payload::ViewportChanged(V2Viewport::new(
+                expected.0, expected.1
+            )))
         );
     }
 
@@ -935,11 +1003,20 @@ mod tests {
             V2Pointer::new(V2PointerPhase::Down, 0x1234, 0xabcd),
             V2Pointer::new(V2PointerPhase::Up, u16::MAX, 0),
         ];
+        let changed_viewport = (800, 600);
+        paperspoon
+            .send_viewport_changed(changed_viewport)
+            .expect("queue changed viewport");
+        paperspoon
+            .send_viewport_changed(changed_viewport)
+            .expect("unchanged viewport is a no-op");
         for pointer in expected {
             paperspoon
                 .send_pointer(pointer.phase(), pointer.x(), pointer.y())
                 .expect("queue pointer");
         }
+
+        read_expected_viewport(&mut peer, changed_viewport);
 
         let message_len = V2_HEADER_LEN + paper_protocol::V2_POINTER_PAYLOAD_LEN;
         let mut encoded = vec![0; message_len * expected.len()];
@@ -1014,6 +1091,16 @@ mod tests {
                 .expect_err("disconnected pointer send must fail")
                 .to_string()
                 .contains("PaperSpoon not connected")
+        );
+        paperspoon
+            .send_viewport_changed((800, 600))
+            .expect("disconnected viewport change is retained");
+        assert_eq!(
+            *paperspoon
+                .remote_viewport
+                .lock()
+                .expect("remote viewport lock"),
+            (800, 600)
         );
     }
 
@@ -1190,7 +1277,10 @@ mod tests {
         let mut first = accept_before(&listener, Duration::from_secs(2));
         read_expected_hello(&mut first, TEST_VIEWPORT);
         let resized_viewport = (800, 600);
-        paperspoon.set_remote_viewport(resized_viewport);
+        paperspoon
+            .send_viewport_changed(resized_viewport)
+            .expect("send viewport change before reconnect");
+        read_expected_viewport(&mut first, resized_viewport);
         drop(first);
         drop(listener); // Force EOF: the reconnector must notice.
 

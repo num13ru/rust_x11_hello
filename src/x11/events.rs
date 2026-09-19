@@ -86,7 +86,6 @@ pub fn event_loop(
         }
     };
     let mut remote_frame_cache = RemoteFrameCache::default();
-    paperspoon.set_remote_viewport(remote_viewport_size(initial_size));
 
     loop {
         if let Some(frame) = paperspoon.poll_frame() {
@@ -178,7 +177,9 @@ pub fn event_loop(
                     GeometryUpdate::Redraw(redraw) => {
                         let (width, height) = redraw.size();
                         let viewport = remote_viewport_size((width, height));
-                        paperspoon.set_remote_viewport(viewport);
+                        if let Err(error) = paperspoon.send_viewport_changed(viewport) {
+                            eprintln!("transport error sending viewport change: {error:#}");
+                        }
                         if let Some(frame) = remote_frame_cache.invalidate_mismatched(viewport) {
                             eprintln!(
                                 "frame cache invalidated id={} width={} height={} viewport_width={} viewport_height={}",

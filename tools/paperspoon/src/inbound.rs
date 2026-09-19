@@ -1,7 +1,7 @@
 //! Protocol-v2 session and pointer framing from PaperPad.
 
 use paper_protocol::{
-    V2_HEADER_LEN, V2DecodeResult, V2Hello, V2Payload, V2Pointer, decode_v2_message,
+    V2_HEADER_LEN, V2DecodeResult, V2Hello, V2Payload, V2Pointer, V2Viewport, decode_v2_message,
     decode_v2_payload,
 };
 use std::io::{self, BufRead, Read};
@@ -10,6 +10,13 @@ use std::io::{self, BufRead, Read};
 pub(crate) enum InboundMessage {
     Hello(V2Hello),
     Pointer(V2Pointer),
+    ViewportChanged(V2Viewport),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum SessionMessage {
+    Pointer(V2Pointer),
+    ViewportChanged(V2Viewport),
 }
 
 pub(crate) fn read_inbound_message<R: BufRead>(
@@ -25,17 +32,24 @@ pub(crate) fn read_inbound_message<R: BufRead>(
 pub(crate) fn read_session_hello<R: BufRead>(reader: &mut R) -> io::Result<Option<V2Hello>> {
     match read_inbound_message(reader)? {
         Some(InboundMessage::Hello(hello)) => Ok(Some(hello)),
-        Some(InboundMessage::Pointer(_)) => Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "initial PaperPad message was not Hello",
-        )),
+        Some(InboundMessage::Pointer(_) | InboundMessage::ViewportChanged(_)) => {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "initial PaperPad message was not Hello",
+            ))
+        }
         None => Ok(None),
     }
 }
 
-pub(crate) fn read_session_pointer<R: BufRead>(reader: &mut R) -> io::Result<Option<V2Pointer>> {
+pub(crate) fn read_session_message<R: BufRead>(
+    reader: &mut R,
+) -> io::Result<Option<SessionMessage>> {
     match read_inbound_message(reader)? {
-        Some(InboundMessage::Pointer(pointer)) => Ok(Some(pointer)),
+        Some(InboundMessage::Pointer(pointer)) => Ok(Some(SessionMessage::Pointer(pointer))),
+        Some(InboundMessage::ViewportChanged(viewport)) => {
+            Ok(Some(SessionMessage::ViewportChanged(viewport)))
+        }
         Some(InboundMessage::Hello(_)) => Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "duplicate Hello from PaperPad",
@@ -77,6 +91,7 @@ fn read_v2_message<R: Read>(reader: &mut R) -> io::Result<InboundMessage> {
     match decode_v2_payload(message).map_err(invalid_data)? {
         V2Payload::Hello(hello) => Ok(InboundMessage::Hello(hello)),
         V2Payload::Pointer(pointer) => Ok(InboundMessage::Pointer(pointer)),
+        V2Payload::ViewportChanged(viewport) => Ok(InboundMessage::ViewportChanged(viewport)),
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("unexpected {message_type:?} message from PaperPad"),
@@ -91,14 +106,18 @@ fn invalid_data(error: impl ToString) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use paper_protocol::{V2MessageType, V2PointerPhase, V2Viewport, encode_v2_message};
+    use paper_protocol::{
+        Mono1Frame, V2MessageType, V2PointerPhase, V2Viewport, encode_v2_frame, encode_v2_message,
+    };
     use std::io::Cursor;
 
     #[test]
-    fn hello_then_pointer_establishes_session_order() {
+    fn hello_then_viewport_and_pointer_establish_session_order() {
         let hello = V2Hello::new(1272, 1624);
+        let viewport = V2Viewport::new(800, 600);
         let pointer = V2Pointer::new(V2PointerPhase::Down, 12, 34);
         let mut encoded = hello.encode_message().expect("encode Hello");
+        encoded.extend_from_slice(&viewport.encode_message().expect("encode viewport"));
         encoded.extend_from_slice(&pointer.encode_message().expect("encode pointer"));
         let mut reader = Cursor::new(encoded);
 
@@ -107,8 +126,12 @@ mod tests {
             Some(hello)
         );
         assert_eq!(
-            read_session_pointer(&mut reader).expect("read pointer"),
-            Some(pointer)
+            read_session_message(&mut reader).expect("read viewport"),
+            Some(SessionMessage::ViewportChanged(viewport))
+        );
+        assert_eq!(
+            read_session_message(&mut reader).expect("read pointer"),
+            Some(SessionMessage::Pointer(pointer))
         );
     }
 
@@ -124,11 +147,21 @@ mod tests {
             io::ErrorKind::InvalidData
         );
 
+        let viewport = V2Viewport::new(800, 600)
+            .encode_message()
+            .expect("encode viewport");
+        assert_eq!(
+            read_session_hello(&mut Cursor::new(viewport))
+                .expect_err("viewport before Hello")
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+
         let hello = V2Hello::new(1272, 1624)
             .encode_message()
             .expect("encode Hello");
         assert_eq!(
-            read_session_pointer(&mut Cursor::new(hello))
+            read_session_message(&mut Cursor::new(hello))
                 .expect_err("duplicate Hello")
                 .kind(),
             io::ErrorKind::InvalidData
@@ -165,12 +198,14 @@ mod tests {
             io::ErrorKind::InvalidData
         );
 
-        let viewport = V2Viewport::new(1272, 1624)
-            .encode_message()
-            .expect("encode viewport");
+        let frame = encode_v2_frame(
+            1,
+            &Mono1Frame::new(8, 1, vec![0]).expect("valid test frame"),
+        )
+        .expect("encode frame");
         assert_eq!(
-            read_inbound_message(&mut Cursor::new(viewport))
-                .expect_err("unexpected viewport")
+            read_inbound_message(&mut Cursor::new(frame))
+                .expect_err("unexpected frame")
                 .kind(),
             io::ErrorKind::InvalidData
         );
