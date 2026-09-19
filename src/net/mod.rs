@@ -15,7 +15,7 @@
 
 use paper_protocol::{
     V2_HEADER_LEN, V2_MAGIC, V2DecodeResult, V2MessageType, V2Payload, V2Pointer, V2PointerPhase,
-    decode_v2_message, decode_v2_payload, parse_display_command,
+    decode_v2_message, decode_v2_payload,
 };
 
 mod connection;
@@ -79,21 +79,6 @@ fn wait_for_startup_retry(stopping: &AtomicBool, delay: Duration) -> bool {
             return true;
         }
         std::thread::sleep(remaining.min(STARTUP_STOP_POLL_INTERVAL));
-    }
-}
-
-#[derive(Clone, Default)]
-struct DisplayMailbox {
-    pending: Arc<Mutex<Option<String>>>,
-}
-
-impl DisplayMailbox {
-    fn publish(&self, text: String) {
-        *self.pending.lock().expect("display mailbox lock") = Some(text);
-    }
-
-    fn take(&self) -> Option<String> {
-        self.pending.lock().expect("display mailbox lock").take()
     }
 }
 
@@ -195,7 +180,6 @@ impl FrameMailbox {
 pub struct Paperspoon {
     /// Shared with the reconnector thread; owns the active socket.
     connection: Arc<Mutex<ConnectionState>>,
-    display: DisplayMailbox,
     frames: FrameMailbox,
     outbound_tx: Option<SyncSender<QueuedOutbound>>,
     wake_tx: Option<Sender<()>>,
@@ -266,20 +250,13 @@ enum InboundMessage {
     Frame(ReceivedFrame),
 }
 
-fn spawn_reader(
-    stream: TcpStream,
-    display: DisplayMailbox,
-    frames: FrameMailbox,
-    wake_tx: Sender<()>,
-) -> JoinHandle<()> {
+fn spawn_reader(stream: TcpStream, frames: FrameMailbox, wake_tx: Sender<()>) -> JoinHandle<()> {
     std::thread::spawn(move || {
         let mut reader = BufReader::new(stream);
         loop {
             match read_inbound_message(&mut reader) {
                 Ok(Some(InboundMessage::Line(line))) => {
-                    if let Some(text) = parse_display_command(&line) {
-                        display.publish(text);
-                    }
+                    eprintln!("ignored legacy inbound line bytes={}", line.len());
                 }
                 Ok(Some(InboundMessage::Frame(frame))) => match frames.publish(frame) {
                     Ok(()) => {}
@@ -416,7 +393,6 @@ impl Paperspoon {
     pub fn disconnected() -> Self {
         Self {
             connection: Arc::new(Mutex::new(ConnectionState::disconnected())),
-            display: DisplayMailbox::default(),
             frames: FrameMailbox::default(),
             outbound_tx: None,
             wake_tx: None,
@@ -499,7 +475,6 @@ impl Paperspoon {
         // which retries until PaperSpoon is reachable again and swaps in a
         // fresh socket — proactive auto-reconnect without user input.
         let connection = Arc::new(Mutex::new(ConnectionState::connected(stream)));
-        let display = DisplayMailbox::default();
         let (outbound_tx, outbound_rx) = mpsc::sync_channel(OUTBOUND_QUEUE_CAPACITY);
         let (wake_tx, wake_rx) = mpsc::channel::<()>();
 
@@ -508,12 +483,7 @@ impl Paperspoon {
             .expect("shared stream lock")
             .clone_stream()?
             .into_stream();
-        let reader_handle = spawn_reader(
-            reader_stream,
-            display.clone(),
-            frames.clone(),
-            wake_tx.clone(),
-        );
+        let reader_handle = spawn_reader(reader_stream, frames.clone(), wake_tx.clone());
 
         // Reconnector: wake on EOF, clear slot, retry connect until success,
         // install fresh socket + reader, then wait for the next EOF.
@@ -521,7 +491,6 @@ impl Paperspoon {
         let stopping = Arc::new(AtomicBool::new(false));
         let writer = spawn_writer(Arc::clone(&connection), outbound_rx, Arc::clone(&stopping));
         let worker_stopping = Arc::clone(&stopping);
-        let worker_display = display.clone();
         let worker_frames = frames.clone();
         let worker_wake_tx = wake_tx.clone();
         let reconnector = std::thread::spawn(move || {
@@ -563,7 +532,6 @@ impl Paperspoon {
                             }
                             active_reader = Some(spawn_reader(
                                 fresh_reader,
-                                worker_display.clone(),
                                 worker_frames.clone(),
                                 worker_wake_tx.clone(),
                             ));
@@ -577,7 +545,6 @@ impl Paperspoon {
 
         Ok(Self {
             connection,
-            display,
             frames,
             outbound_tx: Some(outbound_tx),
             wake_tx: Some(wake_tx),
@@ -657,15 +624,6 @@ impl Paperspoon {
                 description,
             },
         )
-    }
-
-    /// Drain any display commands received since the last call.
-    ///
-    /// Returns the latest pending display text, if any, and empties the
-    /// single-slot mailbox. It never blocks on network I/O.
-    pub fn poll_display(&mut self) -> Option<String> {
-        self.promote_startup();
-        self.display.take()
     }
 
     /// Update dimensions that inbound remote frames must match.
@@ -861,7 +819,7 @@ mod tests {
 
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         while attempts.load(Ordering::Acquire) < 2 {
-            paperspoon.poll_display();
+            paperspoon.promote_startup();
             assert!(
                 std::time::Instant::now() < deadline,
                 "startup was not retried"
@@ -895,7 +853,7 @@ mod tests {
             Paperspoon::start_with(|| Err(anyhow::anyhow!("injected startup failure")), None);
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         while paperspoon.startup_rx.is_some() {
-            paperspoon.poll_display();
+            paperspoon.promote_startup();
             assert!(
                 std::time::Instant::now() < deadline,
                 "startup failure was not collected"
@@ -1036,16 +994,6 @@ mod tests {
                 .to_string()
                 .contains("PaperSpoon not connected")
         );
-    }
-
-    #[test]
-    fn display_mailbox_coalesces_to_latest_unread_text() {
-        let mailbox = DisplayMailbox::default();
-        assert_eq!(mailbox.take(), None);
-        mailbox.publish("first".to_string());
-        mailbox.publish("second".to_string());
-        assert_eq!(mailbox.take(), Some("second".to_string()));
-        assert_eq!(mailbox.take(), None);
     }
 
     #[test]
@@ -1248,23 +1196,28 @@ mod tests {
         // Keep the original peer open: a second accept proves the reader
         // rejected the frame and woke the reconnector instead of seeing EOF.
         let mut replacement_peer = accept_before(&listener, Duration::from_secs(5));
-        writeln!(replacement_peer, "display recovered").expect("write recovered display");
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         loop {
-            if paperspoon.poll_display() == Some("recovered".to_string()) {
-                break;
+            match paperspoon.send_pointer(V2PointerPhase::Down, 7, 8) {
+                Ok(()) => break,
+                Err(error) if error.to_string().contains("PaperSpoon not connected") => {}
+                Err(error) => panic!("unexpected pointer error after reconnect: {error:#}"),
             }
             assert!(
                 std::time::Instant::now() < deadline,
-                "no display after oversized-line reconnect"
+                "oversized-line reconnect was not promoted"
             );
             std::thread::sleep(Duration::from_millis(10));
         }
+        read_expected_pointer(
+            &mut replacement_peer,
+            V2Pointer::new(V2PointerPhase::Down, 7, 8),
+        );
     }
 
     #[test]
     fn auto_reconnects_when_paperspoon_returns() {
-        use std::io::{Read, Write};
+        use std::io::Read;
         use std::net::TcpListener;
         use std::time::Duration;
 
@@ -1272,16 +1225,7 @@ mod tests {
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind");
         let addr = listener.local_addr().expect("addr");
         let mut paperspoon = Paperspoon::connect_to(addr).expect("connect");
-        let mut first = accept_before(&listener, Duration::from_secs(2));
-        writeln!(first, "display first").expect("write first");
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
-        loop {
-            if paperspoon.poll_display() == Some("first".to_string()) {
-                break;
-            }
-            assert!(std::time::Instant::now() < deadline, "no first display");
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        let first = accept_before(&listener, Duration::from_secs(2));
         drop(first);
         drop(listener); // Force EOF: the reconnector must notice.
 
@@ -1291,18 +1235,23 @@ mod tests {
         // accepting proves the auto-restore.
         let listener3 = TcpListener::bind(addr).expect("rebind same port");
         let mut reconnected_peer = accept_before(&listener3, Duration::from_secs(5));
-        writeln!(reconnected_peer, "display again").expect("write again");
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         loop {
-            if paperspoon.poll_display() == Some("again".to_string()) {
-                break;
+            match paperspoon.send_pointer(V2PointerPhase::Up, 9, 10) {
+                Ok(()) => break,
+                Err(error) if error.to_string().contains("PaperSpoon not connected") => {}
+                Err(error) => panic!("unexpected pointer error after reconnect: {error:#}"),
             }
             assert!(
                 std::time::Instant::now() < deadline,
-                "no reconnected display"
+                "reconnected transport was not promoted"
             );
             std::thread::sleep(Duration::from_millis(10));
         }
+        read_expected_pointer(
+            &mut reconnected_peer,
+            V2Pointer::new(V2PointerPhase::Up, 9, 10),
+        );
 
         // Drop must stop and join the reader even while its peer remains idle.
         assert_eq!(

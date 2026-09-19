@@ -5,26 +5,21 @@ use crate::ui::screen::{RemotePoint, ScreenLayout};
 use crate::ui::system::{SystemAction, SystemUi};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct Redraw<'a> {
+pub(crate) struct Redraw {
     size: (u16, u16),
-    status_text: Option<&'a str>,
 }
 
-impl<'a> Redraw<'a> {
+impl Redraw {
     pub(crate) fn size(self) -> (u16, u16) {
         self.size
-    }
-
-    pub(crate) fn status_text(self) -> Option<&'a str> {
-        self.status_text
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum GeometryUpdate<'a> {
+pub(crate) enum GeometryUpdate {
     IgnoredZero,
     Unchanged,
-    Redraw(Redraw<'a>),
+    Redraw(Redraw),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -74,7 +69,6 @@ pub(crate) struct AppState {
     height: u16,
     remote_contact_active: bool,
     system_ui: SystemUi,
-    status_text: Option<String>,
 }
 
 impl AppState {
@@ -84,7 +78,6 @@ impl AppState {
             height,
             remote_contact_active: false,
             system_ui: SystemUi::default(),
-            status_text: None,
         }
     }
 
@@ -92,19 +85,11 @@ impl AppState {
         (self.width, self.height)
     }
 
-    pub(crate) fn redraw(&self) -> Redraw<'_> {
-        Redraw {
-            size: self.size(),
-            status_text: self.status_text.as_deref(),
-        }
+    pub(crate) fn redraw(&self) -> Redraw {
+        Redraw { size: self.size() }
     }
 
-    pub(crate) fn set_status_text(&mut self, text: String) -> Redraw<'_> {
-        self.status_text = Some(text);
-        self.redraw()
-    }
-
-    pub(crate) fn update_geometry(&mut self, reported: (u16, u16)) -> GeometryUpdate<'_> {
+    pub(crate) fn update_geometry(&mut self, reported: (u16, u16)) -> GeometryUpdate {
         if reported.0 == 0 || reported.1 == 0 {
             GeometryUpdate::IgnoredZero
         } else if reported == self.size() {
@@ -129,10 +114,7 @@ impl AppState {
             ),
             None => (None, (0, 0)),
         };
-        let activation = match system_action {
-            Some(SystemAction::Exit) => Some(Activation::Exit),
-            None => None,
-        };
+        let activation = system_action.map(|SystemAction::Exit| Activation::Exit);
         let remote = self.handle_remote_pointer(event, remote_point, remote_size);
         PointerOutcome { activation, remote }
     }
@@ -188,21 +170,16 @@ impl AppState {
 mod tests {
     use super::*;
     use crate::ui::button::{PRIMARY_BUTTON_DETAIL, PointerEventKind};
-    use crate::ui::geometry::button_grid;
     use crate::ui::screen::PhysicalPoint;
     use crate::ui::system::exit_bounds;
 
     const SIZE: (u16, u16) = (1272, 1696);
 
-    fn center_of(button_id: u8, size: (u16, u16)) -> PhysicalPoint {
+    fn remote_point(size: (u16, u16)) -> PhysicalPoint {
         let screen = ScreenLayout::new(size.0, size.1).expect("screen layout");
-        let button = button_grid(screen.remote_viewport.width, screen.remote_viewport.height)
-            .into_iter()
-            .find(|button| button.id == button_id)
-            .expect("button exists");
         PhysicalPoint {
-            x: (screen.remote_viewport.x + button.bounds.x + button.bounds.width / 2) as i16,
-            y: (screen.remote_viewport.y + button.bounds.y + button.bounds.height / 2) as i16,
+            x: (screen.remote_viewport.x + screen.remote_viewport.width / 2) as i16,
+            y: (screen.remote_viewport.y + screen.remote_viewport.height / 2) as i16,
         }
     }
 
@@ -217,7 +194,7 @@ mod tests {
     #[test]
     fn remote_pointer_does_not_activate_locally_and_exit_stays_local() {
         let mut state = AppState::new(SIZE);
-        let remote_point = center_of(1, SIZE);
+        let remote_point = remote_point(SIZE);
         assert_eq!(
             state
                 .handle_pointer(pointer(PointerEventKind::Press, remote_point))
@@ -251,7 +228,7 @@ mod tests {
 
     #[test]
     fn application_and_exit_contacts_cannot_cross_activate() {
-        let application_point = center_of(1, SIZE);
+        let application_point = remote_point(SIZE);
         let exit = exit_bounds(SIZE.0, SIZE.1).expect("Exit bounds");
         let exit_point = PhysicalPoint {
             x: (exit.x + exit.width / 2) as i16,
@@ -287,7 +264,7 @@ mod tests {
 
     #[test]
     fn remote_pointer_pair_uses_viewport_coordinates_without_local_activation() {
-        let point = center_of(5, SIZE);
+        let point = remote_point(SIZE);
         let remote_point = ScreenLayout::new(SIZE.0, SIZE.1)
             .expect("screen layout")
             .physical_to_remote(point)
@@ -316,7 +293,7 @@ mod tests {
 
     #[test]
     fn exit_owned_contact_never_becomes_remote_and_cross_release_cancels_remote() {
-        let remote_point = center_of(1, SIZE);
+        let remote_point = remote_point(SIZE);
         let exit = exit_bounds(SIZE.0, SIZE.1).expect("Exit bounds");
         let exit_point = PhysicalPoint {
             x: (exit.x + exit.width / 2) as i16,
@@ -358,7 +335,7 @@ mod tests {
 
     #[test]
     fn auxiliary_unmatched_and_repeated_contacts_do_not_create_remote_pairs() {
-        let point = center_of(1, SIZE);
+        let point = remote_point(SIZE);
         let mut state = AppState::new(SIZE);
         let auxiliary = |kind| PointerEvent {
             kind,
@@ -412,7 +389,7 @@ mod tests {
     #[test]
     fn geometry_updates_ignore_zero_and_cancel_contact_on_change() {
         let mut state = AppState::new(SIZE);
-        let point = center_of(1, SIZE);
+        let point = remote_point(SIZE);
         assert_eq!(
             state
                 .handle_pointer(pointer(PointerEventKind::Press, point))
@@ -425,15 +402,10 @@ mod tests {
         );
         assert_eq!(state.size(), SIZE);
         assert_eq!(state.update_geometry(SIZE), GeometryUpdate::Unchanged);
-        let _ = state.set_status_text("connected".into());
-
         let resized = (SIZE.0 / 2, SIZE.1 / 2);
         assert_eq!(
             state.update_geometry(resized),
-            GeometryUpdate::Redraw(Redraw {
-                size: resized,
-                status_text: Some("connected"),
-            })
+            GeometryUpdate::Redraw(Redraw { size: resized })
         );
         assert_eq!(state.size(), resized);
         assert_eq!(
@@ -441,32 +413,6 @@ mod tests {
                 .handle_pointer(pointer(PointerEventKind::Release, point))
                 .activation(),
             None
-        );
-    }
-
-    #[test]
-    fn status_update_requests_redraw_and_replaces_text_without_transport_knowledge() {
-        let mut state = AppState::new(SIZE);
-        assert_eq!(
-            state.redraw(),
-            Redraw {
-                size: SIZE,
-                status_text: None,
-            }
-        );
-        assert_eq!(
-            state.set_status_text("first".into()),
-            Redraw {
-                size: SIZE,
-                status_text: Some("first"),
-            }
-        );
-        assert_eq!(
-            state.set_status_text("second".into()),
-            Redraw {
-                size: SIZE,
-                status_text: Some("second"),
-            }
         );
     }
 }

@@ -116,8 +116,10 @@ pub(crate) fn draw_layout(width: u16, height: u16) -> Option<SystemDrawLayout> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui::geometry::{WINDOW_HEIGHT, WINDOW_WIDTH, button_grid};
     use crate::ui::screen::PhysicalPoint;
+
+    const WINDOW_WIDTH: u16 = 1272;
+    const WINDOW_HEIGHT: u16 = 1696;
 
     fn pointer(kind: PointerEventKind, point: PhysicalPoint) -> PointerEvent {
         PointerEvent {
@@ -177,18 +179,12 @@ mod tests {
         ] {
             let exit = exit_bounds(width, height).expect("Exit bounds");
             let screen = ScreenLayout::new(width, height).expect("screen layout");
-            let buttons = button_grid(screen.remote_viewport.width, screen.remote_viewport.height);
-
-            assert_eq!(buttons.len(), 9, "{width}x{height}");
             assert_eq!(exit.x, CELL_MARGIN);
             assert_eq!(exit.y, screen.system_ui_region.y);
             assert_eq!(exit.height, SYSTEM_UI_HEIGHT);
             assert_eq!(exit.x + exit.width + CELL_MARGIN, screen.physical_size().0);
             assert_eq!(exit.y, screen.remote_viewport.height);
             assert_eq!(exit.y + exit.height, screen.physical_size().1);
-            assert!(buttons.iter().all(|button| {
-                button.bounds.y + button.bounds.height <= screen.remote_viewport.height
-            }));
         }
     }
 

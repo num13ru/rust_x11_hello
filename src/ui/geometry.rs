@@ -1,39 +1,11 @@
-//! Pure geometry and layout math for the logical button grid.
-//!
-//! This module has no X11 dependency: it converts a window extent into logical
-//! button rectangles, scaled text positions, and text label placements. The X11
-//! layer maps these onto its own wire types.
+//! Geometry primitives used by PaperPad-owned system UI.
 
-use super::screen::{PhysicalPoint, RemotePoint};
+use super::screen::PhysicalPoint;
 
-pub const GRID_COLUMNS: u16 = 3;
-pub const GRID_ROWS: u16 = 3;
-/// Each cell has this much space on each side of its column slot.
 pub const CELL_MARGIN: u16 = 20;
-pub const GRID_TOP_INSET: u16 = 60;
-/// Reserved at the bottom for PaperSpoon display commands.
-pub const STATUS_BAR_HEIGHT: u16 = 40;
-pub const TITLE_X: u16 = CELL_MARGIN;
-pub const TITLE_BASELINE: u16 = 40;
-pub const TITLE_TEXT: &[u8] = b"Core X11 button grid: tap 1-9";
-pub const BUTTON_LABELS: [&[u8]; 9] = [b"1", b"2", b"3", b"4", b"5", b"6", b"7", b"8", b"9"];
-pub const LABEL_TEXT_X_OFFSET: u16 = 3;
 pub const LABEL_TEXT_Y_OFFSET: u16 = 5;
 
-// Portrait Kindle fixture for input tests; runtime uses the selected X11 screen.
-#[cfg(test)]
-pub const WINDOW_WIDTH: u16 = 1272;
-#[cfg(test)]
-pub const WINDOW_HEIGHT: u16 = 1696;
-#[cfg(test)]
-pub const GRID_RECT_LEFT: u16 = CELL_MARGIN;
-#[cfg(test)]
-pub const GRID_RECT_TOP: u16 = GRID_TOP_INSET;
-#[cfg(test)]
-pub const GRID_ROWS_CELL_WIDTH: u16 = WINDOW_WIDTH / GRID_COLUMNS - CELL_MARGIN * 2;
-#[cfg(test)]
-pub const GRID_ROWS_CELL_HEIGHT: u16 = GRID_ROWS_CELL_WIDTH;
-/// Half-open axis-aligned rectangle in logical coordinates.
+/// Half-open axis-aligned rectangle in physical window coordinates.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LogicalRect {
     pub x: u16,
@@ -48,34 +20,13 @@ impl LogicalRect {
         let point_y = i32::from(point.y);
         let left = i32::from(self.x);
         let top = i32::from(self.y);
+        let right = left + i32::from(self.width);
+        let bottom = top + i32::from(self.height);
 
-        point_x >= left
-            && point_y >= top
-            && point_x < left + i32::from(self.width)
-            && point_y < top + i32::from(self.height)
-    }
-
-    pub(crate) fn contains_remote(self, point: RemotePoint) -> bool {
-        let point_x = u32::from(point.x);
-        let point_y = u32::from(point.y);
-        let left = u32::from(self.x);
-        let top = u32::from(self.y);
-
-        point_x >= left
-            && point_y >= top
-            && point_x < left + u32::from(self.width)
-            && point_y < top + u32::from(self.height)
+        point_x >= left && point_x < right && point_y >= top && point_y < bottom
     }
 }
 
-/// One logical button of the grid.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct LogicalButton {
-    pub id: u8,
-    pub bounds: LogicalRect,
-}
-
-/// A wire-independent rectangle, consumed by the drawing layer.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LayoutRect {
     pub x: i16,
@@ -84,7 +35,6 @@ pub struct LayoutRect {
     pub height: u16,
 }
 
-/// A text run to draw at a position.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TextPlacement {
     pub x: i16,
@@ -92,196 +42,6 @@ pub struct TextPlacement {
     pub text: &'static [u8],
 }
 
-/// A complete layout ready for the drawing layer.
-#[derive(Debug)]
-pub struct DrawLayout {
-    pub rectangles: Vec<LayoutRect>,
-    pub text: Vec<TextPlacement>,
-}
-
-/// Build square cells using `width / 3 - 2 * CELL_MARGIN` when height permits.
-/// Column gaps absorb integer-division remainders so Exit aligns with both
-/// outer grid edges. Short windows reduce the cell side, never stretch it.
-/// Extents unable to fit the margins, nine cells, and status strip have no
-/// interactive controls. The dimensions are relative to the remote viewport.
-pub(crate) fn grid_dimensions(width: u16, height: u16) -> Option<(u16, u16)> {
-    if width == 0 || height == 0 {
-        return None;
-    }
-
-    let row_gap = CELL_MARGIN * 2;
-    let fixed_vertical_overhead = GRID_TOP_INSET + (GRID_ROWS - 1) * row_gap + STATUS_BAR_HEIGHT;
-    let side = (width / GRID_COLUMNS)
-        .saturating_sub(CELL_MARGIN * 2)
-        .min(height.saturating_sub(fixed_vertical_overhead) / GRID_ROWS);
-
-    (side > 0).then_some((width, side))
-}
-
-/// Build the nine application buttons without PaperPad system controls.
-pub fn button_grid(width: u16, height: u16) -> Vec<LogicalButton> {
-    let Some((width, side)) = grid_dimensions(width, height) else {
-        return Vec::new();
-    };
-
-    let row_gap = CELL_MARGIN * 2;
-    let inner_width = width - CELL_MARGIN * 2;
-    let mut buttons = Vec::with_capacity(usize::from(GRID_COLUMNS * GRID_ROWS));
-    for row in 0..GRID_ROWS {
-        for column in 0..GRID_COLUMNS {
-            let x = u32::from(CELL_MARGIN)
-                + u32::from(inner_width - side) * u32::from(column) / u32::from(GRID_COLUMNS - 1);
-            buttons.push(LogicalButton {
-                id: (row * GRID_COLUMNS + column + 1) as u8,
-                bounds: LogicalRect {
-                    x: x as u16,
-                    y: GRID_TOP_INSET + row * (side + row_gap),
-                    width: side,
-                    height: side,
-                },
-            });
-        }
-    }
-    buttons
-}
-
 pub(crate) fn logical_coordinate(value: u32) -> i16 {
     value.min(i16::MAX as u32) as i16
-}
-
-/// Compute a viewport-relative layout, or `None` for zero extents.
-pub fn draw_layout(width: u16, height: u16) -> Option<DrawLayout> {
-    if width == 0 || height == 0 {
-        return None;
-    }
-    let buttons = button_grid(width, height);
-
-    let rectangles = buttons
-        .iter()
-        .map(|button| LayoutRect {
-            x: logical_coordinate(u32::from(button.bounds.x)),
-            y: logical_coordinate(u32::from(button.bounds.y)),
-            width: button.bounds.width,
-            height: button.bounds.height,
-        })
-        .collect();
-    let mut text = Vec::with_capacity(BUTTON_LABELS.len() + 1);
-    text.push(TextPlacement {
-        x: logical_coordinate(u32::from(TITLE_X.min(width - 1))),
-        y: logical_coordinate(u32::from(TITLE_BASELINE.min(height - 1))),
-        text: TITLE_TEXT,
-    });
-    let baseline_offset = u32::from(LABEL_TEXT_Y_OFFSET);
-    for (button, label) in buttons.iter().zip(BUTTON_LABELS) {
-        let center_x = u32::from(button.bounds.x) + u32::from(button.bounds.width) / 2;
-        let center_y = u32::from(button.bounds.y) + u32::from(button.bounds.height) / 2;
-        text.push(TextPlacement {
-            x: logical_coordinate(center_x.saturating_sub(u32::from(LABEL_TEXT_X_OFFSET))),
-            y: logical_coordinate(center_y + baseline_offset),
-            text: label,
-        });
-    }
-
-    Some(DrawLayout { rectangles, text })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const PORTRAIT_REMOTE_WIDTH: u16 = 1272;
-    const PORTRAIT_REMOTE_HEIGHT: u16 = 1624;
-
-    #[test]
-    fn portrait_remote_viewport_has_nine_square_application_cells() {
-        let buttons = button_grid(PORTRAIT_REMOTE_WIDTH, PORTRAIT_REMOTE_HEIGHT);
-        assert_eq!(buttons.len(), 9);
-        for (index, button) in buttons[..9].iter().enumerate() {
-            assert_eq!(button.id, index as u8 + 1);
-            assert_eq!(
-                button.bounds,
-                LogicalRect {
-                    x: [20, 444, 868][index % 3],
-                    y: [60, 484, 908][index / 3],
-                    width: 384,
-                    height: 384,
-                }
-            );
-        }
-        let layout = draw_layout(PORTRAIT_REMOTE_WIDTH, PORTRAIT_REMOTE_HEIGHT).unwrap();
-        assert_eq!(layout.rectangles.len(), 9);
-        assert_eq!(layout.text.len(), 10);
-        assert_eq!(layout.text[0].text, TITLE_TEXT);
-        for (index, label) in layout.text[1..10].iter().enumerate() {
-            assert_eq!(label.text, BUTTON_LABELS[index]);
-            assert_eq!(label.x, buttons[index].bounds.x as i16 + 192 - 3);
-            assert_eq!(label.y, buttons[index].bounds.y as i16 + 192 + 5);
-        }
-    }
-
-    #[test]
-    fn resized_and_odd_extents_keep_application_squares_aligned() {
-        for (width, height) in [
-            (636, 848),
-            (1273, 1696),
-            (1274, 1696),
-            (1696, 1272),
-            (760, 528),
-            (123, 263),
-            (i16::MAX as u16, i16::MAX as u16),
-        ] {
-            let buttons = button_grid(width, height);
-            assert_eq!(buttons.len(), 9, "{width}x{height}");
-            for (index, button) in buttons.iter().enumerate() {
-                let rect = button.bounds;
-                assert!(rect.width > 0 && rect.height > 0);
-                assert!(u32::from(rect.x) + u32::from(rect.width) <= u32::from(width));
-                assert!(
-                    u32::from(rect.y) + u32::from(rect.height)
-                        <= u32::from(height - STATUS_BAR_HEIGHT)
-                );
-                assert_eq!(rect.width, rect.height);
-                for other in &buttons[index + 1..] {
-                    let other = other.bounds;
-                    assert!(
-                        rect.x + rect.width <= other.x
-                            || other.x + other.width <= rect.x
-                            || rect.y + rect.height <= other.y
-                            || other.y + other.height <= rect.y
-                    );
-                }
-            }
-            let layout = draw_layout(width, height).unwrap();
-            for (rect, button) in layout.rectangles.iter().zip(&buttons) {
-                assert_eq!(rect.x as u16, button.bounds.x);
-                assert_eq!(rect.y as u16, button.bounds.y);
-                assert_eq!(rect.width, button.bounds.width);
-                assert_eq!(rect.height, button.bounds.height);
-            }
-        }
-        // Landscape fallback is constrained by height, not stretched to width.
-        assert!(button_grid(1696, 1272)[0].bounds.width < 1696 / 3 - 40);
-    }
-
-    #[test]
-    fn zero_or_insufficient_space_has_no_interactive_controls() {
-        assert!(draw_layout(0, 1696).is_none());
-        assert!(draw_layout(1272, 0).is_none());
-        for (width, height) in [(1, 1), (3, 3)] {
-            assert!(button_grid(width, height).is_empty());
-            let layout = draw_layout(width, height).unwrap();
-            assert!(layout.rectangles.is_empty());
-            assert_eq!(layout.text.len(), 1);
-            assert!(layout.text[0].x >= 0 && layout.text[0].x < width as i16);
-            assert!(layout.text[0].y >= 0 && layout.text[0].y < height as i16);
-        }
-        for (width, height) in [(122, 1696), (1272, 180)] {
-            assert!(button_grid(width, height).is_empty());
-            let layout = draw_layout(width, height).unwrap();
-            assert!(layout.rectangles.is_empty());
-            assert_eq!(layout.text.len(), 1);
-            assert!(layout.text[0].x >= 0 && layout.text[0].x < width as i16);
-            assert!(layout.text[0].y >= 0 && layout.text[0].y < height as i16);
-        }
-    }
 }

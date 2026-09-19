@@ -88,18 +88,6 @@ pub fn event_loop(
     let mut remote_frame_cache = RemoteFrameCache::default();
     paperspoon.set_remote_viewport(remote_viewport_size(initial_size));
 
-    if let Some(text) = paperspoon.poll_display() {
-        draw_surface(
-            conn,
-            win,
-            gc,
-            app.set_status_text(text),
-            framebuffer_adapter.as_ref(),
-            &remote_frame_cache,
-            "display",
-        )
-        .context("failed to redraw status after PaperSpoon command")?;
-    }
     loop {
         if let Some(frame) = paperspoon.poll_frame() {
             match framebuffer_adapter.as_ref() {
@@ -155,20 +143,6 @@ pub fn event_loop(
                     frame.pixels().len()
                 ),
             }
-        }
-        // Drain any PaperSpoon command received since the last X11 event.
-        if let Some(text) = paperspoon.poll_display() {
-            eprintln!("display: {text}");
-            draw_surface(
-                conn,
-                win,
-                gc,
-                app.set_status_text(text),
-                framebuffer_adapter.as_ref(),
-                &remote_frame_cache,
-                "display",
-            )
-            .context("failed to redraw status after PaperSpoon command")?;
         }
         let Some(event) = conn
             .poll_for_event()
@@ -321,16 +295,16 @@ fn remote_viewport_origin(physical_size: (u16, u16)) -> (i16, i16) {
         .unwrap_or((0, 0))
 }
 
-fn draw_app(conn: &RustConnection, win: Window, gc: Gcontext, redraw: Redraw<'_>) -> Result<()> {
+fn draw_app(conn: &RustConnection, win: Window, gc: Gcontext, redraw: Redraw) -> Result<()> {
     let (width, height) = redraw.size();
-    draw(conn, win, gc, width, height, redraw.status_text())
+    draw(conn, win, gc, width, height)
 }
 
 fn draw_surface(
     conn: &RustConnection,
     win: Window,
     gc: Gcontext,
-    redraw: Redraw<'_>,
+    redraw: Redraw,
     framebuffer_adapter: Option<&X11BitmapAdapter>,
     remote_frame_cache: &RemoteFrameCache<PreparedBitmap>,
     cause: &str,
