@@ -9,7 +9,7 @@ use std::env;
 use x11rb::rust_connection::RustConnection;
 
 use x11::display;
-use x11::events::{EventLoopExit, event_loop};
+use x11::events::{EventLoopExit, event_loop, remote_viewport_size};
 
 mod app;
 mod config;
@@ -48,7 +48,7 @@ fn run() -> Result<()> {
         size.1
     );
 
-    let mut paperspoon = net::Paperspoon::start(paperpad_config);
+    let mut paperspoon = net::Paperspoon::start(paperpad_config, remote_viewport_size(size));
 
     let event_result = event_loop(&conn, win, gc, size, &mut paperspoon);
 

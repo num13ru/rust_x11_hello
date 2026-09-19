@@ -14,7 +14,7 @@
 //! endpoint. Neither path blocks or breaks the X11 event loop.
 
 use paper_protocol::{
-    V2_HEADER_LEN, V2DecodeResult, V2MessageType, V2Payload, V2Pointer, V2PointerPhase,
+    V2_HEADER_LEN, V2DecodeResult, V2Hello, V2MessageType, V2Payload, V2Pointer, V2PointerPhase,
     decode_v2_message, decode_v2_payload,
 };
 
@@ -176,6 +176,7 @@ impl FrameMailbox {
 pub struct Paperspoon {
     /// Shared with the reconnector thread; owns the active socket.
     connection: Arc<Mutex<ConnectionState>>,
+    remote_viewport: Arc<Mutex<(u16, u16)>>,
     frames: FrameMailbox,
     outbound_tx: Option<SyncSender<QueuedOutbound>>,
     wake_tx: Option<Sender<()>>,
@@ -183,6 +184,13 @@ pub struct Paperspoon {
     writer: Option<JoinHandle<()>>,
     reconnector: Option<JoinHandle<()>>,
     startup_rx: Option<Receiver<StartupUpdate>>,
+}
+
+fn write_hello(stream: &mut TcpStream, viewport: (u16, u16)) -> Result<()> {
+    let encoded = V2Hello::new(viewport.0, viewport.1).encode_message()?;
+    stream
+        .write_all(&encoded)
+        .context("failed to write Hello to PaperSpoon")
 }
 
 struct QueuedOutbound {
@@ -350,6 +358,7 @@ impl Paperspoon {
     pub fn disconnected() -> Self {
         Self {
             connection: Arc::new(Mutex::new(ConnectionState::disconnected())),
+            remote_viewport: Arc::new(Mutex::new((0, 0))),
             frames: FrameMailbox::default(),
             outbound_tx: None,
             wake_tx: None,
@@ -361,21 +370,27 @@ impl Paperspoon {
     }
 
     /// Start retrying PaperSpoon connection attempts without blocking X11.
-    pub fn start(config: PaperpadConfig) -> Self {
+    pub fn start(config: PaperpadConfig, remote_viewport: (u16, u16)) -> Self {
         Self::start_with(
             move || {
                 let addr = paperspoon_addr(config.host(), config.port())?;
                 connect_stream(addr).map(|stream| (addr, stream))
             },
             Some(STARTUP_RETRY_INTERVAL),
+            remote_viewport,
         )
     }
 
-    fn start_with<F>(mut connect: F, retry_interval: Option<Duration>) -> Self
+    fn start_with<F>(
+        mut connect: F,
+        retry_interval: Option<Duration>,
+        remote_viewport: (u16, u16),
+    ) -> Self
     where
         F: FnMut() -> StartupResult + Send + 'static,
     {
         let mut paperspoon = Self::disconnected();
+        paperspoon.set_remote_viewport(remote_viewport);
         let worker_stopping = Arc::clone(&paperspoon.stopping);
         let (startup_tx, startup_rx) = mpsc::sync_channel(1);
         // OS hostname resolution cannot be cancelled through std. Detaching
@@ -421,17 +436,25 @@ impl Paperspoon {
     /// Internal and `pub(crate)`: tests inject an ephemeral listener this
     /// way so they never depend on process-global env vars.
     #[cfg(test)]
-    pub(crate) fn connect_to(addr: SocketAddr) -> Result<Self> {
+    pub(crate) fn connect_to(addr: SocketAddr, remote_viewport: (u16, u16)) -> Result<Self> {
         let stream = connect_stream(addr)?;
-        Self::from_stream(addr, stream, FrameMailbox::default())
+        Self::from_stream(addr, stream, FrameMailbox::default(), remote_viewport)
     }
 
-    fn from_stream(addr: SocketAddr, stream: TcpStream, frames: FrameMailbox) -> Result<Self> {
+    fn from_stream(
+        addr: SocketAddr,
+        mut stream: TcpStream,
+        frames: FrameMailbox,
+        remote_viewport: (u16, u16),
+    ) -> Result<Self> {
         // The socket is shared with a reconnector thread. When the reader
         // hits EOF, it clears the shared slot and wakes the reconnector,
         // which retries until PaperSpoon is reachable again and swaps in a
         // fresh socket — proactive auto-reconnect without user input.
+        frames.set_viewport(remote_viewport);
+        write_hello(&mut stream, remote_viewport)?;
         let connection = Arc::new(Mutex::new(ConnectionState::connected(stream)));
+        let remote_viewport = Arc::new(Mutex::new(remote_viewport));
         let (outbound_tx, outbound_rx) = mpsc::sync_channel(OUTBOUND_QUEUE_CAPACITY);
         let (wake_tx, wake_rx) = mpsc::channel::<()>();
 
@@ -450,6 +473,7 @@ impl Paperspoon {
         let worker_stopping = Arc::clone(&stopping);
         let worker_frames = frames.clone();
         let worker_wake_tx = wake_tx.clone();
+        let worker_remote_viewport = Arc::clone(&remote_viewport);
         let reconnector = std::thread::spawn(move || {
             let mut active_reader = Some(reader_handle);
             'reconnector: loop {
@@ -471,8 +495,15 @@ impl Paperspoon {
                         break 'reconnector;
                     }
                     match TcpStream::connect_timeout(&addr, TCP_CONNECT_TIMEOUT) {
-                        Ok(new_stream) => {
+                        Ok(mut new_stream) => {
                             if configure_stream(&new_stream).is_err() {
+                                let _ = new_stream.shutdown(Shutdown::Both);
+                                std::thread::sleep(TCP_CONNECT_TIMEOUT);
+                                continue;
+                            }
+                            let viewport =
+                                *worker_remote_viewport.lock().expect("remote viewport lock");
+                            if write_hello(&mut new_stream, viewport).is_err() {
                                 let _ = new_stream.shutdown(Shutdown::Both);
                                 std::thread::sleep(TCP_CONNECT_TIMEOUT);
                                 continue;
@@ -502,6 +533,7 @@ impl Paperspoon {
 
         Ok(Self {
             connection,
+            remote_viewport,
             frames,
             outbound_tx: Some(outbound_tx),
             wake_tx: Some(wake_tx),
@@ -528,7 +560,8 @@ impl Paperspoon {
 
         match update {
             StartupUpdate::Connected { addr, stream } => {
-                match Self::from_stream(addr, stream, self.frames.clone()) {
+                let remote_viewport = *self.remote_viewport.lock().expect("remote viewport lock");
+                match Self::from_stream(addr, stream, self.frames.clone(), remote_viewport) {
                     Ok(paperspoon) => {
                         self.startup_rx.take();
                         *self = paperspoon;
@@ -585,6 +618,7 @@ impl Paperspoon {
 
     /// Update dimensions that inbound remote frames must match.
     pub(crate) fn set_remote_viewport(&self, viewport: (u16, u16)) {
+        *self.remote_viewport.lock().expect("remote viewport lock") = viewport;
         self.frames.set_viewport(viewport);
     }
 
@@ -621,6 +655,8 @@ impl Drop for Paperspoon {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    const TEST_VIEWPORT: (u16, u16) = (1272, 1624);
 
     fn received_frame(frame_id: u64, width: u16, height: u16, pixels: Vec<u8>) -> ReceivedFrame {
         let frame = paper_protocol::Mono1Frame::new(width, height, pixels).expect("valid Mono1");
@@ -659,6 +695,22 @@ mod tests {
         assert_eq!(decode_v2_payload(message), Ok(V2Payload::Pointer(expected)));
     }
 
+    fn read_expected_hello(peer: &mut TcpStream, expected: (u16, u16)) {
+        let message_len = V2_HEADER_LEN + paper_protocol::V2_HELLO_PAYLOAD_LEN;
+        let mut encoded = vec![0; message_len];
+        peer.read_exact(&mut encoded).expect("read Hello message");
+        let V2DecodeResult::Complete { message, consumed } =
+            decode_v2_message(&encoded).expect("decode Hello message")
+        else {
+            panic!("complete Hello message expected");
+        };
+        assert_eq!(consumed, message_len);
+        assert_eq!(
+            decode_v2_payload(message),
+            Ok(V2Payload::Hello(V2Hello::new(expected.0, expected.1)))
+        );
+    }
+
     #[test]
     fn background_start_rejects_pointer_and_drop_is_nonblocking() {
         let (started_tx, started_rx) = mpsc::channel();
@@ -672,6 +724,7 @@ mod tests {
                 Err(anyhow::anyhow!("injected delayed startup"))
             },
             None,
+            TEST_VIEWPORT,
         );
         started_rx
             .recv_timeout(Duration::from_secs(2))
@@ -710,6 +763,7 @@ mod tests {
                 Err(anyhow::anyhow!("injected retryable failure"))
             },
             Some(Duration::from_millis(100)),
+            TEST_VIEWPORT,
         );
         attempt_rx
             .recv_timeout(Duration::from_secs(2))
@@ -736,11 +790,11 @@ mod tests {
         let mut paperspoon = Paperspoon::start_with(
             move || connect_stream(addr).map(|stream| (addr, stream)),
             None,
+            TEST_VIEWPORT,
         );
         let mut peer = accept_before(&listener, Duration::from_secs(2));
         peer.set_read_timeout(Some(Duration::from_secs(2)))
             .expect("set peer timeout");
-
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         loop {
             match paperspoon.send_pointer(V2PointerPhase::Down, 123, 456) {
@@ -755,6 +809,7 @@ mod tests {
                 Err(error) => panic!("unexpected pointer error: {error:#}"),
             }
         }
+        read_expected_hello(&mut peer, TEST_VIEWPORT);
         read_expected_pointer(&mut peer, V2Pointer::new(V2PointerPhase::Down, 123, 456));
     }
 
@@ -772,6 +827,7 @@ mod tests {
                 connect_stream(addr).map(|stream| (addr, stream))
             },
             Some(Duration::from_millis(20)),
+            TEST_VIEWPORT,
         );
 
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
@@ -800,14 +856,18 @@ mod tests {
                 Err(error) => panic!("unexpected pointer error: {error:#}"),
             }
         }
+        read_expected_hello(&mut peer, TEST_VIEWPORT);
         read_expected_pointer(&mut peer, V2Pointer::new(V2PointerPhase::Up, 321, 654));
         assert_eq!(attempts.load(Ordering::Acquire), 2);
     }
 
     #[test]
     fn background_start_failure_remains_disconnected() {
-        let mut paperspoon =
-            Paperspoon::start_with(|| Err(anyhow::anyhow!("injected startup failure")), None);
+        let mut paperspoon = Paperspoon::start_with(
+            || Err(anyhow::anyhow!("injected startup failure")),
+            None,
+            TEST_VIEWPORT,
+        );
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         while paperspoon.startup_rx.is_some() {
             paperspoon.promote_startup();
@@ -849,7 +909,8 @@ mod tests {
     fn connected_transport_has_bounded_write_timeout() {
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind");
         let paperspoon =
-            Paperspoon::connect_to(listener.local_addr().expect("addr")).expect("connect");
+            Paperspoon::connect_to(listener.local_addr().expect("addr"), TEST_VIEWPORT)
+                .expect("connect");
         let _peer = accept_before(&listener, Duration::from_secs(2));
         assert_eq!(
             transport_write_timeout(&paperspoon),
@@ -863,10 +924,12 @@ mod tests {
 
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind");
         let mut paperspoon =
-            Paperspoon::connect_to(listener.local_addr().expect("addr")).expect("connect");
+            Paperspoon::connect_to(listener.local_addr().expect("addr"), TEST_VIEWPORT)
+                .expect("connect");
         let mut peer = accept_before(&listener, Duration::from_secs(2));
         peer.set_read_timeout(Some(Duration::from_secs(2)))
             .expect("set peer timeout");
+        read_expected_hello(&mut peer, TEST_VIEWPORT);
 
         let expected = [
             V2Pointer::new(V2PointerPhase::Down, 0x1234, 0xabcd),
@@ -897,7 +960,8 @@ mod tests {
     fn reader_publishes_valid_frame_from_tcp_stream() {
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind");
         let mut paperspoon =
-            Paperspoon::connect_to(listener.local_addr().expect("addr")).expect("connect");
+            Paperspoon::connect_to(listener.local_addr().expect("addr"), TEST_VIEWPORT)
+                .expect("connect");
         paperspoon.set_remote_viewport((9, 2));
         let mut peer = accept_before(&listener, Duration::from_secs(2));
         let frame = paper_protocol::Mono1Frame::new(9, 2, vec![0xaa, 0x80, 0x55, 0x00])
@@ -1083,7 +1147,7 @@ mod tests {
 
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind");
         let addr = listener.local_addr().expect("addr");
-        let mut paperspoon = Paperspoon::connect_to(addr).expect("connect");
+        let mut paperspoon = Paperspoon::connect_to(addr, TEST_VIEWPORT).expect("connect");
         let mut first_peer = accept_before(&listener, Duration::from_secs(2));
 
         first_peer
@@ -1093,6 +1157,7 @@ mod tests {
         // Keep the original peer open: a second accept proves the reader
         // rejected the frame and woke the reconnector instead of seeing EOF.
         let mut replacement_peer = accept_before(&listener, Duration::from_secs(5));
+        read_expected_hello(&mut replacement_peer, TEST_VIEWPORT);
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         loop {
             match paperspoon.send_pointer(V2PointerPhase::Down, 7, 8) {
@@ -1121,8 +1186,11 @@ mod tests {
         // Start a listener (PaperSpoon), connect, then stop it to force EOF.
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind");
         let addr = listener.local_addr().expect("addr");
-        let mut paperspoon = Paperspoon::connect_to(addr).expect("connect");
-        let first = accept_before(&listener, Duration::from_secs(2));
+        let mut paperspoon = Paperspoon::connect_to(addr, TEST_VIEWPORT).expect("connect");
+        let mut first = accept_before(&listener, Duration::from_secs(2));
+        read_expected_hello(&mut first, TEST_VIEWPORT);
+        let resized_viewport = (800, 600);
+        paperspoon.set_remote_viewport(resized_viewport);
         drop(first);
         drop(listener); // Force EOF: the reconnector must notice.
 
@@ -1132,6 +1200,7 @@ mod tests {
         // accepting proves the auto-restore.
         let listener3 = TcpListener::bind(addr).expect("rebind same port");
         let mut reconnected_peer = accept_before(&listener3, Duration::from_secs(5));
+        read_expected_hello(&mut reconnected_peer, resized_viewport);
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         loop {
             match paperspoon.send_pointer(V2PointerPhase::Up, 9, 10) {

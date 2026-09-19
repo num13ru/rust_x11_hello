@@ -1,19 +1,50 @@
-//! Protocol-v2 pointer framing from PaperPad.
+//! Protocol-v2 session and pointer framing from PaperPad.
 
 use paper_protocol::{
-    V2_HEADER_LEN, V2DecodeResult, V2Payload, V2Pointer, decode_v2_message, decode_v2_payload,
+    V2_HEADER_LEN, V2DecodeResult, V2Hello, V2Payload, V2Pointer, decode_v2_message,
+    decode_v2_payload,
 };
 use std::io::{self, BufRead, Read};
 
-pub(crate) fn read_inbound_pointer<R: BufRead>(reader: &mut R) -> io::Result<Option<V2Pointer>> {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum InboundMessage {
+    Hello(V2Hello),
+    Pointer(V2Pointer),
+}
+
+pub(crate) fn read_inbound_message<R: BufRead>(
+    reader: &mut R,
+) -> io::Result<Option<InboundMessage>> {
     if reader.fill_buf()?.is_empty() {
         return Ok(None);
     }
 
-    read_v2_pointer(reader).map(Some)
+    read_v2_message(reader).map(Some)
 }
 
-fn read_v2_pointer<R: Read>(reader: &mut R) -> io::Result<V2Pointer> {
+pub(crate) fn read_session_hello<R: BufRead>(reader: &mut R) -> io::Result<Option<V2Hello>> {
+    match read_inbound_message(reader)? {
+        Some(InboundMessage::Hello(hello)) => Ok(Some(hello)),
+        Some(InboundMessage::Pointer(_)) => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "initial PaperPad message was not Hello",
+        )),
+        None => Ok(None),
+    }
+}
+
+pub(crate) fn read_session_pointer<R: BufRead>(reader: &mut R) -> io::Result<Option<V2Pointer>> {
+    match read_inbound_message(reader)? {
+        Some(InboundMessage::Pointer(pointer)) => Ok(Some(pointer)),
+        Some(InboundMessage::Hello(_)) => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "duplicate Hello from PaperPad",
+        )),
+        None => Ok(None),
+    }
+}
+
+fn read_v2_message<R: Read>(reader: &mut R) -> io::Result<InboundMessage> {
     let mut encoded = vec![0; V2_HEADER_LEN];
     reader.read_exact(&mut encoded)?;
 
@@ -32,7 +63,7 @@ fn read_v2_pointer<R: Read>(reader: &mut R) -> io::Result<V2Pointer> {
     else {
         return Err(io::Error::new(
             io::ErrorKind::UnexpectedEof,
-            "protocol-v2 pointer remained incomplete after exact read",
+            "protocol-v2 message remained incomplete after exact read",
         ));
     };
     if consumed != encoded.len() {
@@ -44,7 +75,8 @@ fn read_v2_pointer<R: Read>(reader: &mut R) -> io::Result<V2Pointer> {
 
     let message_type = message.message_type();
     match decode_v2_payload(message).map_err(invalid_data)? {
-        V2Payload::Pointer(pointer) => Ok(pointer),
+        V2Payload::Hello(hello) => Ok(InboundMessage::Hello(hello)),
+        V2Payload::Pointer(pointer) => Ok(InboundMessage::Pointer(pointer)),
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!("unexpected {message_type:?} message from PaperPad"),
@@ -63,6 +95,47 @@ mod tests {
     use std::io::Cursor;
 
     #[test]
+    fn hello_then_pointer_establishes_session_order() {
+        let hello = V2Hello::new(1272, 1624);
+        let pointer = V2Pointer::new(V2PointerPhase::Down, 12, 34);
+        let mut encoded = hello.encode_message().expect("encode Hello");
+        encoded.extend_from_slice(&pointer.encode_message().expect("encode pointer"));
+        let mut reader = Cursor::new(encoded);
+
+        assert_eq!(
+            read_session_hello(&mut reader).expect("read Hello"),
+            Some(hello)
+        );
+        assert_eq!(
+            read_session_pointer(&mut reader).expect("read pointer"),
+            Some(pointer)
+        );
+    }
+
+    #[test]
+    fn pointer_before_hello_and_duplicate_hello_are_rejected() {
+        let pointer = V2Pointer::new(V2PointerPhase::Down, 12, 34)
+            .encode_message()
+            .expect("encode pointer");
+        assert_eq!(
+            read_session_hello(&mut Cursor::new(pointer))
+                .expect_err("pointer before Hello")
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+
+        let hello = V2Hello::new(1272, 1624)
+            .encode_message()
+            .expect("encode Hello");
+        assert_eq!(
+            read_session_pointer(&mut Cursor::new(hello))
+                .expect_err("duplicate Hello")
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
     fn consecutive_pointer_messages_keep_exact_boundaries() {
         let down = V2Pointer::new(V2PointerPhase::Down, 0x1234, 0xabcd);
         let up = V2Pointer::new(V2PointerPhase::Up, u16::MAX, 0);
@@ -71,14 +144,14 @@ mod tests {
         let mut reader = Cursor::new(encoded);
 
         assert_eq!(
-            read_inbound_pointer(&mut reader).expect("read down"),
-            Some(down)
+            read_inbound_message(&mut reader).expect("read down"),
+            Some(InboundMessage::Pointer(down))
         );
         assert_eq!(
-            read_inbound_pointer(&mut reader).expect("read up"),
-            Some(up)
+            read_inbound_message(&mut reader).expect("read up"),
+            Some(InboundMessage::Pointer(up))
         );
-        assert_eq!(read_inbound_pointer(&mut reader).expect("EOF"), None);
+        assert_eq!(read_inbound_message(&mut reader).expect("EOF"), None);
     }
 
     #[test]
@@ -86,7 +159,7 @@ mod tests {
         let malformed = encode_v2_message(V2MessageType::PointerDown, &[0; 3])
             .expect("encode malformed typed payload");
         assert_eq!(
-            read_inbound_pointer(&mut Cursor::new(malformed))
+            read_inbound_message(&mut Cursor::new(malformed))
                 .expect_err("short pointer payload")
                 .kind(),
             io::ErrorKind::InvalidData
@@ -96,7 +169,7 @@ mod tests {
             .encode_message()
             .expect("encode viewport");
         assert_eq!(
-            read_inbound_pointer(&mut Cursor::new(viewport))
+            read_inbound_message(&mut Cursor::new(viewport))
                 .expect_err("unexpected viewport")
                 .kind(),
             io::ErrorKind::InvalidData
@@ -107,7 +180,7 @@ mod tests {
     fn legacy_lines_are_rejected_as_invalid_v2_headers() {
         let legacy = b"legacy line protocol\n".to_vec();
         assert_eq!(
-            read_inbound_pointer(&mut Cursor::new(legacy))
+            read_inbound_message(&mut Cursor::new(legacy))
                 .expect_err("legacy line")
                 .kind(),
             io::ErrorKind::InvalidData
@@ -120,13 +193,13 @@ mod tests {
             .encode_message()
             .expect("encode pointer");
         assert_eq!(
-            read_inbound_pointer(&mut Cursor::new(&pointer[..V2_HEADER_LEN - 1]))
+            read_inbound_message(&mut Cursor::new(&pointer[..V2_HEADER_LEN - 1]))
                 .expect_err("truncated header")
                 .kind(),
             io::ErrorKind::UnexpectedEof
         );
         assert_eq!(
-            read_inbound_pointer(&mut Cursor::new(&pointer[..pointer.len() - 1]))
+            read_inbound_message(&mut Cursor::new(&pointer[..pointer.len() - 1]))
                 .expect_err("truncated payload")
                 .kind(),
             io::ErrorKind::UnexpectedEof

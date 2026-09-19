@@ -40,7 +40,7 @@ mod inbound;
 mod server;
 
 use diagnostic::{StdinCommand, parse_stdin_command};
-use inbound::read_inbound_pointer;
+use inbound::{read_session_hello, read_session_pointer};
 use server::CurrentConnection;
 
 /// Default TCP port. Must match `rust_x11_hello`'s `COMPANION_PORT`.
@@ -246,15 +246,6 @@ fn main() -> io::Result<()> {
         // A new connection has not received any application frame yet.
         while application_viewport_rx.try_recv().is_ok() {}
 
-        // This is now the active Kindle connection for control lines.
-        let connection_token = match current.install(&stream) {
-            Ok(token) => token,
-            Err(e) => {
-                eprintln!("clone error for {peer}: {e}");
-                continue;
-            }
-        };
-
         let mut file = match OpenOptions::new()
             .create(true)
             .append(true)
@@ -263,15 +254,48 @@ fn main() -> io::Result<()> {
             Ok(f) => f,
             Err(e) => {
                 eprintln!("log open error for {peer}: {e}");
-                current.clear_if_current(&connection_token);
+                continue;
+            }
+        };
+        let mut reader = BufReader::new(&mut stream);
+        let hello = match read_session_hello(&mut reader) {
+            Ok(Some(hello)) => hello,
+            Ok(None) => continue,
+            Err(error) => {
+                eprintln!("TCP read error from {peer}: {error}");
+                continue;
+            }
+        };
+        let hello_record = format!(
+            "hello protocol={} viewport={}x{}",
+            hello.protocol_version(),
+            hello.viewport_width(),
+            hello.viewport_height()
+        );
+        println!("received from {peer}: {hello_record}");
+        flush_stdout("after received Hello");
+        let hello_ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0);
+        if let Err(error) = writeln!(file, "{hello_ts} {peer} {hello_record}") {
+            eprintln!("log write error: {error}");
+        } else if let Err(error) = file.flush() {
+            eprintln!("log flush error: {error}");
+        }
+
+        // A valid Hello makes this the active Kindle connection for frames.
+        let connection_token = match current.install(reader.get_ref()) {
+            Ok(token) => token,
+            Err(e) => {
+                eprintln!("clone error for {peer}: {e}");
                 continue;
             }
         };
         let application_ui = ApplicationUi::default();
         let mut application_input = ApplicationInput::default();
-        let mut reader = BufReader::new(&mut stream);
         loop {
-            let pointer = match read_inbound_pointer(&mut reader) {
+            let pointer = match read_session_pointer(&mut reader) {
                 Ok(Some(pointer)) => pointer,
                 Ok(None) => break,
                 Err(error) => {

@@ -278,7 +278,7 @@ pub fn event_loop(
     }
 }
 
-fn remote_viewport_size(physical_size: (u16, u16)) -> (u16, u16) {
+pub(crate) fn remote_viewport_size(physical_size: (u16, u16)) -> (u16, u16) {
     ScreenLayout::new(physical_size.0, physical_size.1)
         .map(|layout| (layout.remote_viewport.width, layout.remote_viewport.height))
         .unwrap_or((0, 0))
