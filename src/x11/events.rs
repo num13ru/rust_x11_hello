@@ -245,7 +245,7 @@ pub fn event_loop(
                 let Some(activation) = outcome.activation() else {
                     continue;
                 };
-                if dispatch_activation(activation, paperspoon) {
+                if dispatch_activation(activation) {
                     conn.destroy_window(win)
                         .context("failed to destroy window after exit")?
                         .check()
@@ -269,7 +269,7 @@ pub fn event_loop(
                 let Some(activation) = outcome.activation() else {
                     continue;
                 };
-                if dispatch_activation(activation, paperspoon) {
+                if dispatch_activation(activation) {
                     conn.destroy_window(win)
                         .context("failed to destroy window after exit")?
                         .check()
@@ -372,30 +372,12 @@ pub fn format_pointer_event(event_type: &str, event: &ButtonPressEvent) -> Strin
     )
 }
 
-/// Log one activation and send its semantic action over the transport.
-///
-/// Returns `true` when the activated action requests window teardown
-/// (the exit button). The caller then destroys the window to end the loop
-/// cleanly instead of waiting for the watchdog.
-fn dispatch_activation(activation: Activation, paperspoon: &mut Paperspoon) -> bool {
+/// Log the local system activation and request window teardown.
+fn dispatch_activation(activation: Activation) -> bool {
     match activation {
-        Activation::Send { button_id, action } => {
-            eprintln!(
-                "ui action=activate button={button_id} semantic={}",
-                action.id()
-            );
-            if let Err(error) = paperspoon.send_action(action.id()) {
-                eprintln!("transport error: {error:#}");
-            }
-            false
-        }
         Activation::Exit => {
             eprintln!("ui action=activate system=exit");
             true
-        }
-        Activation::Unknown { button_id } => {
-            eprintln!("ui action=activate button={button_id} semantic=unknown");
-            false
         }
     }
 }

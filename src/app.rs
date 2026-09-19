@@ -1,9 +1,6 @@
 //! Wire- and X11-independent application state and decisions.
 
-use crate::ui::action::{SemanticAction, action_for_button};
-use crate::ui::button::{
-    ContactTracker, PRIMARY_BUTTON_DETAIL, PointerEvent, PointerEventKind, handle_pointer_event,
-};
+use crate::ui::button::{PRIMARY_BUTTON_DETAIL, PointerEvent, PointerEventKind};
 use crate::ui::screen::{RemotePoint, ScreenLayout};
 use crate::ui::system::{SystemAction, SystemUi};
 
@@ -32,14 +29,7 @@ pub(crate) enum GeometryUpdate<'a> {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Activation {
-    Send {
-        button_id: u8,
-        action: SemanticAction,
-    },
     Exit,
-    Unknown {
-        button_id: u8,
-    },
 }
 
 /// One normalized primary-pointer record for the PaperSpoon-owned viewport.
@@ -82,7 +72,6 @@ impl PointerOutcome {
 pub(crate) struct AppState {
     width: u16,
     height: u16,
-    application_contact: ContactTracker,
     remote_contact_active: bool,
     system_ui: SystemUi,
     status_text: Option<String>,
@@ -93,7 +82,6 @@ impl AppState {
         Self {
             width,
             height,
-            application_contact: ContactTracker::default(),
             remote_contact_active: false,
             system_ui: SystemUi::default(),
             status_text: None,
@@ -122,7 +110,6 @@ impl AppState {
         } else if reported == self.size() {
             GeometryUpdate::Unchanged
         } else {
-            self.application_contact.cancel();
             self.remote_contact_active = false;
             self.system_ui.cancel_contact();
             self.width = reported.0;
@@ -142,25 +129,15 @@ impl AppState {
             ),
             None => (None, (0, 0)),
         };
-        let application_button = handle_pointer_event(
-            &mut self.application_contact,
-            event.kind,
-            event.detail,
-            remote_point,
-            remote_size.0,
-            remote_size.1,
-        );
-
         let activation = match system_action {
             Some(SystemAction::Exit) => Some(Activation::Exit),
-            None => application_button.map(activation_for_button),
+            None => None,
         };
         let remote = self.handle_remote_pointer(event, remote_point, remote_size);
         PointerOutcome { activation, remote }
     }
 
     pub(crate) fn cancel_contact(&mut self) {
-        self.application_contact.cancel();
         self.remote_contact_active = false;
         self.system_ui.cancel_contact();
     }
@@ -207,13 +184,6 @@ impl AppState {
     }
 }
 
-fn activation_for_button(button_id: u8) -> Activation {
-    match action_for_button(button_id) {
-        Some(action) => Activation::Send { button_id, action },
-        None => Activation::Unknown { button_id },
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -244,28 +214,21 @@ mod tests {
         }
     }
 
-    fn activate(state: &mut AppState, button_id: u8) -> Option<Activation> {
-        let point = center_of(button_id, state.size());
+    #[test]
+    fn remote_pointer_does_not_activate_locally_and_exit_stays_local() {
+        let mut state = AppState::new(SIZE);
+        let remote_point = center_of(1, SIZE);
         assert_eq!(
             state
-                .handle_pointer(pointer(PointerEventKind::Press, point))
+                .handle_pointer(pointer(PointerEventKind::Press, remote_point))
                 .activation(),
             None
         );
-        state
-            .handle_pointer(pointer(PointerEventKind::Release, point))
-            .activation()
-    }
-
-    #[test]
-    fn pointer_activation_distinguishes_send_exit_and_unknown() {
-        let mut state = AppState::new(SIZE);
         assert_eq!(
-            activate(&mut state, 1),
-            Some(Activation::Send {
-                button_id: 1,
-                action: SemanticAction::MediaPlayPause,
-            })
+            state
+                .handle_pointer(pointer(PointerEventKind::Release, remote_point))
+                .activation(),
+            None
         );
         let exit = exit_bounds(SIZE.0, SIZE.1).expect("Exit bounds");
         let exit_point = PhysicalPoint {
@@ -283,10 +246,6 @@ mod tests {
                 .handle_pointer(pointer(PointerEventKind::Release, exit_point))
                 .activation(),
             Some(Activation::Exit)
-        );
-        assert_eq!(
-            activation_for_button(u8::MAX),
-            Activation::Unknown { button_id: u8::MAX }
         );
     }
 
@@ -327,7 +286,7 @@ mod tests {
     }
 
     #[test]
-    fn remote_pointer_pair_uses_viewport_coordinates_alongside_legacy_activation() {
+    fn remote_pointer_pair_uses_viewport_coordinates_without_local_activation() {
         let point = center_of(5, SIZE);
         let remote_point = ScreenLayout::new(SIZE.0, SIZE.1)
             .expect("screen layout")
@@ -352,10 +311,7 @@ mod tests {
                 point: remote_point,
             })
         );
-        assert!(matches!(
-            released.activation(),
-            Some(Activation::Send { button_id: 5, .. })
-        ));
+        assert_eq!(released.activation(), None);
     }
 
     #[test]

@@ -2,9 +2,8 @@
 //! control/framebuffer messages.
 //!
 //! The Kindle connects out to PaperSpoon once at launch and keeps the
-//! connection for the run. Semantic actions and protocol-v2 pointer phases
-//! share one bounded writer queue so their byte ordering is deterministic. A
-//! reader thread
+//! connection for the run. Protocol-v2 pointer phases use one bounded writer
+//! queue so their byte ordering is deterministic. A reader thread
 //! consumes inbound PaperSpoon display lines and protocol-v2 Frame messages,
 //! publishing the latest of each into mailboxes the X11 event loop drains
 //! between events and on a bounded idle poll interval. Frames are validated
@@ -16,7 +15,7 @@
 
 use paper_protocol::{
     V2_HEADER_LEN, V2_MAGIC, V2DecodeResult, V2MessageType, V2Payload, V2Pointer, V2PointerPhase,
-    decode_v2_message, decode_v2_payload, format_action_line, parse_display_command,
+    decode_v2_message, decode_v2_payload, parse_display_command,
 };
 
 mod connection;
@@ -38,7 +37,6 @@ const TCP_WRITE_TIMEOUT: Duration = Duration::from_millis(150);
 const STARTUP_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 const STARTUP_STOP_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const OUTBOUND_QUEUE_CAPACITY: usize = 16;
-const MAX_ACTION_LINE_BYTES: usize = 256;
 /// Maximum complete inbound TCP line, including its newline when present.
 /// Status rendering policy remains separate; this limit only bounds framing.
 const MAX_INBOUND_LINE_BYTES: usize = 8 * 1024;
@@ -632,20 +630,6 @@ impl Paperspoon {
         }
     }
 
-    /// Queue one semantic activation for ordered background delivery.
-    ///
-    /// Disconnected, oversized, full-queue, and stopped-worker states fail
-    /// immediately. Accepted actions are not retried, and shutdown discards
-    /// actions the writer has not started.
-    pub fn send_action(&mut self, semantic_id: &str) -> Result<()> {
-        let line = format_action_line(semantic_id);
-        anyhow::ensure!(
-            line.len() <= MAX_ACTION_LINE_BYTES,
-            "PaperSpoon action line exceeds {MAX_ACTION_LINE_BYTES} bytes"
-        );
-        self.enqueue_bytes(line.into_bytes(), "semantic action")
-    }
-
     /// Queue one viewport-relative pointer phase for ordered background delivery.
     ///
     /// Disconnected, full-queue, and stopped-worker states fail immediately.
@@ -747,8 +731,21 @@ mod tests {
         }
     }
 
+    fn read_expected_pointer(peer: &mut TcpStream, expected: V2Pointer) {
+        let message_len = V2_HEADER_LEN + paper_protocol::V2_POINTER_PAYLOAD_LEN;
+        let mut encoded = vec![0; message_len];
+        peer.read_exact(&mut encoded).expect("read pointer message");
+        let V2DecodeResult::Complete { message, consumed } =
+            decode_v2_message(&encoded).expect("decode pointer message")
+        else {
+            panic!("complete pointer message expected");
+        };
+        assert_eq!(consumed, message_len);
+        assert_eq!(decode_v2_payload(message), Ok(V2Payload::Pointer(expected)));
+    }
+
     #[test]
-    fn background_start_rejects_actions_and_drop_is_nonblocking() {
+    fn background_start_rejects_pointer_and_drop_is_nonblocking() {
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let (finished_tx, finished_rx) = mpsc::channel();
@@ -767,8 +764,8 @@ mod tests {
 
         assert!(
             paperspoon
-                .send_action("media.play_pause")
-                .expect_err("pending startup must not accept actions")
+                .send_pointer(V2PointerPhase::Down, 1, 2)
+                .expect_err("pending startup must not accept pointer input")
                 .to_string()
                 .contains("PaperSpoon not connected")
         );
@@ -819,21 +816,19 @@ mod tests {
 
     #[test]
     fn background_start_promotes_connected_transport() {
-        use std::io::BufRead as _;
-
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind");
         let addr = listener.local_addr().expect("addr");
         let mut paperspoon = Paperspoon::start_with(
             move || connect_stream(addr).map(|stream| (addr, stream)),
             None,
         );
-        let peer = accept_before(&listener, Duration::from_secs(2));
+        let mut peer = accept_before(&listener, Duration::from_secs(2));
         peer.set_read_timeout(Some(Duration::from_secs(2)))
             .expect("set peer timeout");
 
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         loop {
-            match paperspoon.send_action("media.play_pause") {
+            match paperspoon.send_pointer(V2PointerPhase::Down, 123, 456) {
                 Ok(()) => break,
                 Err(error) if error.to_string().contains("PaperSpoon not connected") => {
                     assert!(
@@ -842,21 +837,14 @@ mod tests {
                     );
                     std::thread::sleep(Duration::from_millis(10));
                 }
-                Err(error) => panic!("unexpected action error: {error:#}"),
+                Err(error) => panic!("unexpected pointer error: {error:#}"),
             }
         }
-
-        let mut line = String::new();
-        BufReader::new(peer)
-            .read_line(&mut line)
-            .expect("read action after startup");
-        assert_eq!(line, "event action=media.play_pause;\n");
+        read_expected_pointer(&mut peer, V2Pointer::new(V2PointerPhase::Down, 123, 456));
     }
 
     #[test]
     fn background_start_retries_then_promotes_connection() {
-        use std::io::BufRead as _;
-
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind");
         let addr = listener.local_addr().expect("addr");
         let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -881,11 +869,11 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
 
-        let peer = accept_before(&listener, Duration::from_secs(2));
+        let mut peer = accept_before(&listener, Duration::from_secs(2));
         peer.set_read_timeout(Some(Duration::from_secs(2)))
             .expect("set peer timeout");
         loop {
-            match paperspoon.send_action("tmux.work") {
+            match paperspoon.send_pointer(V2PointerPhase::Up, 321, 654) {
                 Ok(()) => break,
                 Err(error) if error.to_string().contains("PaperSpoon not connected") => {
                     assert!(
@@ -894,15 +882,10 @@ mod tests {
                     );
                     std::thread::sleep(Duration::from_millis(10));
                 }
-                Err(error) => panic!("unexpected action error: {error:#}"),
+                Err(error) => panic!("unexpected pointer error: {error:#}"),
             }
         }
-
-        let mut line = String::new();
-        BufReader::new(peer)
-            .read_line(&mut line)
-            .expect("read action after retry");
-        assert_eq!(line, "event action=tmux.work;\n");
+        read_expected_pointer(&mut peer, V2Pointer::new(V2PointerPhase::Up, 321, 654));
         assert_eq!(attempts.load(Ordering::Acquire), 2);
     }
 
@@ -922,7 +905,7 @@ mod tests {
 
         assert!(
             paperspoon
-                .send_action("media.play_pause")
+                .send_pointer(V2PointerPhase::Down, 1, 2)
                 .expect_err("failed startup must remain disconnected")
                 .to_string()
                 .contains("PaperSpoon not connected")
@@ -957,34 +940,6 @@ mod tests {
             transport_write_timeout(&paperspoon),
             Some(TCP_WRITE_TIMEOUT)
         );
-    }
-
-    #[test]
-    fn writer_delivers_queued_action_line() {
-        use std::io::BufRead as _;
-
-        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind");
-        let mut paperspoon =
-            Paperspoon::connect_to(listener.local_addr().expect("addr")).expect("connect");
-        let peer = accept_before(&listener, Duration::from_secs(2));
-        peer.set_read_timeout(Some(Duration::from_secs(2)))
-            .expect("set peer timeout");
-
-        paperspoon
-            .send_action("media.play_pause")
-            .expect("queue action");
-        paperspoon
-            .send_action("tmux.work")
-            .expect("queue second action");
-        let mut line = String::new();
-        let mut reader = BufReader::new(peer);
-        reader.read_line(&mut line).expect("read queued action");
-        assert_eq!(line, "event action=media.play_pause;\n");
-        line.clear();
-        reader
-            .read_line(&mut line)
-            .expect("read second queued action");
-        assert_eq!(line, "event action=tmux.work;\n");
     }
 
     #[test]
@@ -1072,23 +1027,14 @@ mod tests {
     }
 
     #[test]
-    fn send_action_rejects_disconnected_and_overlong_input() {
+    fn send_pointer_rejects_disconnected_transport() {
         let mut paperspoon = Paperspoon::disconnected();
         assert!(
             paperspoon
-                .send_action("media.play_pause")
-                .expect_err("disconnected send must fail")
+                .send_pointer(V2PointerPhase::Down, 1, 2)
+                .expect_err("disconnected pointer send must fail")
                 .to_string()
                 .contains("PaperSpoon not connected")
-        );
-
-        let overlong = "x".repeat(MAX_ACTION_LINE_BYTES);
-        assert!(
-            paperspoon
-                .send_action(&overlong)
-                .expect_err("overlong action must fail")
-                .to_string()
-                .contains("action line exceeds")
         );
     }
 
@@ -1340,7 +1286,7 @@ mod tests {
         drop(listener); // Force EOF: the reconnector must notice.
 
         // A new PaperSpoon appears; the reconnector should restore the stream
-        // without any send_action call from us. The reconnector loops forever
+        // without any outbound pointer call from us. The reconnector loops forever
         // retrying `addr` (now free), so rebinding the SAME port and
         // accepting proves the auto-restore.
         let listener3 = TcpListener::bind(addr).expect("rebind same port");
