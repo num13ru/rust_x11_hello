@@ -1,4 +1,4 @@
-//! Explicit stdin commands for host-generated diagnostic framebuffers.
+//! Explicit stdin commands for host-generated framebuffers.
 
 use paper_protocol::{
     Mono1Frame, V2_FRAME_PREFIX_LEN, V2_MAX_PAYLOAD_LEN, encode_v2_frame, mono1_payload_len,
@@ -100,12 +100,24 @@ impl DiagnosticFrame {
 pub(crate) enum StdinCommand<'a> {
     ForwardLine(&'a str),
     Frame(DiagnosticFrame),
+    ApplicationFrame { width: u16, height: u16 },
 }
 
 pub(crate) fn parse_stdin_command(line: &str) -> Result<StdinCommand<'_>, String> {
     let mut parts = line.split_whitespace();
-    if parts.next() != Some("frame") {
-        return Ok(StdinCommand::ForwardLine(line));
+    match parts.next() {
+        Some("ui") => {
+            let dimensions = parts
+                .next()
+                .ok_or_else(|| "usage: ui <width>x<height>".to_string())?;
+            if parts.next().is_some() {
+                return Err("usage: ui <width>x<height>".to_string());
+            }
+            let (width, height) = parse_dimensions(dimensions)?;
+            return Ok(StdinCommand::ApplicationFrame { width, height });
+        }
+        Some("frame") => {}
+        Some(_) | None => return Ok(StdinCommand::ForwardLine(line)),
     }
 
     let pattern_name = parts
@@ -122,9 +134,19 @@ pub(crate) fn parse_stdin_command(line: &str) -> Result<StdinCommand<'_>, String
     if parts.next().is_some() {
         return Err("usage: frame <pattern> <width>x<height>".to_string());
     }
+    let (width, height) = parse_dimensions(dimensions)?;
+
+    Ok(StdinCommand::Frame(DiagnosticFrame {
+        pattern,
+        width,
+        height,
+    }))
+}
+
+fn parse_dimensions(dimensions: &str) -> Result<(u16, u16), String> {
     let (width, height) = dimensions
         .split_once('x')
-        .ok_or_else(|| "frame dimensions must use <width>x<height>".to_string())?;
+        .ok_or_else(|| "dimensions must use <width>x<height>".to_string())?;
     let width = width
         .parse::<u16>()
         .map_err(|_| format!("invalid frame width '{width}'"))?;
@@ -134,12 +156,7 @@ pub(crate) fn parse_stdin_command(line: &str) -> Result<StdinCommand<'_>, String
     if width == 0 || height == 0 {
         return Err("frame dimensions must be nonzero".to_string());
     }
-
-    Ok(StdinCommand::Frame(DiagnosticFrame {
-        pattern,
-        width,
-        height,
-    }))
+    Ok((width, height))
 }
 
 /// Four differently sized filled blocks make every corner distinguishable.
@@ -185,6 +202,17 @@ mod tests {
             parse_stdin_command("display hello"),
             Ok(StdinCommand::ForwardLine("display hello"))
         );
+        assert_eq!(
+            parse_stdin_command("ui 1272x1624"),
+            Ok(StdinCommand::ApplicationFrame {
+                width: 1272,
+                height: 1624,
+            })
+        );
+        assert!(parse_stdin_command("ui").is_err());
+        assert!(parse_stdin_command("ui 1272").is_err());
+        assert!(parse_stdin_command("ui 0x1624").is_err());
+        assert!(parse_stdin_command("ui 1272x1624 extra").is_err());
         assert!(parse_stdin_command("frame").is_err());
         assert!(parse_stdin_command("frame unknown 8x8").is_err());
         assert!(parse_stdin_command("frame white 8").is_err());

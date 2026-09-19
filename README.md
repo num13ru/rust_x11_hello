@@ -243,6 +243,19 @@ frame black 1272x1624
 frame white 1272x1624
 ```
 
+To render and send PaperSpoon's host-owned application UI instead of a
+diagnostic pattern, use the same explicit remote viewport dimensions:
+
+```text
+ui 1272x1624
+```
+
+PaperSpoon prints `sent application frame ...`; PaperPad logs `frame uploaded
+... cache=updated`. During this transitional step, PaperPad still performs the
+matching application hit testing and semantic action forwarding, so the remote
+pixels can be checked against the existing tap behavior before pointer handling
+moves to the host. The 72-pixel local Exit strip remains PaperPad-rendered.
+
 Patterns are generated as validated Mono1 frames and assigned increasing frame
 IDs. PaperSpoon prints `sent frame ...`; PaperPad logs `frame uploaded ...
 cache=updated`. A mismatched extent or failed upload does not replace the last

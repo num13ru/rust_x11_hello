@@ -2,7 +2,34 @@
 
 use crate::application_ui::{ApplicationLayout, ApplicationUi, TextRun};
 use crate::mono_renderer::MonoCanvas;
-use paper_protocol::{Mono1Frame, Mono1FrameError, Mono1Pixel};
+use paper_protocol::{
+    Mono1Frame, Mono1FrameError, Mono1Pixel, V2_FRAME_PREFIX_LEN, V2_MAX_PAYLOAD_LEN,
+    encode_v2_frame, mono1_payload_len,
+};
+
+/// Render and encode an application frame after enforcing the v2 payload cap.
+pub fn encode_application(
+    frame_id: u64,
+    ui: &ApplicationUi,
+    width: u16,
+    height: u16,
+) -> Result<Vec<u8>, String> {
+    let pixel_bytes = mono1_payload_len(width, height)
+        .ok_or_else(|| "application frame dimensions overflow payload size".to_string())?;
+    let payload_bytes = V2_FRAME_PREFIX_LEN
+        .checked_add(pixel_bytes)
+        .ok_or_else(|| "application frame payload size overflow".to_string())?;
+    if payload_bytes > V2_MAX_PAYLOAD_LEN {
+        return Err(format!(
+            "application frame payload is {payload_bytes} bytes; maximum is {V2_MAX_PAYLOAD_LEN}"
+        ));
+    }
+
+    let frame = render_application(ui, width, height)
+        .map_err(|error| format!("failed to render application frame: {error}"))?;
+    encode_v2_frame(frame_id, &frame)
+        .map_err(|error| format!("failed to encode application frame: {error}"))
+}
 
 /// Render one complete PaperSpoon-owned application viewport.
 pub fn render_application(
@@ -42,6 +69,7 @@ fn draw_text(canvas: &mut MonoCanvas, text: TextRun<'_>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use paper_protocol::{V2DecodeResult, V2Payload, decode_v2_message, decode_v2_payload};
 
     const WIDTH: u16 = 1272;
     const HEIGHT: u16 = 1624;
@@ -55,6 +83,27 @@ mod tests {
                 height: HEIGHT,
             })
         );
+    }
+
+    #[test]
+    fn encoding_roundtrips_and_rejects_oversized_extent_before_rendering() {
+        let ui = ApplicationUi::default();
+        let encoded = encode_application(42, &ui, 9, 8).expect("encoded application frame");
+        let V2DecodeResult::Complete { message, consumed } =
+            decode_v2_message(&encoded).expect("decoded v2 message")
+        else {
+            panic!("complete Frame expected");
+        };
+        assert_eq!(consumed, encoded.len());
+        let V2Payload::Frame(frame) = decode_v2_payload(message).expect("typed Frame") else {
+            panic!("Frame expected");
+        };
+        assert_eq!(frame.frame_id(), 42);
+        assert_eq!((frame.width(), frame.height()), (9, 8));
+
+        let error =
+            encode_application(43, &ui, u16::MAX, u16::MAX).expect_err("oversized frame rejected");
+        assert!(error.contains("maximum"));
     }
 
     #[test]

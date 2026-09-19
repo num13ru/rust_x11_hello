@@ -30,6 +30,7 @@ use std::net::{SocketAddr, TcpListener};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use paper_protocol::{DISCOVERY_PORT, parse_action_line};
+use paperspoon::{application_renderer::encode_application, application_ui::ApplicationUi};
 
 mod diagnostic;
 mod discovery;
@@ -128,6 +129,7 @@ fn main() -> io::Result<()> {
     println!(
         "type 'frame <white|black|horizontal|checkerboard|border|corners> <width>x<height>' to send a diagnostic framebuffer"
     );
+    println!("type 'ui <width>x<height>' to send the host-rendered application UI");
     if opts.forward_url {
         println!("forwarding actions to Hammerspoon via open -g hammerspoon://paperpad/...");
     } else {
@@ -144,6 +146,7 @@ fn main() -> io::Result<()> {
             .spawn(move || {
                 let stdin = io::stdin();
                 let mut next_frame_id = 1_u64;
+                let application_ui = ApplicationUi::default();
                 for line in stdin.lock().lines() {
                     let line = match line {
                         Ok(line) => line,
@@ -187,7 +190,35 @@ fn main() -> io::Result<()> {
                                 Err(error) => eprintln!("frame write error: {error}"),
                             }
                         }
-                        Err(error) => eprintln!("frame command error: {error}"),
+                        Ok(StdinCommand::ApplicationFrame { width, height }) => {
+                            let encoded = match encode_application(
+                                next_frame_id,
+                                &application_ui,
+                                width,
+                                height,
+                            ) {
+                                Ok(encoded) => encoded,
+                                Err(error) => {
+                                    eprintln!("ui command error: {error}");
+                                    continue;
+                                }
+                            };
+                            match current.forward_bytes(&encoded) {
+                                Ok(true) => {
+                                    println!(
+                                        "sent application frame id={next_frame_id} width={width} height={height} bytes={}",
+                                        encoded.len()
+                                    );
+                                    flush_stdout("after sent application frame");
+                                    next_frame_id = next_frame_id.wrapping_add(1);
+                                }
+                                Ok(false) => {
+                                    eprintln!("application frame not sent: no PaperPad connected");
+                                }
+                                Err(error) => eprintln!("application frame write error: {error}"),
+                            }
+                        }
+                        Err(error) => eprintln!("stdin command error: {error}"),
                     }
                 }
             })?
