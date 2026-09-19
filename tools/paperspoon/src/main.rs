@@ -29,14 +29,16 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpListener};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use paper_protocol::{DISCOVERY_PORT, parse_action_line};
+use paper_protocol::{DISCOVERY_PORT, V2PointerPhase, parse_action_line};
 use paperspoon::{application_renderer::encode_application, application_ui::ApplicationUi};
 
 mod diagnostic;
 mod discovery;
+mod inbound;
 mod server;
 
 use diagnostic::{StdinCommand, parse_stdin_command};
+use inbound::{InboundMessage, read_inbound_message};
 use server::CurrentConnection;
 
 /// Default TCP port. Must match `rust_x11_hello`'s `COMPANION_PORT`.
@@ -259,20 +261,36 @@ fn main() -> io::Result<()> {
                 continue;
             }
         };
-        let reader = BufReader::new(&mut stream);
-        for line in reader.lines() {
-            let line = match line {
-                Ok(line) => line,
+        let mut reader = BufReader::new(&mut stream);
+        loop {
+            let inbound = match read_inbound_message(&mut reader) {
+                Ok(Some(inbound)) => inbound,
+                Ok(None) => break,
                 Err(error) => {
                     eprintln!("TCP read error from {peer}: {error}");
                     break;
                 }
             };
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            println!("received from {peer}: {line}");
+            let (record, forward_action) = match inbound {
+                InboundMessage::Line(line) => {
+                    let line = line.trim();
+                    if line.is_empty() {
+                        continue;
+                    }
+                    (line.to_string(), true)
+                }
+                InboundMessage::Pointer(pointer) => {
+                    let phase = match pointer.phase() {
+                        V2PointerPhase::Down => "down",
+                        V2PointerPhase::Up => "up",
+                    };
+                    (
+                        format!("pointer phase={phase} x={} y={}", pointer.x(), pointer.y()),
+                        false,
+                    )
+                }
+            };
+            println!("received from {peer}: {record}");
             flush_stdout("after received line");
 
             let ts = SystemTime::now()
@@ -280,14 +298,15 @@ fn main() -> io::Result<()> {
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
             // Never let a log write or flush failure tear down the connection.
-            if let Err(error) = writeln!(file, "{ts} {peer} {line}") {
+            if let Err(error) = writeln!(file, "{ts} {peer} {record}") {
                 eprintln!("log write error: {error}");
             } else if let Err(error) = file.flush() {
                 eprintln!("log flush error: {error}");
             }
 
             if opts.forward_url
-                && let Some(action_id) = parse_action_line(line)
+                && forward_action
+                && let Some(action_id) = parse_action_line(&record)
                 && let Err(error) = forward_url(action_id)
             {
                 eprintln!("forward error to Hammerspoon: {error}");
