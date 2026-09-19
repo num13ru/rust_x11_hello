@@ -97,13 +97,12 @@ impl DiagnosticFrame {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub(crate) enum StdinCommand<'a> {
-    ForwardLine(&'a str),
+pub(crate) enum StdinCommand {
     Frame(DiagnosticFrame),
     ApplicationFrame { width: u16, height: u16 },
 }
 
-pub(crate) fn parse_stdin_command(line: &str) -> Result<StdinCommand<'_>, String> {
+pub(crate) fn parse_stdin_command(line: &str) -> Result<StdinCommand, String> {
     let mut parts = line.split_whitespace();
     match parts.next() {
         Some("ui") => {
@@ -117,7 +116,8 @@ pub(crate) fn parse_stdin_command(line: &str) -> Result<StdinCommand<'_>, String
             return Ok(StdinCommand::ApplicationFrame { width, height });
         }
         Some("frame") => {}
-        Some(_) | None => return Ok(StdinCommand::ForwardLine(line)),
+        Some(command) => return Err(format!("unknown stdin command {command:?}")),
+        None => return Err("stdin command is empty".to_string()),
     }
 
     let pattern_name = parts
@@ -197,11 +197,8 @@ mod tests {
     }
 
     #[test]
-    fn non_frame_lines_are_preserved_and_frame_syntax_is_strict() {
-        assert_eq!(
-            parse_stdin_command("display hello"),
-            Ok(StdinCommand::ForwardLine("display hello"))
-        );
+    fn commands_are_v2_frames_and_syntax_is_strict() {
+        assert!(parse_stdin_command("unknown hello").is_err());
         assert_eq!(
             parse_stdin_command("ui 1272x1624"),
             Ok(StdinCommand::ApplicationFrame {

@@ -1,37 +1,22 @@
-//! Mixed legacy-line and protocol-v2 input framing from PaperPad.
+//! Protocol-v2 pointer framing from PaperPad.
 
 use paper_protocol::{
-    V2_HEADER_LEN, V2_MAGIC, V2DecodeResult, V2Payload, V2Pointer, decode_v2_message,
-    decode_v2_payload,
+    V2_HEADER_LEN, V2DecodeResult, V2Payload, V2Pointer, decode_v2_message, decode_v2_payload,
 };
 use std::io::{self, BufRead, Read};
 
-/// Maximum complete legacy action line, including its newline when present.
-const MAX_INBOUND_LINE_BYTES: usize = 8 * 1024;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum InboundMessage {
-    Line(String),
-    Pointer(V2Pointer),
-}
-
-pub(crate) fn read_inbound_message<R: BufRead>(
-    reader: &mut R,
-) -> io::Result<Option<InboundMessage>> {
-    let first = match reader.fill_buf()?.first() {
-        Some(first) => *first,
-        None => return Ok(None),
-    };
-    if first == V2_MAGIC[0] {
-        read_v2_pointer(reader).map(|pointer| Some(InboundMessage::Pointer(pointer)))
-    } else {
-        read_legacy_line(reader).map(|line| line.map(InboundMessage::Line))
+pub(crate) fn read_inbound_pointer<R: BufRead>(reader: &mut R) -> io::Result<Option<V2Pointer>> {
+    if reader.fill_buf()?.is_empty() {
+        return Ok(None);
     }
+
+    read_v2_pointer(reader).map(Some)
 }
 
 fn read_v2_pointer<R: Read>(reader: &mut R) -> io::Result<V2Pointer> {
     let mut encoded = vec![0; V2_HEADER_LEN];
     reader.read_exact(&mut encoded)?;
+
     let additional = match decode_v2_message(&encoded).map_err(invalid_data)? {
         V2DecodeResult::Incomplete { additional } => additional,
         V2DecodeResult::Complete { .. } => 0,
@@ -47,15 +32,16 @@ fn read_v2_pointer<R: Read>(reader: &mut R) -> io::Result<V2Pointer> {
     else {
         return Err(io::Error::new(
             io::ErrorKind::UnexpectedEof,
-            "protocol-v2 message remained incomplete after declared payload",
+            "protocol-v2 pointer remained incomplete after exact read",
         ));
     };
     if consumed != encoded.len() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "protocol-v2 decoder did not consume the complete message",
+            "protocol-v2 decoder did not consume complete message",
         ));
     }
+
     let message_type = message.message_type();
     match decode_v2_payload(message).map_err(invalid_data)? {
         V2Payload::Pointer(pointer) => Ok(pointer),
@@ -66,31 +52,6 @@ fn read_v2_pointer<R: Read>(reader: &mut R) -> io::Result<V2Pointer> {
     }
 }
 
-fn read_legacy_line<R: BufRead>(reader: &mut R) -> io::Result<Option<String>> {
-    let mut bytes = Vec::new();
-    let read = reader
-        .take((MAX_INBOUND_LINE_BYTES + 1) as u64)
-        .read_until(b'\n', &mut bytes)?;
-    if read == 0 {
-        return Ok(None);
-    }
-    if bytes.len() > MAX_INBOUND_LINE_BYTES {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("PaperPad line exceeds {MAX_INBOUND_LINE_BYTES} bytes"),
-        ));
-    }
-    if bytes.last() == Some(&b'\n') {
-        bytes.pop();
-        if bytes.last() == Some(&b'\r') {
-            bytes.pop();
-        }
-    }
-    String::from_utf8(bytes)
-        .map(Some)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
-}
-
 fn invalid_data(error: impl ToString) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, error.to_string())
 }
@@ -98,79 +59,77 @@ fn invalid_data(error: impl ToString) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use paper_protocol::{V2PointerPhase, encode_v2_message};
+    use paper_protocol::{V2MessageType, V2PointerPhase, V2Viewport, encode_v2_message};
     use std::io::Cursor;
 
     #[test]
-    fn mixed_lines_and_pointer_messages_keep_exact_boundaries() {
+    fn consecutive_pointer_messages_keep_exact_boundaries() {
         let down = V2Pointer::new(V2PointerPhase::Down, 0x1234, 0xabcd);
         let up = V2Pointer::new(V2PointerPhase::Up, u16::MAX, 0);
-        let mut encoded = b"event action=media.play_pause;\r\n".to_vec();
-        encoded.extend_from_slice(&down.encode_message().expect("encode down"));
+        let mut encoded = down.encode_message().expect("encode down");
         encoded.extend_from_slice(&up.encode_message().expect("encode up"));
-        encoded.extend_from_slice(b"event action=tmux.work;\n");
         let mut reader = Cursor::new(encoded);
 
         assert_eq!(
-            read_inbound_message(&mut reader).expect("read action"),
-            Some(InboundMessage::Line(
-                "event action=media.play_pause;".to_string()
-            ))
+            read_inbound_pointer(&mut reader).expect("read down"),
+            Some(down)
         );
         assert_eq!(
-            read_inbound_message(&mut reader).expect("read down"),
-            Some(InboundMessage::Pointer(down))
+            read_inbound_pointer(&mut reader).expect("read up"),
+            Some(up)
         );
-        assert_eq!(
-            read_inbound_message(&mut reader).expect("read up"),
-            Some(InboundMessage::Pointer(up))
-        );
-        assert_eq!(
-            read_inbound_message(&mut reader).expect("read second action"),
-            Some(InboundMessage::Line("event action=tmux.work;".to_string()))
-        );
-        assert_eq!(read_inbound_message(&mut reader).expect("EOF"), None);
+        assert_eq!(read_inbound_pointer(&mut reader).expect("EOF"), None);
     }
 
     #[test]
-    fn malformed_or_unexpected_v2_messages_are_rejected() {
-        let malformed = encode_v2_message(paper_protocol::V2MessageType::PointerDown, &[0; 3])
-            .expect("encode malformed pointer");
-        let error =
-            read_inbound_message(&mut Cursor::new(malformed)).expect_err("invalid pointer length");
-        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    fn malformed_and_unexpected_v2_messages_are_rejected() {
+        let malformed = encode_v2_message(V2MessageType::PointerDown, &[0; 3])
+            .expect("encode malformed typed payload");
+        assert_eq!(
+            read_inbound_pointer(&mut Cursor::new(malformed))
+                .expect_err("short pointer payload")
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
 
-        let unexpected = paper_protocol::V2Viewport::new(1272, 1624)
+        let viewport = V2Viewport::new(1272, 1624)
             .encode_message()
             .expect("encode viewport");
-        let error =
-            read_inbound_message(&mut Cursor::new(unexpected)).expect_err("unexpected viewport");
-        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert_eq!(
+            read_inbound_pointer(&mut Cursor::new(viewport))
+                .expect_err("unexpected viewport")
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
     }
 
     #[test]
-    fn legacy_lines_are_bounded_and_utf8_validated() {
-        let mut exact = vec![b'x'; MAX_INBOUND_LINE_BYTES - 1];
-        exact.push(b'\n');
+    fn legacy_lines_are_rejected_as_invalid_v2_headers() {
+        let legacy = b"legacy line protocol\n".to_vec();
         assert_eq!(
-            read_inbound_message(&mut Cursor::new(exact))
-                .expect("exact-limit line")
-                .expect("line"),
-            InboundMessage::Line("x".repeat(MAX_INBOUND_LINE_BYTES - 1))
+            read_inbound_pointer(&mut Cursor::new(legacy))
+                .expect_err("legacy line")
+                .kind(),
+            io::ErrorKind::InvalidData
         );
+    }
 
-        let oversized = vec![b'x'; MAX_INBOUND_LINE_BYTES + 1];
+    #[test]
+    fn truncated_v2_message_is_an_unexpected_eof() {
+        let pointer = V2Pointer::new(V2PointerPhase::Down, 1, 2)
+            .encode_message()
+            .expect("encode pointer");
         assert_eq!(
-            read_inbound_message(&mut Cursor::new(oversized))
-                .expect_err("oversized line")
+            read_inbound_pointer(&mut Cursor::new(&pointer[..V2_HEADER_LEN - 1]))
+                .expect_err("truncated header")
                 .kind(),
-            io::ErrorKind::InvalidData
+            io::ErrorKind::UnexpectedEof
         );
         assert_eq!(
-            read_inbound_message(&mut Cursor::new(vec![0xff, b'\n']))
-                .expect_err("invalid UTF-8")
+            read_inbound_pointer(&mut Cursor::new(&pointer[..pointer.len() - 1]))
+                .expect_err("truncated payload")
                 .kind(),
-            io::ErrorKind::InvalidData
+            io::ErrorKind::UnexpectedEof
         );
     }
 }

@@ -1,14 +1,12 @@
-//! Minimal TCP PaperSpoon listener for Kindle semantic activations.
+//! TCP PaperSpoon listener for host-rendered PaperPad sessions.
 //!
 //! Listens on `0.0.0.0:<port>` (default 5581). For each accepted connection:
 //!
-//! - lines from the Kindle (`event action=<semantic-id>;`) are printed to
-//!   stdout and appended with a unix timestamp and peer address to a log
-//!   file (default `paperspoon.log`);
-//! - `display <text>` lines typed on stdin are forwarded to the Kindle;
+//! - protocol-v2 pointer records from the Kindle are logged and resolved by
+//!   the host-owned application UI;
 //! - `frame <pattern> <width>x<height>` generates and sends a binary v2
 //!   diagnostic framebuffer;
-//! - received action IDs are optionally forwarded to Hammerspoon with
+//! - resolved host action IDs are optionally forwarded to Hammerspoon with
 //!   `open -g hammerspoon://paperpad?action=<id>`.
 //!
 //! Usage: `paperspoon [<port> <log-file>] [--no-forward-url]`
@@ -30,7 +28,7 @@ use std::net::{SocketAddr, TcpListener};
 use std::sync::mpsc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use paper_protocol::{DISCOVERY_PORT, V2PointerPhase, parse_action_line};
+use paper_protocol::{DISCOVERY_PORT, V2PointerPhase};
 use paperspoon::{
     application_input::ApplicationInput, application_renderer::encode_application,
     application_ui::ApplicationUi,
@@ -42,7 +40,7 @@ mod inbound;
 mod server;
 
 use diagnostic::{StdinCommand, parse_stdin_command};
-use inbound::{InboundMessage, read_inbound_message};
+use inbound::read_inbound_pointer;
 use server::CurrentConnection;
 
 /// Default TCP port. Must match `rust_x11_hello`'s `COMPANION_PORT`.
@@ -110,10 +108,6 @@ fn flush_stdout(context: &str) {
     }
 }
 
-fn legacy_action_dispatch_enabled(application_input: &ApplicationInput) -> bool {
-    !application_input.is_active()
-}
-
 fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().collect();
     let opts = parse_options(&args);
@@ -135,7 +129,6 @@ fn main() -> io::Result<()> {
     );
     println!("discovery listening address=0.0.0.0:{DISCOVERY_PORT}");
 
-    println!("type 'display <text>' to send a control command");
     println!(
         "type 'frame <white|black|horizontal|checkerboard|border|corners> <width>x<height>' to send a diagnostic framebuffer"
     );
@@ -171,12 +164,7 @@ fn main() -> io::Result<()> {
                         continue;
                     }
                     match parse_stdin_command(line) {
-                        Ok(StdinCommand::ForwardLine(line)) => {
-                            if let Err(error) = current.forward_line(line) {
-                                eprintln!("control write error: {error}");
-                            }
-                        }
-                        Ok(StdinCommand::Frame(frame)) => {
+                Ok(StdinCommand::Frame(frame)) => {
                             let encoded = match frame.encode(next_frame_id) {
                                 Ok(encoded) => encoded,
                                 Err(error) => {
@@ -283,8 +271,8 @@ fn main() -> io::Result<()> {
         let mut application_input = ApplicationInput::default();
         let mut reader = BufReader::new(&mut stream);
         loop {
-            let inbound = match read_inbound_message(&mut reader) {
-                Ok(Some(inbound)) => inbound,
+            let pointer = match read_inbound_pointer(&mut reader) {
+                Ok(Some(pointer)) => pointer,
                 Ok(None) => break,
                 Err(error) => {
                     eprintln!("TCP read error from {peer}: {error}");
@@ -294,30 +282,12 @@ fn main() -> io::Result<()> {
             for viewport in application_viewport_rx.try_iter() {
                 application_input.set_viewport(viewport);
             }
-            let (record, forward_legacy_action, host_activation) = match inbound {
-                InboundMessage::Line(line) => {
-                    let line = line.trim();
-                    if line.is_empty() {
-                        continue;
-                    }
-                    (
-                        line.to_string(),
-                        legacy_action_dispatch_enabled(&application_input),
-                        None,
-                    )
-                }
-                InboundMessage::Pointer(pointer) => {
-                    let phase = match pointer.phase() {
-                        V2PointerPhase::Down => "down",
-                        V2PointerPhase::Up => "up",
-                    };
-                    (
-                        format!("pointer phase={phase} x={} y={}", pointer.x(), pointer.y()),
-                        false,
-                        application_input.handle_pointer(&application_ui, pointer),
-                    )
-                }
+            let phase = match pointer.phase() {
+                V2PointerPhase::Down => "down",
+                V2PointerPhase::Up => "up",
             };
+            let record = format!("pointer phase={phase} x={} y={}", pointer.x(), pointer.y());
+            let host_activation = application_input.handle_pointer(&application_ui, pointer);
             println!("received from {peer}: {record}");
             flush_stdout("after received line");
 
@@ -354,24 +324,6 @@ fn main() -> io::Result<()> {
                     eprintln!("log write error: {error}");
                 } else if let Err(error) = file.flush() {
                     eprintln!("log flush error: {error}");
-                }
-            }
-
-            if let Some(action_id) = parse_action_line(&record) {
-                if forward_legacy_action && opts.forward_url {
-                    if let Err(error) = forward_url(action_id) {
-                        eprintln!("forward error to Hammerspoon: {error}");
-                    }
-                } else if !forward_legacy_action {
-                    let legacy_record =
-                        format!("legacy action semantic={action_id} dispatch=suppressed");
-                    println!("compatibility for {peer}: {legacy_record}");
-                    flush_stdout("after suppressed legacy action");
-                    if let Err(error) = writeln!(file, "{ts} {peer} {legacy_record}") {
-                        eprintln!("log write error: {error}");
-                    } else if let Err(error) = file.flush() {
-                        eprintln!("log flush error: {error}");
-                    }
                 }
             }
         }
@@ -422,17 +374,5 @@ mod tests {
         assert_eq!(opts.port, 5582);
         assert_eq!(opts.log_path, "/tmp/x.log");
         assert!(!opts.forward_url);
-    }
-
-    #[test]
-    fn legacy_dispatch_is_suppressed_only_while_host_input_is_active() {
-        let mut input = ApplicationInput::default();
-        assert!(legacy_action_dispatch_enabled(&input));
-
-        input.set_viewport(Some((1272, 1624)));
-        assert!(!legacy_action_dispatch_enabled(&input));
-
-        input.set_viewport(None);
-        assert!(legacy_action_dispatch_enabled(&input));
     }
 }

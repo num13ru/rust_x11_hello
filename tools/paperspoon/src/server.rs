@@ -39,16 +39,6 @@ impl CurrentConnection {
         true
     }
 
-    /// Write one newline-terminated control line to the current connection.
-    ///
-    /// Returns `Ok(false)` when no PaperPad is connected. A failed write
-    /// closes and clears only the generation used for that write.
-    pub(crate) fn forward_line(&self, line: &str) -> io::Result<bool> {
-        let mut encoded = line.as_bytes().to_vec();
-        encoded.push(b'\n');
-        self.forward_bytes(&encoded)
-    }
-
     /// Write exact binary bytes to the current connection.
     ///
     /// Returns `Ok(false)` when no PaperPad is connected. A failed write
@@ -77,7 +67,7 @@ impl CurrentConnection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{BufRead, BufReader, Read};
+    use std::io::Read;
     use std::net::TcpListener;
     use std::time::Duration;
 
@@ -92,47 +82,35 @@ mod tests {
     #[test]
     fn forwarding_follows_connection_replacement() {
         let current = CurrentConnection::default();
-        assert!(!current.forward_line("display nobody").expect("no target"));
+        assert!(!current.forward_bytes(b"nobody").expect("no target"));
 
-        let (first, first_peer) = tcp_pair();
+        let (first, mut first_peer) = tcp_pair();
         first_peer
             .set_read_timeout(Some(Duration::from_secs(2)))
             .expect("set first timeout");
         let first_token = current.install(&first).expect("install first");
-        assert!(
-            current
-                .forward_line("display first")
-                .expect("forward first")
-        );
-        let mut first_line = String::new();
-        BufReader::new(first_peer)
-            .read_line(&mut first_line)
-            .expect("read first line");
-        assert_eq!(first_line, "display first\n");
+        assert!(current.forward_bytes(&[1, 2]).expect("forward first"));
+        let mut first_bytes = [0; 2];
+        first_peer
+            .read_exact(&mut first_bytes)
+            .expect("read first bytes");
+        assert_eq!(first_bytes, [1, 2]);
 
-        let (second, second_peer) = tcp_pair();
+        let (second, mut second_peer) = tcp_pair();
         second_peer
             .set_read_timeout(Some(Duration::from_secs(2)))
             .expect("set second timeout");
         let second_token = current.install(&second).expect("install second");
         assert!(!current.clear_if_current(&first_token));
-        assert!(
-            current
-                .forward_line("display second")
-                .expect("forward second")
-        );
-        let mut second_line = String::new();
-        BufReader::new(second_peer)
-            .read_line(&mut second_line)
-            .expect("read second line");
-        assert_eq!(second_line, "display second\n");
+        assert!(current.forward_bytes(&[3, 4]).expect("forward second"));
+        let mut second_bytes = [0; 2];
+        second_peer
+            .read_exact(&mut second_bytes)
+            .expect("read second bytes");
+        assert_eq!(second_bytes, [3, 4]);
 
         assert!(current.clear_if_current(&second_token));
-        assert!(
-            !current
-                .forward_line("display nobody")
-                .expect("cleared target")
-        );
+        assert!(!current.forward_bytes(b"nobody").expect("cleared target"));
     }
 
     #[test]
@@ -144,13 +122,9 @@ mod tests {
         drop(peer);
 
         current
-            .forward_line("display failure")
+            .forward_bytes(b"failure")
             .expect_err("closed stream write must fail");
-        assert!(
-            !current
-                .forward_line("display nobody")
-                .expect("cleared target")
-        );
+        assert!(!current.forward_bytes(b"nobody").expect("cleared target"));
     }
 
     #[test]

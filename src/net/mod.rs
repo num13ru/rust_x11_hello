@@ -4,7 +4,7 @@
 //! The Kindle connects out to PaperSpoon once at launch and keeps the
 //! connection for the run. Protocol-v2 pointer phases use one bounded writer
 //! queue so their byte ordering is deterministic. A reader thread
-//! consumes inbound PaperSpoon display lines and protocol-v2 Frame messages,
+//! consumes inbound protocol-v2 Frame messages,
 //! publishing the latest of each into mailboxes the X11 event loop drains
 //! between events and on a bounded idle poll interval. Frames are validated
 //! against the current remote viewport but are not rendered yet.
@@ -14,7 +14,7 @@
 //! endpoint. Neither path blocks or breaks the X11 event loop.
 
 use paper_protocol::{
-    V2_HEADER_LEN, V2_MAGIC, V2DecodeResult, V2MessageType, V2Payload, V2Pointer, V2PointerPhase,
+    V2_HEADER_LEN, V2DecodeResult, V2MessageType, V2Payload, V2Pointer, V2PointerPhase,
     decode_v2_message, decode_v2_payload,
 };
 
@@ -37,10 +37,6 @@ const TCP_WRITE_TIMEOUT: Duration = Duration::from_millis(150);
 const STARTUP_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 const STARTUP_STOP_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const OUTBOUND_QUEUE_CAPACITY: usize = 16;
-/// Maximum complete inbound TCP line, including its newline when present.
-/// Status rendering policy remains separate; this limit only bounds framing.
-const MAX_INBOUND_LINE_BYTES: usize = 8 * 1024;
-
 type StartupResult = Result<(SocketAddr, TcpStream)>;
 
 enum StartupUpdate {
@@ -244,21 +240,12 @@ fn enqueue_outbound<T>(outbound_tx: &SyncSender<T>, outbound: T) -> Result<()> {
     }
 }
 
-#[derive(Debug)]
-enum InboundMessage {
-    Line(String),
-    Frame(ReceivedFrame),
-}
-
 fn spawn_reader(stream: TcpStream, frames: FrameMailbox, wake_tx: Sender<()>) -> JoinHandle<()> {
     std::thread::spawn(move || {
         let mut reader = BufReader::new(stream);
         loop {
-            match read_inbound_message(&mut reader) {
-                Ok(Some(InboundMessage::Line(line))) => {
-                    eprintln!("ignored legacy inbound line bytes={}", line.len());
-                }
-                Ok(Some(InboundMessage::Frame(frame))) => match frames.publish(frame) {
+            match read_inbound_frame(&mut reader) {
+                Ok(Some(frame)) => match frames.publish(frame) {
                     Ok(()) => {}
                     Err(error) => eprintln!("frame rejected: {error}"),
                 },
@@ -273,16 +260,11 @@ fn spawn_reader(stream: TcpStream, frames: FrameMailbox, wake_tx: Sender<()>) ->
     })
 }
 
-fn read_inbound_message<R: BufRead>(reader: &mut R) -> io::Result<Option<InboundMessage>> {
-    let first = match reader.fill_buf()?.first() {
-        Some(first) => *first,
-        None => return Ok(None),
-    };
-    if first == V2_MAGIC[0] {
-        read_v2_frame(reader).map(|frame| Some(InboundMessage::Frame(frame)))
-    } else {
-        read_inbound_line(reader).map(|line| line.map(InboundMessage::Line))
+fn read_inbound_frame<R: BufRead>(reader: &mut R) -> io::Result<Option<ReceivedFrame>> {
+    if reader.fill_buf()?.is_empty() {
+        return Ok(None);
     }
+    read_v2_frame(reader).map(Some)
 }
 
 fn read_v2_frame<R: Read>(reader: &mut R) -> io::Result<ReceivedFrame> {
@@ -340,31 +322,6 @@ fn read_v2_frame<R: Read>(reader: &mut R) -> io::Result<ReceivedFrame> {
 
 fn invalid_v2_data(error: impl std::fmt::Display) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, error.to_string())
-}
-
-fn read_inbound_line<R: BufRead>(reader: &mut R) -> io::Result<Option<String>> {
-    let mut bytes = Vec::new();
-    reader
-        .take((MAX_INBOUND_LINE_BYTES + 1) as u64)
-        .read_until(b'\n', &mut bytes)?;
-    if bytes.is_empty() {
-        return Ok(None);
-    }
-    if bytes.len() > MAX_INBOUND_LINE_BYTES {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "PaperSpoon inbound line exceeds 8192 bytes",
-        ));
-    }
-    if bytes.last() == Some(&b'\n') {
-        bytes.pop();
-        if bytes.last() == Some(&b'\r') {
-            bytes.pop();
-        }
-    }
-    String::from_utf8(bytes)
-        .map(Some)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
 }
 
 /// Resolve the PaperSpoon address.
@@ -1053,42 +1010,30 @@ mod tests {
     }
 
     #[test]
-    fn inbound_reader_accepts_display_lines_around_binary_frame() {
-        let frame = paper_protocol::Mono1Frame::new(9, 2, vec![0xaa, 0x80, 0x55, 0x00])
-            .expect("valid Mono1");
-        let encoded = paper_protocol::encode_v2_frame(7, &frame).expect("encode Frame");
-        let mut stream = b"display before\n".to_vec();
-        stream.extend_from_slice(&encoded);
-        stream.extend_from_slice(b"display after\n");
+    fn inbound_reader_accepts_consecutive_binary_frames() {
+        let first = paper_protocol::Mono1Frame::new(9, 2, vec![0xaa, 0x80, 0x55, 0x00])
+            .expect("valid first Mono1");
+        let second = paper_protocol::Mono1Frame::new(8, 1, vec![0xff]).expect("valid second Mono1");
+        let mut stream = paper_protocol::encode_v2_frame(7, &first).expect("encode first Frame");
+        stream.extend_from_slice(
+            &paper_protocol::encode_v2_frame(8, &second).expect("encode second Frame"),
+        );
         let mut reader = BufReader::new(Cursor::new(stream));
 
-        let Some(InboundMessage::Line(line)) =
-            read_inbound_message(&mut reader).expect("read first line")
-        else {
-            panic!("expected first display line");
-        };
-        assert_eq!(line, "display before");
-
-        let Some(InboundMessage::Frame(frame)) =
-            read_inbound_message(&mut reader).expect("read frame")
-        else {
-            panic!("expected binary frame");
-        };
+        let frame = read_inbound_frame(&mut reader)
+            .expect("read first frame")
+            .expect("first frame");
         assert_eq!(frame.frame_id(), 7);
         assert_eq!((frame.width(), frame.height(), frame.stride()), (9, 2, 2));
         assert_eq!(frame.pixels(), &[0xaa, 0x80, 0x55, 0x00]);
 
-        let Some(InboundMessage::Line(line)) =
-            read_inbound_message(&mut reader).expect("read second line")
-        else {
-            panic!("expected second display line");
-        };
-        assert_eq!(line, "display after");
-        assert!(
-            read_inbound_message(&mut reader)
-                .expect("read EOF")
-                .is_none()
-        );
+        let frame = read_inbound_frame(&mut reader)
+            .expect("read second frame")
+            .expect("second frame");
+        assert_eq!(frame.frame_id(), 8);
+        assert_eq!((frame.width(), frame.height(), frame.stride()), (8, 1, 1));
+        assert_eq!(frame.pixels(), &[0xff]);
+        assert!(read_inbound_frame(&mut reader).expect("read EOF").is_none());
     }
 
     #[test]
@@ -1097,7 +1042,7 @@ mod tests {
         let mut malformed = paper_protocol::encode_v2_frame(8, &frame).expect("encode Frame");
         malformed[V2_HEADER_LEN + 13] = 1;
         assert_eq!(
-            read_inbound_message(&mut BufReader::new(Cursor::new(malformed)))
+            read_inbound_frame(&mut BufReader::new(Cursor::new(malformed)))
                 .expect_err("nonzero Frame reserved byte")
                 .kind(),
             io::ErrorKind::InvalidData
@@ -1107,7 +1052,7 @@ mod tests {
             .encode_message()
             .expect("encode Hello");
         assert_eq!(
-            read_inbound_message(&mut BufReader::new(Cursor::new(hello)))
+            read_inbound_frame(&mut BufReader::new(Cursor::new(hello)))
                 .expect_err("unexpected inbound Hello")
                 .kind(),
             io::ErrorKind::InvalidData
@@ -1117,14 +1062,14 @@ mod tests {
     #[test]
     fn inbound_reader_rejects_oversized_v2_header_before_payload() {
         let mut header = [0_u8; V2_HEADER_LEN];
-        header[0..4].copy_from_slice(&V2_MAGIC);
+        header[0..4].copy_from_slice(&paper_protocol::V2_MAGIC);
         header[4] = paper_protocol::V2_VERSION;
         header[5] = V2MessageType::Frame as u8;
         header[8..12]
             .copy_from_slice(&((paper_protocol::V2_MAX_PAYLOAD_LEN + 1) as u32).to_be_bytes());
 
         assert_eq!(
-            read_inbound_message(&mut BufReader::new(Cursor::new(header)))
+            read_inbound_frame(&mut BufReader::new(Cursor::new(header)))
                 .expect_err("oversized payload header")
                 .kind(),
             io::ErrorKind::InvalidData
@@ -1132,53 +1077,7 @@ mod tests {
     }
 
     #[test]
-    fn inbound_line_reader_preserves_lines_semantics() {
-        let mut input = Cursor::new(b"display first\r\ndisplay second\nfinal".to_vec());
-        assert_eq!(
-            read_inbound_line(&mut input).expect("read CRLF line"),
-            Some("display first".to_string())
-        );
-        assert_eq!(
-            read_inbound_line(&mut input).expect("read LF line"),
-            Some("display second".to_string())
-        );
-        assert_eq!(
-            read_inbound_line(&mut input).expect("read final line"),
-            Some("final".to_string())
-        );
-        assert_eq!(read_inbound_line(&mut input).expect("read EOF"), None);
-    }
-
-    #[test]
-    fn inbound_line_reader_accepts_exact_limit() {
-        let mut input = Cursor::new(vec![b'x'; MAX_INBOUND_LINE_BYTES]);
-        let line = read_inbound_line(&mut input)
-            .expect("read bounded line")
-            .expect("line");
-        assert_eq!(line.len(), MAX_INBOUND_LINE_BYTES);
-    }
-
-    #[test]
-    fn inbound_line_reader_rejects_oversize_and_invalid_utf8() {
-        let mut oversized = Cursor::new(vec![b'x'; MAX_INBOUND_LINE_BYTES + 1]);
-        assert_eq!(
-            read_inbound_line(&mut oversized)
-                .expect_err("oversized line must fail")
-                .kind(),
-            io::ErrorKind::InvalidData
-        );
-
-        let mut invalid_utf8 = Cursor::new(vec![0xff, b'\n']);
-        assert_eq!(
-            read_inbound_line(&mut invalid_utf8)
-                .expect_err("invalid UTF-8 must fail")
-                .kind(),
-            io::ErrorKind::InvalidData
-        );
-    }
-
-    #[test]
-    fn oversized_inbound_line_reconnects_without_peer_eof() {
+    fn legacy_inbound_line_reconnects_without_peer_eof() {
         use std::io::Write;
         use std::net::TcpListener;
 
@@ -1187,11 +1086,9 @@ mod tests {
         let mut paperspoon = Paperspoon::connect_to(addr).expect("connect");
         let mut first_peer = accept_before(&listener, Duration::from_secs(2));
 
-        let mut oversized = vec![b'x'; MAX_INBOUND_LINE_BYTES + 1];
-        oversized.push(b'\n');
         first_peer
-            .write_all(&oversized)
-            .expect("write oversized line");
+            .write_all(b"legacy line protocol\n")
+            .expect("write legacy line");
 
         // Keep the original peer open: a second accept proves the reader
         // rejected the frame and woke the reconnector instead of seeing EOF.
@@ -1205,7 +1102,7 @@ mod tests {
             }
             assert!(
                 std::time::Instant::now() < deadline,
-                "oversized-line reconnect was not promoted"
+                "legacy-line reconnect was not promoted"
             );
             std::thread::sleep(Duration::from_millis(10));
         }
