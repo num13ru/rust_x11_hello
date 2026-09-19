@@ -4,7 +4,7 @@
 //! [`crate::ui::button::PointerEvent`]. Rendering is delegated to the sibling
 //! adapter, and the UI layer never sees X11 types.
 
-use super::framebuffer::X11BitmapAdapter;
+use super::framebuffer::{PreparedBitmap, X11BitmapAdapter};
 use super::render::draw;
 
 use crate::app::{Activation, AppState, GeometryUpdate, Redraw};
@@ -25,6 +25,46 @@ pub enum EventLoopExit {
 
 const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
+struct CachedRemoteFrame<T> {
+    frame_id: u64,
+    width: u16,
+    height: u16,
+    bitmap: T,
+}
+
+struct RemoteFrameCache<T> {
+    current: Option<CachedRemoteFrame<T>>,
+}
+
+impl<T> Default for RemoteFrameCache<T> {
+    fn default() -> Self {
+        Self { current: None }
+    }
+}
+
+impl<T> RemoteFrameCache<T> {
+    fn current(&self) -> Option<&CachedRemoteFrame<T>> {
+        self.current.as_ref()
+    }
+
+    fn replace(&mut self, frame_id: u64, width: u16, height: u16, bitmap: T) {
+        self.current = Some(CachedRemoteFrame {
+            frame_id,
+            width,
+            height,
+            bitmap,
+        });
+    }
+
+    fn invalidate_mismatched(&mut self, viewport: (u16, u16)) -> Option<CachedRemoteFrame<T>> {
+        let mismatched = self
+            .current
+            .as_ref()
+            .is_some_and(|frame| (frame.width, frame.height) != viewport);
+        mismatched.then(|| self.current.take().expect("mismatched frame exists"))
+    }
+}
+
 /// Run the event loop until the window is destroyed or the connection fails.
 pub fn event_loop(
     conn: &RustConnection,
@@ -44,11 +84,20 @@ pub fn event_loop(
             None
         }
     };
+    let mut remote_frame_cache = RemoteFrameCache::default();
     paperspoon.set_remote_viewport(remote_viewport_size(initial_size));
 
     if let Some(text) = paperspoon.poll_display() {
-        draw_app(conn, win, gc, app.set_status_text(text))
-            .context("failed to redraw status after PaperSpoon command")?;
+        draw_surface(
+            conn,
+            win,
+            gc,
+            app.set_status_text(text),
+            framebuffer_adapter.as_ref(),
+            &remote_frame_cache,
+            "display",
+        )
+        .context("failed to redraw status after PaperSpoon command")?;
     }
     loop {
         if let Some(frame) = paperspoon.poll_frame() {
@@ -62,17 +111,25 @@ pub fn event_loop(
                             remote_viewport_origin(app.size()),
                             &bitmap,
                         ) {
-                            Ok(chunks) => eprintln!(
-                                "frame uploaded id={} width={} height={} wire_stride={} wire_bytes={} x11_stride={} x11_bytes={} chunks={} cache=none",
-                                frame.frame_id(),
-                                frame.width(),
-                                frame.height(),
-                                frame.stride(),
-                                frame.pixels().len(),
-                                bitmap.stride(),
-                                bitmap.bytes().len(),
-                                chunks
-                            ),
+                            Ok(chunks) => {
+                                eprintln!(
+                                    "frame uploaded id={} width={} height={} wire_stride={} wire_bytes={} x11_stride={} x11_bytes={} chunks={} cache=updated",
+                                    frame.frame_id(),
+                                    frame.width(),
+                                    frame.height(),
+                                    frame.stride(),
+                                    frame.pixels().len(),
+                                    bitmap.stride(),
+                                    bitmap.bytes().len(),
+                                    chunks
+                                );
+                                remote_frame_cache.replace(
+                                    frame.frame_id(),
+                                    frame.width(),
+                                    frame.height(),
+                                    bitmap,
+                                );
+                            }
                             Err(error) => eprintln!(
                                 "frame upload error id={} width={} height={}: {error:#}",
                                 frame.frame_id(),
@@ -101,8 +158,16 @@ pub fn event_loop(
         // Drain any PaperSpoon command received since the last X11 event.
         if let Some(text) = paperspoon.poll_display() {
             eprintln!("display: {text}");
-            draw_app(conn, win, gc, app.set_status_text(text))
-                .context("failed to redraw status after PaperSpoon command")?;
+            draw_surface(
+                conn,
+                win,
+                gc,
+                app.set_status_text(text),
+                framebuffer_adapter.as_ref(),
+                &remote_frame_cache,
+                "display",
+            )
+            .context("failed to redraw status after PaperSpoon command")?;
         }
         let Some(event) = conn
             .poll_for_event()
@@ -114,8 +179,16 @@ pub fn event_loop(
 
         match event {
             Event::Expose(event) if event.window == win && event.count == 0 => {
-                draw_app(conn, win, gc, app.redraw())
-                    .context("failed to redraw final Expose batch")?;
+                draw_surface(
+                    conn,
+                    win,
+                    gc,
+                    app.redraw(),
+                    framebuffer_adapter.as_ref(),
+                    &remote_frame_cache,
+                    "Expose",
+                )
+                .context("failed to redraw final Expose batch")?;
             }
             Event::Expose(_) => {}
             Event::ConfigureNotify(event) if event.window == win => {
@@ -129,13 +202,28 @@ pub fn event_loop(
                     GeometryUpdate::Unchanged => {}
                     GeometryUpdate::Redraw(redraw) => {
                         let (width, height) = redraw.size();
-                        paperspoon.set_remote_viewport(remote_viewport_size((width, height)));
+                        let viewport = remote_viewport_size((width, height));
+                        paperspoon.set_remote_viewport(viewport);
+                        if let Some(frame) = remote_frame_cache.invalidate_mismatched(viewport) {
+                            eprintln!(
+                                "frame cache invalidated id={} width={} height={} viewport_width={} viewport_height={}",
+                                frame.frame_id, frame.width, frame.height, viewport.0, viewport.1
+                            );
+                        }
                         eprintln!(
                             "event type=ConfigureNotify x={} y={} width={width} height={height} window=0x{:x}",
                             event.x, event.y, event.window
                         );
-                        draw_app(conn, win, gc, redraw)
-                            .context("failed to redraw after ConfigureNotify")?;
+                        draw_surface(
+                            conn,
+                            win,
+                            gc,
+                            redraw,
+                            framebuffer_adapter.as_ref(),
+                            &remote_frame_cache,
+                            "ConfigureNotify",
+                        )
+                        .context("failed to redraw after ConfigureNotify")?;
                     }
                 }
             }
@@ -229,6 +317,34 @@ fn draw_app(conn: &RustConnection, win: Window, gc: Gcontext, redraw: Redraw<'_>
     draw(conn, win, gc, width, height, redraw.status_text())
 }
 
+fn draw_surface(
+    conn: &RustConnection,
+    win: Window,
+    gc: Gcontext,
+    redraw: Redraw<'_>,
+    framebuffer_adapter: Option<&X11BitmapAdapter>,
+    remote_frame_cache: &RemoteFrameCache<PreparedBitmap>,
+    cause: &str,
+) -> Result<()> {
+    let size = redraw.size();
+    draw_app(conn, win, gc, redraw)?;
+
+    let (Some(adapter), Some(frame)) = (framebuffer_adapter, remote_frame_cache.current()) else {
+        return Ok(());
+    };
+    match adapter.blit(conn, win, gc, remote_viewport_origin(size), &frame.bitmap) {
+        Ok(chunks) => eprintln!(
+            "frame redrawn id={} width={} height={} chunks={} cause={} cache=hit",
+            frame.frame_id, frame.width, frame.height, chunks, cause
+        ),
+        Err(error) => eprintln!(
+            "frame redraw error id={} width={} height={} cause={}: {error:#}",
+            frame.frame_id, frame.width, frame.height, cause
+        ),
+    }
+    Ok(())
+}
+
 /// One-line raw diagnostic for a press or release event.
 pub fn format_pointer_event(event_type: &str, event: &ButtonPressEvent) -> String {
     format!(
@@ -301,6 +417,31 @@ mod tests {
             format_pointer_event("ButtonRelease", &event),
             "input type=ButtonRelease detail=3 event_x=-1 event_y=360 root_x=79 root_y=480 time=123456 window=0x2600001 root=0x50d child=0x0 state=0x0101 same_screen=true"
         );
+    }
+
+    #[test]
+    fn remote_frame_cache_replaces_and_invalidates_only_for_new_viewport() {
+        let mut cache = RemoteFrameCache::default();
+        assert!(cache.current().is_none());
+
+        cache.replace(1, 9, 2, "first");
+        cache.replace(2, 17, 4, "second");
+        let current = cache.current().expect("replacement cached");
+        assert_eq!(current.frame_id, 2);
+        assert_eq!((current.width, current.height), (17, 4));
+        assert_eq!(current.bitmap, "second");
+
+        assert!(cache.invalidate_mismatched((17, 4)).is_none());
+        assert_eq!(
+            cache.current().expect("matching cache retained").frame_id,
+            2
+        );
+
+        let invalidated = cache
+            .invalidate_mismatched((17, 5))
+            .expect("mismatched cache invalidated");
+        assert_eq!(invalidated.frame_id, 2);
+        assert!(cache.current().is_none());
     }
 
     #[test]

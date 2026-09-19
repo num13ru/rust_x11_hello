@@ -245,16 +245,22 @@ frame white 1272x1624
 
 Patterns are generated as validated Mono1 frames and assigned increasing frame
 IDs. PaperSpoon prints `sent frame ...`; PaperPad logs `frame uploaded ...
-cache=none`. A mismatched extent is rejected by PaperPad without replacing a
-pending valid frame. This transitional implementation does not cache the
-uploaded image, so an X11 Expose or legacy redraw may replace it; resend the
-command when needed.
+cache=updated`. A mismatched extent or failed upload does not replace the last
+successfully displayed frame. PaperPad redraws that cached frame after X11
+Expose, legacy status, and same-viewport geometry redraws; successful cache
+redraws log `frame redrawn ... cache=hit`. A viewport-size change invalidates
+the old cache rather than stretching or clipping it.
 
 For the manual device check, verify the four differently sized blocks in
 `corners` occupy the expected corners, the `border` reaches the remote
 viewport's rightmost pixel and bottom row, black/white polarity is correct, and
 no pattern overwrites the 72-pixel local Exit strip. Press Exit after a frame to
-confirm it remains device-local and responsive.
+confirm it remains device-local and responsive. After a valid frame, send
+`display cache-check` and confirm the frame remains visible while PaperPad logs
+`frame redrawn ... cause=display cache=hit`. Stop PaperSpoon, trigger an X11
+Expose (brief sleep/wake on the tested Paperwhite), and confirm the cached frame
+returns without the host. A deliberately mismatched frame such as
+`frame white 1272x1623` must not replace the cached valid frame.
 
 For a Wi-Fi run, the listener binds `0.0.0.0` on TCP 5581 **and** starts the
 UDP discovery responder on `0.0.0.0:5580` (you should see both the TCP
