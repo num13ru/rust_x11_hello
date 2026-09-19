@@ -27,10 +27,14 @@ use std::env;
 use std::fs::OpenOptions;
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpListener};
+use std::sync::mpsc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use paper_protocol::{DISCOVERY_PORT, V2PointerPhase, parse_action_line};
-use paperspoon::{application_renderer::encode_application, application_ui::ApplicationUi};
+use paperspoon::{
+    application_input::ApplicationInput, application_renderer::encode_application,
+    application_ui::ApplicationUi,
+};
 
 mod diagnostic;
 mod discovery;
@@ -140,6 +144,7 @@ fn main() -> io::Result<()> {
     io::stdout().flush()?;
 
     let current = CurrentConnection::default();
+    let (application_viewport_tx, application_viewport_rx) = mpsc::channel();
 
     let _stdin_worker = {
         let current = current.clone();
@@ -177,6 +182,9 @@ fn main() -> io::Result<()> {
                             };
                             match current.forward_bytes(&encoded) {
                                 Ok(true) => {
+                                    if application_viewport_tx.send(None).is_err() {
+                                        eprintln!("application viewport tracker stopped");
+                                    }
                                     let (width, height) = frame.dimensions();
                                     println!(
                                         "sent frame id={next_frame_id} pattern={} width={width} height={height} bytes={}",
@@ -207,6 +215,9 @@ fn main() -> io::Result<()> {
                             };
                             match current.forward_bytes(&encoded) {
                                 Ok(true) => {
+                                    if application_viewport_tx.send(Some((width, height))).is_err() {
+                                        eprintln!("application viewport tracker stopped");
+                                    }
                                     println!(
                                         "sent application frame id={next_frame_id} width={width} height={height} bytes={}",
                                         encoded.len()
@@ -240,6 +251,9 @@ fn main() -> io::Result<()> {
         println!("connected: {peer}");
         flush_stdout("after connected banner");
 
+        // A new connection has not received any application frame yet.
+        while application_viewport_rx.try_recv().is_ok() {}
+
         // This is now the active Kindle connection for control lines.
         let connection_token = match current.install(&stream) {
             Ok(token) => token,
@@ -261,6 +275,8 @@ fn main() -> io::Result<()> {
                 continue;
             }
         };
+        let application_ui = ApplicationUi::default();
+        let mut application_input = ApplicationInput::default();
         let mut reader = BufReader::new(&mut stream);
         loop {
             let inbound = match read_inbound_message(&mut reader) {
@@ -271,13 +287,16 @@ fn main() -> io::Result<()> {
                     break;
                 }
             };
-            let (record, forward_action) = match inbound {
+            for viewport in application_viewport_rx.try_iter() {
+                application_input.set_viewport(viewport);
+            }
+            let (record, forward_action, shadow_activation) = match inbound {
                 InboundMessage::Line(line) => {
                     let line = line.trim();
                     if line.is_empty() {
                         continue;
                     }
-                    (line.to_string(), true)
+                    (line.to_string(), true, None)
                 }
                 InboundMessage::Pointer(pointer) => {
                     let phase = match pointer.phase() {
@@ -287,6 +306,7 @@ fn main() -> io::Result<()> {
                     (
                         format!("pointer phase={phase} x={} y={}", pointer.x(), pointer.y()),
                         false,
+                        application_input.handle_pointer(&application_ui, pointer),
                     )
                 }
             };
@@ -302,6 +322,20 @@ fn main() -> io::Result<()> {
                 eprintln!("log write error: {error}");
             } else if let Err(error) = file.flush() {
                 eprintln!("log flush error: {error}");
+            }
+
+            if let Some(activation) = shadow_activation {
+                let shadow_record = format!(
+                    "shadow action button={} semantic={} dispatch=disabled",
+                    activation.button_id, activation.action_id
+                );
+                println!("resolved for {peer}: {shadow_record}");
+                flush_stdout("after shadow action");
+                if let Err(error) = writeln!(file, "{ts} {peer} {shadow_record}") {
+                    eprintln!("log write error: {error}");
+                } else if let Err(error) = file.flush() {
+                    eprintln!("log flush error: {error}");
+                }
             }
 
             if opts.forward_url

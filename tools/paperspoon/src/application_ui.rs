@@ -25,6 +25,17 @@ pub struct Rect {
     pub height: u16,
 }
 
+impl Rect {
+    pub(crate) fn contains(self, x: u16, y: u16) -> bool {
+        let x = u32::from(x);
+        let y = u32::from(y);
+        x >= u32::from(self.x)
+            && y >= u32::from(self.y)
+            && x < u32::from(self.x) + u32::from(self.width)
+            && y < u32::from(self.y) + u32::from(self.height)
+    }
+}
+
 /// Text and its baseline origin in remote-viewport coordinates.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TextRun<'a> {
