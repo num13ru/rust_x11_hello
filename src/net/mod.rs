@@ -1,9 +1,10 @@
-//! Persistent TCP transport for semantic activation events and PaperSpoon
-//! control.
+//! Persistent TCP transport for outbound PaperPad input and inbound PaperSpoon
+//! control/framebuffer messages.
 //!
 //! The Kindle connects out to PaperSpoon once at launch and keeps the
-//! connection for the run. Each activation queues one newline-terminated
-//! `event action=<semantic-id>;` line for a bounded writer. A reader thread
+//! connection for the run. Semantic actions and protocol-v2 pointer phases
+//! share one bounded writer queue so their byte ordering is deterministic. A
+//! reader thread
 //! consumes inbound PaperSpoon display lines and protocol-v2 Frame messages,
 //! publishing the latest of each into mailboxes the X11 event loop drains
 //! between events and on a bounded idle poll interval. Frames are validated
@@ -14,8 +15,8 @@
 //! endpoint. Neither path blocks or breaks the X11 event loop.
 
 use paper_protocol::{
-    V2_HEADER_LEN, V2_MAGIC, V2DecodeResult, V2MessageType, V2Payload, decode_v2_message,
-    decode_v2_payload, format_action_line, parse_display_command,
+    V2_HEADER_LEN, V2_MAGIC, V2DecodeResult, V2MessageType, V2Payload, V2Pointer, V2PointerPhase,
+    decode_v2_message, decode_v2_payload, format_action_line, parse_display_command,
 };
 
 mod connection;
@@ -36,7 +37,7 @@ const TCP_CONNECT_TIMEOUT: Duration = Duration::from_millis(150);
 const TCP_WRITE_TIMEOUT: Duration = Duration::from_millis(150);
 const STARTUP_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 const STARTUP_STOP_POLL_INTERVAL: Duration = Duration::from_millis(50);
-const ACTION_QUEUE_CAPACITY: usize = 16;
+const OUTBOUND_QUEUE_CAPACITY: usize = 16;
 const MAX_ACTION_LINE_BYTES: usize = 256;
 /// Maximum complete inbound TCP line, including its newline when present.
 /// Status rendering policy remains separate; this limit only bounds framing.
@@ -198,7 +199,7 @@ pub struct Paperspoon {
     connection: Arc<Mutex<ConnectionState>>,
     display: DisplayMailbox,
     frames: FrameMailbox,
-    action_tx: Option<SyncSender<QueuedAction>>,
+    outbound_tx: Option<SyncSender<QueuedOutbound>>,
     wake_tx: Option<Sender<()>>,
     stopping: Arc<AtomicBool>,
     writer: Option<JoinHandle<()>>,
@@ -206,37 +207,42 @@ pub struct Paperspoon {
     startup_rx: Option<Receiver<StartupUpdate>>,
 }
 
-struct QueuedAction {
+struct QueuedOutbound {
     connection: ConnectionToken,
-    line: String,
+    bytes: Vec<u8>,
+    description: &'static str,
 }
 
-fn write_action(connection: &Arc<Mutex<ConnectionState>>, action: &QueuedAction) -> Result<()> {
+fn write_outbound(
+    connection: &Arc<Mutex<ConnectionState>>,
+    outbound: &QueuedOutbound,
+) -> Result<()> {
     let mut write_stream = {
         let guard = connection.lock().expect("shared stream lock");
-        guard.clone_stream_for(&action.connection)?
+        guard.clone_stream_for(&outbound.connection)?
     };
-    if let Err(error) = write_stream.stream_mut().write_all(action.line.as_bytes()) {
+    if let Err(error) = write_stream.stream_mut().write_all(&outbound.bytes) {
         connection
             .lock()
             .expect("shared stream lock")
             .disconnect_if_current(&write_stream);
-        return Err(error).context("failed to write action to PaperSpoon");
+        return Err(error)
+            .with_context(|| format!("failed to write {} to PaperSpoon", outbound.description));
     }
     Ok(())
 }
 
 fn spawn_writer(
     connection: Arc<Mutex<ConnectionState>>,
-    action_rx: Receiver<QueuedAction>,
+    outbound_rx: Receiver<QueuedOutbound>,
     stopping: Arc<AtomicBool>,
 ) -> JoinHandle<()> {
     std::thread::spawn(move || {
-        while let Ok(action) = action_rx.recv() {
+        while let Ok(outbound) = outbound_rx.recv() {
             if stopping.load(Ordering::Acquire) {
                 break;
             }
-            match write_action(&connection, &action) {
+            match write_outbound(&connection, &outbound) {
                 Err(error) if !stopping.load(Ordering::Acquire) => {
                     eprintln!("transport error: {error:#}");
                 }
@@ -246,12 +252,12 @@ fn spawn_writer(
     })
 }
 
-fn enqueue_action<T>(action_tx: &SyncSender<T>, action: T) -> Result<()> {
-    match action_tx.try_send(action) {
+fn enqueue_outbound<T>(outbound_tx: &SyncSender<T>, outbound: T) -> Result<()> {
+    match outbound_tx.try_send(outbound) {
         Ok(()) => Ok(()),
-        Err(TrySendError::Full(_)) => Err(anyhow::anyhow!("PaperSpoon action queue full")),
+        Err(TrySendError::Full(_)) => Err(anyhow::anyhow!("PaperSpoon outbound queue full")),
         Err(TrySendError::Disconnected(_)) => {
-            Err(anyhow::anyhow!("PaperSpoon action worker stopped"))
+            Err(anyhow::anyhow!("PaperSpoon outbound worker stopped"))
         }
     }
 }
@@ -414,7 +420,7 @@ impl Paperspoon {
             connection: Arc::new(Mutex::new(ConnectionState::disconnected())),
             display: DisplayMailbox::default(),
             frames: FrameMailbox::default(),
-            action_tx: None,
+            outbound_tx: None,
             wake_tx: None,
             stopping: Arc::new(AtomicBool::new(false)),
             writer: None,
@@ -496,7 +502,7 @@ impl Paperspoon {
         // fresh socket — proactive auto-reconnect without user input.
         let connection = Arc::new(Mutex::new(ConnectionState::connected(stream)));
         let display = DisplayMailbox::default();
-        let (action_tx, action_rx) = mpsc::sync_channel(ACTION_QUEUE_CAPACITY);
+        let (outbound_tx, outbound_rx) = mpsc::sync_channel(OUTBOUND_QUEUE_CAPACITY);
         let (wake_tx, wake_rx) = mpsc::channel::<()>();
 
         let reader_stream = connection
@@ -515,7 +521,7 @@ impl Paperspoon {
         // install fresh socket + reader, then wait for the next EOF.
         let worker_connection = Arc::clone(&connection);
         let stopping = Arc::new(AtomicBool::new(false));
-        let writer = spawn_writer(Arc::clone(&connection), action_rx, Arc::clone(&stopping));
+        let writer = spawn_writer(Arc::clone(&connection), outbound_rx, Arc::clone(&stopping));
         let worker_stopping = Arc::clone(&stopping);
         let worker_display = display.clone();
         let worker_frames = frames.clone();
@@ -575,7 +581,7 @@ impl Paperspoon {
             connection,
             display,
             frames,
-            action_tx: Some(action_tx),
+            outbound_tx: Some(outbound_tx),
             wake_tx: Some(wake_tx),
             stopping,
             writer: Some(writer),
@@ -637,16 +643,40 @@ impl Paperspoon {
             line.len() <= MAX_ACTION_LINE_BYTES,
             "PaperSpoon action line exceeds {MAX_ACTION_LINE_BYTES} bytes"
         );
+        self.enqueue_bytes(line.into_bytes(), "semantic action")
+    }
+
+    /// Queue one viewport-relative pointer phase for ordered background delivery.
+    ///
+    /// Disconnected, full-queue, and stopped-worker states fail immediately.
+    /// Accepted pointer events are not retried after reconnect.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "wired to X11 events in the next migration slice")
+    )]
+    pub fn send_pointer(&mut self, phase: V2PointerPhase, x: u16, y: u16) -> Result<()> {
+        let encoded = V2Pointer::new(phase, x, y).encode_message()?;
+        self.enqueue_bytes(encoded, "pointer event")
+    }
+
+    fn enqueue_bytes(&mut self, bytes: Vec<u8>, description: &'static str) -> Result<()> {
         self.promote_startup();
         let connection = {
             let guard = self.connection.lock().expect("shared stream lock");
             guard.current_token()?
         };
-        let action_tx = self
-            .action_tx
+        let outbound_tx = self
+            .outbound_tx
             .as_ref()
-            .context("PaperSpoon action worker not running")?;
-        enqueue_action(action_tx, QueuedAction { connection, line })
+            .context("PaperSpoon outbound worker not running")?;
+        enqueue_outbound(
+            outbound_tx,
+            QueuedOutbound {
+                connection,
+                bytes,
+                description,
+            },
+        )
     }
 
     /// Drain any display commands received since the last call.
@@ -682,7 +712,7 @@ impl Drop for Paperspoon {
         if let Some(wake_tx) = self.wake_tx.take() {
             let _ = wake_tx.send(());
         }
-        self.action_tx.take();
+        self.outbound_tx.take();
         if let Some(writer) = self.writer.take() {
             let _ = writer.join();
         }
@@ -962,6 +992,42 @@ mod tests {
     }
 
     #[test]
+    fn writer_delivers_ordered_binary_pointer_phases() {
+        use std::io::Read as _;
+
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind");
+        let mut paperspoon =
+            Paperspoon::connect_to(listener.local_addr().expect("addr")).expect("connect");
+        let mut peer = accept_before(&listener, Duration::from_secs(2));
+        peer.set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("set peer timeout");
+
+        let expected = [
+            V2Pointer::new(V2PointerPhase::Down, 0x1234, 0xabcd),
+            V2Pointer::new(V2PointerPhase::Up, u16::MAX, 0),
+        ];
+        for pointer in expected {
+            paperspoon
+                .send_pointer(pointer.phase(), pointer.x(), pointer.y())
+                .expect("queue pointer");
+        }
+
+        let message_len = V2_HEADER_LEN + paper_protocol::V2_POINTER_PAYLOAD_LEN;
+        let mut encoded = vec![0; message_len * expected.len()];
+        peer.read_exact(&mut encoded)
+            .expect("read pointer messages");
+        for (bytes, pointer) in encoded.chunks_exact(message_len).zip(expected) {
+            let V2DecodeResult::Complete { message, consumed } =
+                decode_v2_message(bytes).expect("decode pointer message")
+            else {
+                panic!("complete pointer message expected");
+            };
+            assert_eq!(consumed, message_len);
+            assert_eq!(decode_v2_payload(message), Ok(V2Payload::Pointer(pointer)));
+        }
+    }
+
+    #[test]
     fn reader_publishes_valid_frame_from_tcp_stream() {
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind");
         let mut paperspoon =
@@ -990,22 +1056,22 @@ mod tests {
     }
 
     #[test]
-    fn action_enqueue_rejects_full_and_stopped_queue() {
+    fn outbound_enqueue_rejects_full_and_stopped_queue() {
         let (tx, rx) = mpsc::sync_channel(1);
-        enqueue_action(&tx, "first".to_string()).expect("fill queue");
+        enqueue_outbound(&tx, "first".to_string()).expect("fill queue");
         assert!(
-            enqueue_action(&tx, "second".to_string())
+            enqueue_outbound(&tx, "second".to_string())
                 .expect_err("full queue must reject")
                 .to_string()
-                .contains("action queue full")
+                .contains("outbound queue full")
         );
 
         drop(rx);
         assert!(
-            enqueue_action(&tx, "third".to_string())
+            enqueue_outbound(&tx, "third".to_string())
                 .expect_err("stopped queue must reject")
                 .to_string()
-                .contains("action worker stopped")
+                .contains("outbound worker stopped")
         );
     }
 
