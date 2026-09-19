@@ -1,5 +1,6 @@
 //! Deterministic software drawing primitives for protocol-native Mono1 frames.
 
+use crate::font5x7;
 use paper_protocol::{Mono1Frame, Mono1FrameError, Mono1Pixel, mono1_payload_len, mono1_stride};
 
 /// Mutable one-bit canvas using the protocol's MSB-first row representation.
@@ -102,6 +103,46 @@ impl MonoCanvas {
         }
     }
 
+    /// Draw text with the embedded bitmap font, clipping it to the canvas.
+    ///
+    /// `baseline_y` is the final raster row of each vertically doubled glyph.
+    pub fn draw_text(&mut self, x: u16, baseline_y: u16, text: &str, color: Mono1Pixel) {
+        let glyph_height = font5x7::HEIGHT * font5x7::VERTICAL_SCALE;
+        let top = i32::from(baseline_y) - i32::from(glyph_height - 1);
+        let mut glyph_x = u32::from(x);
+
+        for character in text.chars() {
+            if glyph_x >= u32::from(self.width) {
+                break;
+            }
+            for (source_row, row_bits) in font5x7::rows(character).into_iter().enumerate() {
+                for repeat in 0..font5x7::VERTICAL_SCALE {
+                    let target_y = top
+                        + i32::try_from(source_row).expect("font row fits i32")
+                            * i32::from(font5x7::VERTICAL_SCALE)
+                        + i32::from(repeat);
+                    if !(0..i32::from(self.height)).contains(&target_y) {
+                        continue;
+                    }
+                    for column in 0..font5x7::WIDTH {
+                        let mask = 1_u8 << (font5x7::WIDTH - 1 - column);
+                        if row_bits & mask == 0 {
+                            continue;
+                        }
+                        let target_x = glyph_x + u32::from(column);
+                        if target_x < u32::from(self.width) {
+                            self.set_pixel(target_x as u16, target_y as u16, color);
+                        }
+                    }
+                }
+            }
+            let Some(next_x) = glyph_x.checked_add(u32::from(font5x7::ADVANCE)) else {
+                break;
+            };
+            glyph_x = next_x;
+        }
+    }
+
     /// Validate and freeze this canvas as a transport-native frame.
     pub fn into_frame(self) -> Result<Mono1Frame, Mono1FrameError> {
         Mono1Frame::new(self.width, self.height, self.pixels)
@@ -175,5 +216,21 @@ mod tests {
         }
         assert_eq!(frame.pixel(3, 2), Some(Mono1Pixel::White));
         assert_eq!(frame.pixel(7, 6), Some(Mono1Pixel::Black));
+    }
+
+    #[test]
+    fn text_preserves_case_digits_and_fallback_glyphs() {
+        let mut canvas = MonoCanvas::new(24, 14).expect("canvas");
+        canvas.draw_text(0, 13, "Aa1\n", Mono1Pixel::Black);
+        let frame = canvas.into_frame().expect("valid frame");
+
+        assert_eq!(frame.pixel(0, 0), Some(Mono1Pixel::White));
+        assert_eq!(frame.pixel(1, 0), Some(Mono1Pixel::Black));
+        assert_eq!(frame.pixel(7, 0), Some(Mono1Pixel::White));
+        assert_eq!(frame.pixel(7, 4), Some(Mono1Pixel::Black));
+        assert_eq!(frame.pixel(14, 0), Some(Mono1Pixel::Black));
+        assert_eq!(frame.pixel(19, 0), Some(Mono1Pixel::Black));
+        assert_eq!(frame.pixel(18, 12), Some(Mono1Pixel::White));
+        assert_eq!(frame.pixel(20, 12), Some(Mono1Pixel::Black));
     }
 }
