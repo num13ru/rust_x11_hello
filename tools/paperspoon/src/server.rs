@@ -42,22 +42,18 @@ impl CurrentConnection {
     /// Write exact binary bytes to the current connection.
     ///
     /// Returns `Ok(false)` when no PaperPad is connected. A failed write
-    /// closes and clears only the connection generation used for the write.
+    /// closes and clears the connection generation used for the write.
+    /// Holding the connection lock across `write_all` prevents concurrent
+    /// frame producers from interleaving protocol bytes on cloned sockets.
     pub(crate) fn forward_bytes(&self, bytes: &[u8]) -> io::Result<bool> {
-        let (token, mut stream) = {
-            let guard = self.inner.lock().expect("current connection lock");
-            let Some(active) = guard.as_ref() else {
-                return Ok(false);
-            };
-            (
-                ConnectionToken(Arc::clone(&active.token)),
-                active.stream.try_clone()?,
-            )
+        let mut guard = self.inner.lock().expect("current connection lock");
+        let Some(active) = guard.as_mut() else {
+            return Ok(false);
         };
 
-        if let Err(error) = stream.write_all(bytes) {
-            let _ = stream.shutdown(Shutdown::Both);
-            self.clear_if_current(&token);
+        if let Err(error) = active.stream.write_all(bytes) {
+            let _ = active.stream.shutdown(Shutdown::Both);
+            guard.take();
             return Err(error);
         }
         Ok(true)
@@ -140,5 +136,45 @@ mod tests {
         let mut actual = [0; 7];
         peer.read_exact(&mut actual).expect("read exact bytes");
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn concurrent_forwarders_preserve_whole_message_boundaries() {
+        let current = CurrentConnection::default();
+        let (stream, mut peer) = tcp_pair();
+        current.install(&stream).expect("install connection");
+        let barrier = Arc::new(std::sync::Barrier::new(3));
+        let message_len = 128 * 1024;
+
+        let first = {
+            let current = current.clone();
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                current
+                    .forward_bytes(&vec![0x11; message_len])
+                    .expect("forward first")
+            })
+        };
+        let second = {
+            let current = current.clone();
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                current
+                    .forward_bytes(&vec![0x22; message_len])
+                    .expect("forward second")
+            })
+        };
+
+        barrier.wait();
+        let mut received = vec![0; message_len * 2];
+        peer.read_exact(&mut received).expect("read both messages");
+        assert!(first.join().expect("join first"));
+        assert!(second.join().expect("join second"));
+        assert!(
+            received == [vec![0x11; message_len], vec![0x22; message_len]].concat()
+                || received == [vec![0x22; message_len], vec![0x11; message_len]].concat()
+        );
     }
 }
