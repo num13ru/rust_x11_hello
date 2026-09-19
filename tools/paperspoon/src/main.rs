@@ -110,6 +110,10 @@ fn flush_stdout(context: &str) {
     }
 }
 
+fn legacy_action_dispatch_enabled(application_input: &ApplicationInput) -> bool {
+    !application_input.is_active()
+}
+
 fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().collect();
     let opts = parse_options(&args);
@@ -290,13 +294,17 @@ fn main() -> io::Result<()> {
             for viewport in application_viewport_rx.try_iter() {
                 application_input.set_viewport(viewport);
             }
-            let (record, forward_action, shadow_activation) = match inbound {
+            let (record, forward_legacy_action, host_activation) = match inbound {
                 InboundMessage::Line(line) => {
                     let line = line.trim();
                     if line.is_empty() {
                         continue;
                     }
-                    (line.to_string(), true, None)
+                    (
+                        line.to_string(),
+                        legacy_action_dispatch_enabled(&application_input),
+                        None,
+                    )
                 }
                 InboundMessage::Pointer(pointer) => {
                     let phase = match pointer.phase() {
@@ -324,26 +332,47 @@ fn main() -> io::Result<()> {
                 eprintln!("log flush error: {error}");
             }
 
-            if let Some(activation) = shadow_activation {
-                let shadow_record = format!(
-                    "shadow action button={} semantic={} dispatch=disabled",
+            if let Some(activation) = host_activation {
+                let dispatch = if opts.forward_url {
+                    match forward_url(activation.action_id) {
+                        Ok(()) => "forwarded",
+                        Err(error) => {
+                            eprintln!("forward error to Hammerspoon: {error}");
+                            "failed"
+                        }
+                    }
+                } else {
+                    "disabled"
+                };
+                let host_record = format!(
+                    "host action button={} semantic={} dispatch={dispatch}",
                     activation.button_id, activation.action_id
                 );
-                println!("resolved for {peer}: {shadow_record}");
-                flush_stdout("after shadow action");
-                if let Err(error) = writeln!(file, "{ts} {peer} {shadow_record}") {
+                println!("resolved for {peer}: {host_record}");
+                flush_stdout("after host action");
+                if let Err(error) = writeln!(file, "{ts} {peer} {host_record}") {
                     eprintln!("log write error: {error}");
                 } else if let Err(error) = file.flush() {
                     eprintln!("log flush error: {error}");
                 }
             }
 
-            if opts.forward_url
-                && forward_action
-                && let Some(action_id) = parse_action_line(&record)
-                && let Err(error) = forward_url(action_id)
-            {
-                eprintln!("forward error to Hammerspoon: {error}");
+            if let Some(action_id) = parse_action_line(&record) {
+                if forward_legacy_action && opts.forward_url {
+                    if let Err(error) = forward_url(action_id) {
+                        eprintln!("forward error to Hammerspoon: {error}");
+                    }
+                } else if !forward_legacy_action {
+                    let legacy_record =
+                        format!("legacy action semantic={action_id} dispatch=suppressed");
+                    println!("compatibility for {peer}: {legacy_record}");
+                    flush_stdout("after suppressed legacy action");
+                    if let Err(error) = writeln!(file, "{ts} {peer} {legacy_record}") {
+                        eprintln!("log write error: {error}");
+                    } else if let Err(error) = file.flush() {
+                        eprintln!("log flush error: {error}");
+                    }
+                }
             }
         }
         current.clear_if_current(&connection_token);
@@ -393,5 +422,17 @@ mod tests {
         assert_eq!(opts.port, 5582);
         assert_eq!(opts.log_path, "/tmp/x.log");
         assert!(!opts.forward_url);
+    }
+
+    #[test]
+    fn legacy_dispatch_is_suppressed_only_while_host_input_is_active() {
+        let mut input = ApplicationInput::default();
+        assert!(legacy_action_dispatch_enabled(&input));
+
+        input.set_viewport(Some((1272, 1624)));
+        assert!(!legacy_action_dispatch_enabled(&input));
+
+        input.set_viewport(None);
+        assert!(legacy_action_dispatch_enabled(&input));
     }
 }

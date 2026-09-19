@@ -25,6 +25,10 @@ pub struct ApplicationInput {
 }
 
 impl ApplicationInput {
+    pub fn is_active(&self) -> bool {
+        self.viewport.is_some()
+    }
+
     /// Replace the active application viewport and cancel any partial contact.
     /// `None` means the displayed frame is not the application UI.
     pub fn set_viewport(&mut self, viewport: Option<(u16, u16)>) {
@@ -185,11 +189,14 @@ mod tests {
         let ui = ApplicationUi::default();
         let mut input = ApplicationInput::default();
 
+        assert!(!input.is_active());
+
         assert_eq!(
             input.handle_pointer(&ui, pointer(V2PointerPhase::Up, 100, 100)),
             None
         );
         input.set_viewport(Some(VIEWPORT));
+        assert!(input.is_active());
         assert_eq!(
             input.handle_pointer(&ui, pointer(V2PointerPhase::Down, 100, 100)),
             None
@@ -213,6 +220,7 @@ mod tests {
             None
         );
         input.set_viewport(None);
+        assert!(!input.is_active());
         assert_eq!(
             input.handle_pointer(&ui, pointer(V2PointerPhase::Down, 100, 100)),
             None
