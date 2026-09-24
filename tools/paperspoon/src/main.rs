@@ -26,7 +26,7 @@ use std::fs::OpenOptions;
 use std::io::{self, BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpListener};
 use std::sync::{Arc, Mutex, mpsc};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use paper_protocol::{DISCOVERY_PORT, V2PointerPhase};
 use paperspoon::{
@@ -183,6 +183,8 @@ struct SentFrame {
     frame_id: u64,
     encoded_len: usize,
     application_viewport: Option<(u16, u16)>,
+    encode_elapsed: Duration,
+    socket_write_elapsed: Duration,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -222,12 +224,17 @@ impl FrameSender {
         let next_frame_id = frame_id
             .checked_add(1)
             .ok_or_else(|| "frame ID exhausted".to_string())?;
+        let encode_started = Instant::now();
         let encoded = encode(frame_id)?;
+        let encode_elapsed = encode_started.elapsed();
         let encoded_len = encoded.len();
+        // write_all measures local socket acceptance, not remote receipt or display.
+        let socket_write_started = Instant::now();
         let sent = self
             .current
             .forward_bytes(&encoded)
             .map_err(|error| format!("failed write frame: {error}"))?;
+        let socket_write_elapsed = socket_write_started.elapsed();
         if !sent {
             return Ok(None);
         }
@@ -239,6 +246,8 @@ impl FrameSender {
             frame_id,
             encoded_len,
             application_viewport: authoritative.and_then(AuthoritativeFrame::application_viewport),
+            encode_elapsed,
+            socket_write_elapsed,
         }))
     }
 
@@ -395,10 +404,12 @@ fn main() -> io::Result<()> {
                                 }
                                 let (width, height) = frame.dimensions();
                                 let record = format!(
-                                    "sent diagnostic frame id={} pattern={} width={width} height={height} bytes={} source=stdin",
+                                    "sent diagnostic frame id={} pattern={} width={width} height={height} bytes={} encode_us={} socket_write_us={} source=stdin",
                                     sent.frame_id,
                                     frame.pattern_name(),
-                                    sent.encoded_len
+                                    sent.encoded_len,
+                                    sent.encode_elapsed.as_micros(),
+                                    sent.socket_write_elapsed.as_micros()
                                 );
                                 println!("{record}");
                                 flush_stdout("after sent frame");
@@ -417,8 +428,11 @@ fn main() -> io::Result<()> {
                                     eprintln!("application viewport tracker stopped");
                                 }
                                 let record = format!(
-                                    "sent application frame id={} width={width} height={height} bytes={} source=stdin",
-                                    sent.frame_id, sent.encoded_len
+                                    "sent application frame id={} width={width} height={height} bytes={} encode_us={} socket_write_us={} source=stdin",
+                                    sent.frame_id,
+                                    sent.encoded_len,
+                                    sent.encode_elapsed.as_micros(),
+                                    sent.socket_write_elapsed.as_micros()
                                 );
                                 println!("{record}");
                                 flush_stdout("after sent application frame");
@@ -513,11 +527,13 @@ fn main() -> io::Result<()> {
                     }
                 };
                 let record = format!(
-                    "sent {kind} frame id={}{pattern} width={} height={} bytes={} source=hello retained={}",
+                    "sent {kind} frame id={}{pattern} width={} height={} bytes={} encode_us={} socket_write_us={} source=hello retained={}",
                     sent.frame_id,
                     reported_viewport.0,
                     reported_viewport.1,
                     sent.encoded_len,
+                    sent.encode_elapsed.as_micros(),
+                    sent.socket_write_elapsed.as_micros(),
                     hello_frame.retained
                 );
                 println!("{record}");
@@ -569,11 +585,13 @@ fn main() -> io::Result<()> {
                     ) {
                         Ok(Some(sent)) => {
                             let record = format!(
-                                "sent application frame id={} width={} height={} bytes={} source=viewport_changed",
+                                "sent application frame id={} width={} height={} bytes={} encode_us={} socket_write_us={} source=viewport_changed",
                                 sent.frame_id,
                                 reported_viewport.0,
                                 reported_viewport.1,
-                                sent.encoded_len
+                                sent.encoded_len,
+                                sent.encode_elapsed.as_micros(),
+                                sent.socket_write_elapsed.as_micros()
                             );
                             println!("{record}");
                             flush_stdout("after viewport replacement frame");
@@ -928,21 +946,31 @@ mod tests {
         let mut received = [0; 8];
         peer.read_exact(&mut received).expect("read both frames");
         assert_eq!(received, [1, 1, 1, 1, 2, 2, 2, 2]);
+        let first_sent = first
+            .join()
+            .expect("join first")
+            .expect("send first")
+            .expect("connected first sender");
+        let second_sent = second
+            .join()
+            .expect("join second")
+            .expect("send second")
+            .expect("connected second sender");
         assert_eq!(
-            first.join().expect("join first").expect("send first"),
-            Some(SentFrame {
-                frame_id: 1,
-                encoded_len: 4,
-                application_viewport: None,
-            })
+            (
+                first_sent.frame_id,
+                first_sent.encoded_len,
+                first_sent.application_viewport
+            ),
+            (1, 4, None)
         );
         assert_eq!(
-            second.join().expect("join second").expect("send second"),
-            Some(SentFrame {
-                frame_id: 2,
-                encoded_len: 4,
-                application_viewport: None,
-            })
+            (
+                second_sent.frame_id,
+                second_sent.encoded_len,
+                second_sent.application_viewport
+            ),
+            (2, 4, None)
         );
     }
 
