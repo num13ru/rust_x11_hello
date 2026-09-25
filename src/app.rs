@@ -1,4 +1,4 @@
-//! Wire- and X11-independent application state and decisions.
+//! Wire- and X11-independent PaperPad viewport and local Exit decisions.
 
 use crate::ui::button::{PRIMARY_BUTTON_DETAIL, PointerEvent, PointerEventKind};
 use crate::ui::screen::{RemotePoint, ScreenLayout};

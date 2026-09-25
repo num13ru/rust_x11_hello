@@ -14,6 +14,24 @@ steps an agent should follow, especially around physical-device work.
 - Physical device: Kindle Paperwhite 6 (Sangria / Bellatrix4), FW 5.17.1.0.4.
   USBNetwork is NOT available on this device; transport is Wi-Fi via `RUST_X11_HELLO_COMPANION`.
 
+## Architecture ownership
+
+PaperSpoon owns application state, layout, rendering, hit testing, and the
+mapping from application controls to semantic actions. PaperPad treats the
+remote viewport as an opaque Mono1 framebuffer: it may interpret physical X11
+coordinates only to map them into viewport-relative pointer coordinates or to
+handle its own device-local system UI, including Exit. Do not duplicate
+application button geometry in PaperPad or send application action IDs across
+the PaperPad/PaperSpoon protocol boundary. Exit and other device-local
+lifecycle controls must work even when PaperSpoon is disconnected.
+
+The dependency direction is PaperSpoon application layout/rendering/input →
+transport-independent `paper-protocol` PPFB v2 frames → PaperPad framebuffer
+receiver and X11 display adapter. Viewport-relative pointer messages travel
+in the opposite direction. Keep framebuffer primitives independent of the
+transport and display backend; X11-specific bitmap conversion belongs in
+PaperPad's X11 adapter, not in `paper-protocol`.
+
 ## Device deployment (MTP)
 
 Prerequisites:

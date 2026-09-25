@@ -306,7 +306,7 @@ fn remote_viewport_origin(physical_size: (u16, u16)) -> (i16, i16) {
         .unwrap_or((0, 0))
 }
 
-fn draw_app(conn: &RustConnection, win: Window, gc: Gcontext, redraw: Redraw) -> Result<()> {
+fn draw_local_ui(conn: &RustConnection, win: Window, gc: Gcontext, redraw: Redraw) -> Result<()> {
     let (width, height) = redraw.size();
     draw(conn, win, gc, width, height)
 }
@@ -321,7 +321,7 @@ fn draw_surface(
     cause: &str,
 ) -> Result<()> {
     let size = redraw.size();
-    draw_app(conn, win, gc, redraw)?;
+    draw_local_ui(conn, win, gc, redraw)?;
 
     let (Some(adapter), Some(frame)) = (framebuffer_adapter, remote_frame_cache.current()) else {
         return Ok(());

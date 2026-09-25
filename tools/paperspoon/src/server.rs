@@ -17,6 +17,13 @@ struct ActiveConnection {
 pub(crate) struct ConnectionToken(Arc<()>);
 
 impl CurrentConnection {
+    pub(crate) fn is_active(&self) -> bool {
+        self.inner
+            .lock()
+            .expect("current connection lock")
+            .is_some()
+    }
+
     pub(crate) fn install(&self, stream: &TcpStream) -> io::Result<ConnectionToken> {
         let token = Arc::new(());
         let active = ActiveConnection {

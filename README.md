@@ -109,10 +109,10 @@ The X11 bitmap adapter converts accepted Mono1 frames to the server-advertised X
 The Kindle connects to PaperSpoon over TCP and sends a binary v2 `Hello` with
 the remote viewport size. While connected, it sends viewport-relative
 `PointerDown`/`PointerUp` and size changes as `ViewportChanged`. PaperSpoon
-responds with binary `Frame` messages, including an application frame after
-`Hello` and a replacement application frame after a viewport change. It
-retains the last successfully sent frame type for reconnect; a diagnostic
-pattern may therefore reappear after a new `Hello` when its dimensions match.
+responds with binary `Frame` messages. After `Hello`, it sends the last
+successfully sent authoritative frame when its dimensions match; otherwise it
+sends the application UI. A viewport change sends a replacement application
+frame. A matching diagnostic pattern may therefore reappear after reconnect.
 
 PaperSpoon (a std-only Rust listener, `tools/paperspoon`) logs received
 pointer phases and any host-resolved application actions. A dropped connection
@@ -226,9 +226,13 @@ diagnostic pattern, use the same explicit remote viewport dimensions:
 ui 1272x1624
 ```
 
-PaperSpoon prints `sent application frame ...`; PaperPad logs `frame uploaded
-... cache=updated`. PaperSpoon performs matching application hit testing and
-semantic action dispatch for taps on that frame. While a diagnostic pattern
+For a sent application frame, PaperSpoon prints `sent application frame ...`
+and PaperPad logs `frame uploaded ... cache=updated`. Repeating `ui` with the
+same viewport and unchanged application pixels logs `application frame skipped
+unchanged ...` without sending a frame or consuming a frame ID. A viewport
+change, a switch back from a diagnostic pattern, or a new `Hello` still sends
+an authoritative frame. PaperSpoon performs matching application hit testing
+and semantic action dispatch for taps on that frame. While a diagnostic pattern
 is authoritative, host application hit testing is inactive. The 72-pixel
 local Exit strip remains PaperPad-rendered in either case.
 

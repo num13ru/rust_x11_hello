@@ -28,9 +28,9 @@ use std::net::{SocketAddr, TcpListener};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use paper_protocol::{DISCOVERY_PORT, V2PointerPhase};
+use paper_protocol::{DISCOVERY_PORT, Mono1Frame, V2PointerPhase, encode_v2_frame};
 use paperspoon::{
-    application_input::ApplicationInput, application_renderer::encode_application,
+    application_input::ApplicationInput, application_renderer::render_application_bounded,
     application_ui::ApplicationUi,
 };
 
@@ -145,6 +145,7 @@ struct FrameSender {
 struct FrameSenderState {
     next_frame_id: u64,
     authoritative: Option<AuthoritativeFrame>,
+    last_application_frame: Option<Mono1Frame>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -167,15 +168,6 @@ impl AuthoritativeFrame {
             Self::Diagnostic(_) => None,
         }
     }
-
-    fn encode(self, ui: &ApplicationUi, frame_id: u64) -> Result<Vec<u8>, String> {
-        match self {
-            Self::Application { viewport } => {
-                encode_application(frame_id, ui, viewport.0, viewport.1)
-            }
-            Self::Diagnostic(frame) => frame.encode(frame_id),
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -185,6 +177,13 @@ struct SentFrame {
     application_viewport: Option<(u16, u16)>,
     encode_elapsed: Duration,
     socket_write_elapsed: Duration,
+}
+
+#[derive(Debug)]
+enum ApplicationSend {
+    Sent(SentFrame),
+    Unchanged,
+    NoConnection,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -201,6 +200,7 @@ impl FrameSender {
             state: Arc::new(Mutex::new(FrameSenderState {
                 next_frame_id: 1,
                 authoritative: None,
+                last_application_frame: None,
             })),
         }
     }
@@ -241,6 +241,9 @@ impl FrameSender {
         state.next_frame_id = next_frame_id;
         if let Some(frame) = authoritative {
             state.authoritative = Some(frame);
+            if matches!(frame, AuthoritativeFrame::Diagnostic(_)) {
+                state.last_application_frame = None;
+            }
         }
         Ok(Some(SentFrame {
             frame_id,
@@ -251,33 +254,72 @@ impl FrameSender {
         }))
     }
 
-    fn send_authoritative(
-        &self,
-        ui: &ApplicationUi,
-        frame: AuthoritativeFrame,
-    ) -> Result<Option<SentFrame>, String> {
+    fn send_diagnostic(&self, frame: DiagnosticFrame) -> Result<Option<SentFrame>, String> {
         let mut state = self.state.lock().expect("frame sender lock");
         self.send_locked(
             &mut state,
-            |frame_id| frame.encode(ui, frame_id),
-            Some(frame),
+            |frame_id| frame.encode(frame_id),
+            Some(AuthoritativeFrame::Diagnostic(frame)),
         )
-    }
-
-    fn send_diagnostic(
-        &self,
-        ui: &ApplicationUi,
-        frame: DiagnosticFrame,
-    ) -> Result<Option<SentFrame>, String> {
-        self.send_authoritative(ui, AuthoritativeFrame::Diagnostic(frame))
     }
 
     fn send_application(
         &self,
         ui: &ApplicationUi,
         viewport: (u16, u16),
+    ) -> Result<ApplicationSend, String> {
+        let mut state = self.state.lock().expect("frame sender lock");
+        self.send_application_locked(&mut state, ui, viewport, true)
+    }
+
+    fn send_application_locked(
+        &self,
+        state: &mut FrameSenderState,
+        ui: &ApplicationUi,
+        viewport: (u16, u16),
+        suppress_unchanged: bool,
+    ) -> Result<ApplicationSend, String> {
+        let candidate = render_application_bounded(ui, viewport.0, viewport.1)?;
+        if !self.current.is_active() {
+            return Ok(ApplicationSend::NoConnection);
+        }
+        if suppress_unchanged
+            && matches!(state.authoritative, Some(AuthoritativeFrame::Application { viewport: current }) if current == viewport)
+            && state.last_application_frame.as_ref() == Some(&candidate)
+        {
+            return Ok(ApplicationSend::Unchanged);
+        }
+        let sent = self.send_locked(
+            state,
+            |frame_id| {
+                encode_v2_frame(frame_id, &candidate)
+                    .map_err(|error| format!("failed to encode application frame: {error}"))
+            },
+            Some(AuthoritativeFrame::Application { viewport }),
+        )?;
+        match sent {
+            Some(sent) => {
+                state.last_application_frame = Some(candidate);
+                Ok(ApplicationSend::Sent(sent))
+            }
+            None => Ok(ApplicationSend::NoConnection),
+        }
+    }
+
+    fn send_application_for_viewport_change(
+        &self,
+        ui: &ApplicationUi,
+        viewport: (u16, u16),
     ) -> Result<Option<SentFrame>, String> {
-        self.send_authoritative(ui, AuthoritativeFrame::Application { viewport })
+        let mut state = self.state.lock().expect("frame sender lock");
+        state.last_application_frame = None;
+        match self.send_application_locked(&mut state, ui, viewport, false)? {
+            ApplicationSend::Sent(sent) => Ok(Some(sent)),
+            ApplicationSend::NoConnection => Ok(None),
+            ApplicationSend::Unchanged => {
+                Err("viewport replacement was unexpectedly suppressed".to_string())
+            }
+        }
     }
 
     fn send_for_hello(
@@ -290,18 +332,27 @@ impl FrameSender {
             .authoritative
             .filter(|frame| frame.dimensions() == viewport);
         let frame = retained.unwrap_or(AuthoritativeFrame::Application { viewport });
-        self.send_locked(
-            &mut state,
-            |frame_id| frame.encode(ui, frame_id),
-            Some(frame),
-        )
-        .map(|sent| {
-            sent.map(|sent| HelloFrame {
-                sent,
-                retained: retained.is_some(),
-                frame,
-            })
-        })
+        let sent = match frame {
+            AuthoritativeFrame::Application { viewport } => {
+                match self.send_application_locked(&mut state, ui, viewport, false)? {
+                    ApplicationSend::Sent(sent) => Some(sent),
+                    ApplicationSend::NoConnection => None,
+                    ApplicationSend::Unchanged => {
+                        return Err("Hello replacement was unexpectedly suppressed".to_string());
+                    }
+                }
+            }
+            AuthoritativeFrame::Diagnostic(diagnostic) => self.send_locked(
+                &mut state,
+                |frame_id| diagnostic.encode(frame_id),
+                Some(frame),
+            )?,
+        };
+        Ok(sent.map(|sent| HelloFrame {
+            sent,
+            retained: retained.is_some(),
+            frame,
+        }))
     }
 }
 
@@ -314,7 +365,7 @@ fn replace_application_frame(
 ) -> Result<Option<SentFrame>, String> {
     *rendered_viewport = None;
     input.set_viewport(None);
-    let sent = frame_sender.send_application(ui, viewport)?;
+    let sent = frame_sender.send_application_for_viewport_change(ui, viewport)?;
     if sent.is_some() {
         *rendered_viewport = Some(viewport);
         input.set_viewport(Some(viewport));
@@ -397,7 +448,7 @@ fn main() -> io::Result<()> {
                 }
                 match parse_stdin_command(line) {
                     Ok(StdinCommand::Frame(frame)) => {
-                        match frame_sender.send_diagnostic(&application_ui, frame) {
+                        match frame_sender.send_diagnostic(frame) {
                             Ok(Some(sent)) => {
                                 if application_viewport_tx.send(None).is_err() {
                                     eprintln!("application viewport tracker stopped");
@@ -423,7 +474,7 @@ fn main() -> io::Result<()> {
                     }
                     Ok(StdinCommand::ApplicationFrame { width, height }) => {
                         match frame_sender.send_application(&application_ui, (width, height)) {
-                            Ok(Some(sent)) => {
+                            Ok(ApplicationSend::Sent(sent)) => {
                                 if application_viewport_tx.send(Some((width, height))).is_err() {
                                     eprintln!("application viewport tracker stopped");
                                 }
@@ -438,7 +489,15 @@ fn main() -> io::Result<()> {
                                 flush_stdout("after sent application frame");
                                 append_host_log_record(&log_path, &record);
                             }
-                            Ok(None) => {
+                            Ok(ApplicationSend::Unchanged) => {
+                                let record = format!(
+                                    "application frame skipped unchanged width={width} height={height} source=stdin"
+                                );
+                                println!("{record}");
+                                flush_stdout("after skipped application frame");
+                                append_host_log_record(&log_path, &record);
+                            }
+                            Ok(ApplicationSend::NoConnection) => {
                                 eprintln!("application frame not sent: no PaperPad connected");
                             }
                             Err(error) => eprintln!("ui command error: {error}"),
@@ -732,7 +791,7 @@ mod tests {
         let border = diagnostic("frame border 9x9");
 
         let first_sent = frame_sender
-            .send_diagnostic(&ui, border)
+            .send_diagnostic(border)
             .expect("send border")
             .expect("active connection");
         let first = read_sent_frame(&mut first_peer, first_sent);
@@ -743,7 +802,7 @@ mod tests {
         assert!(current.clear_if_current(&token));
         assert_eq!(
             frame_sender
-                .send_diagnostic(&ui, diagnostic("frame checkerboard 9x9"))
+                .send_diagnostic(diagnostic("frame checkerboard 9x9"))
                 .expect("no-connection send"),
             None
         );
@@ -762,7 +821,7 @@ mod tests {
             .expect("shut down broken connection");
         drop(broken_peer);
         frame_sender
-            .send_diagnostic(&ui, diagnostic("frame checkerboard 9x9"))
+            .send_diagnostic(diagnostic("frame checkerboard 9x9"))
             .expect_err("failed write must not replace retained frame");
 
         let (_token, mut second_peer) = install_connection(&listener, &current);
@@ -798,8 +857,10 @@ mod tests {
 
         let first_sent = frame_sender
             .send_application(&ui, (128, 128))
-            .expect("send application")
-            .expect("active connection");
+            .expect("send application");
+        let ApplicationSend::Sent(first_sent) = first_sent else {
+            panic!("expected application frame on active connection");
+        };
         let first = read_sent_frame(&mut first_peer, first_sent);
         assert!(current.clear_if_current(&token));
 
@@ -835,7 +896,7 @@ mod tests {
         let (token, mut first_peer) = install_connection(&listener, &current);
 
         let first_sent = frame_sender
-            .send_diagnostic(&ui, diagnostic("frame border 9x9"))
+            .send_diagnostic(diagnostic("frame border 9x9"))
             .expect("send diagnostic")
             .expect("active connection");
         let _ = read_sent_frame(&mut first_peer, first_sent);
@@ -910,6 +971,165 @@ mod tests {
         .expect_err("zero-width replacement must fail");
         assert!(!input.is_active());
         assert_eq!(rendered_viewport, None);
+    }
+
+    #[test]
+    fn unchanged_application_pixels_skip_without_consuming_an_id() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind listener");
+        let current = CurrentConnection::default();
+        let frame_sender = FrameSender::new(current.clone());
+        let (_token, mut peer) = install_connection(&listener, &current);
+        let mut ui = ApplicationUi::default();
+
+        let ApplicationSend::Sent(first) = frame_sender
+            .send_application(&ui, (128, 128))
+            .expect("first application render")
+        else {
+            panic!("first application frame must be sent");
+        };
+        let first_pixels = read_sent_frame(&mut peer, first).2;
+        peer.set_nonblocking(true).expect("nonblocking peer");
+        assert!(matches!(
+            frame_sender.send_application(&ui, (128, 128)),
+            Ok(ApplicationSend::Unchanged)
+        ));
+        assert_eq!(
+            peer.read(&mut [0; 1])
+                .expect_err("no duplicate frame")
+                .kind(),
+            io::ErrorKind::WouldBlock
+        );
+        assert_eq!(
+            frame_sender
+                .state
+                .lock()
+                .expect("frame sender lock")
+                .next_frame_id,
+            2
+        );
+        peer.set_nonblocking(false).expect("blocking peer");
+
+        ui.set_status("ready");
+        let ApplicationSend::Sent(changed) = frame_sender
+            .send_application(&ui, (128, 128))
+            .expect("changed application render")
+        else {
+            panic!("changed application frame must be sent");
+        };
+        assert_eq!(changed.frame_id, 2);
+        assert_ne!(read_sent_frame(&mut peer, changed).2, first_pixels);
+    }
+
+    #[test]
+    fn viewport_change_and_diagnostic_switch_force_application_frames() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind listener");
+        let current = CurrentConnection::default();
+        let frame_sender = FrameSender::new(current.clone());
+        let (_token, mut peer) = install_connection(&listener, &current);
+        let ui = ApplicationUi::default();
+
+        let ApplicationSend::Sent(first) = frame_sender
+            .send_application(&ui, (128, 128))
+            .expect("first application frame")
+        else {
+            panic!("first application frame must be sent");
+        };
+        read_sent_frame(&mut peer, first);
+
+        let resized = frame_sender
+            .send_application_for_viewport_change(&ui, (129, 128))
+            .expect("viewport replacement")
+            .expect("active connection");
+        assert_eq!(read_sent_frame(&mut peer, resized).1, (129, 128));
+
+        let restored = frame_sender
+            .send_application_for_viewport_change(&ui, (128, 128))
+            .expect("restored viewport")
+            .expect("active connection");
+        assert_eq!(read_sent_frame(&mut peer, restored).1, (128, 128));
+
+        let diagnostic = frame_sender
+            .send_diagnostic(diagnostic("frame white 128x128"))
+            .expect("diagnostic frame")
+            .expect("active connection");
+        read_sent_frame(&mut peer, diagnostic);
+        let ApplicationSend::Sent(application) = frame_sender
+            .send_application(&ui, (128, 128))
+            .expect("return to application")
+        else {
+            panic!("application after diagnostic must be sent");
+        };
+        assert_eq!(application.frame_id, 5);
+        read_sent_frame(&mut peer, application);
+    }
+
+    #[test]
+    fn failed_application_send_does_not_advance_baseline_and_hello_resends() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind listener");
+        let current = CurrentConnection::default();
+        let frame_sender = FrameSender::new(current.clone());
+        let (token, mut first_peer) = install_connection(&listener, &current);
+        let mut ui = ApplicationUi::default();
+        let ApplicationSend::Sent(first) = frame_sender
+            .send_application(&ui, (128, 128))
+            .expect("first application frame")
+        else {
+            panic!("first application frame must be sent");
+        };
+        let first_pixels = read_sent_frame(&mut first_peer, first).2;
+
+        ui.set_status("changed");
+        assert!(current.clear_if_current(&token));
+        drop(first_peer);
+        let broken_client = TcpStream::connect(listener.local_addr().expect("listener address"))
+            .expect("connect broken client");
+        let (broken_peer, _) = listener.accept().expect("accept broken client");
+        let broken_token = current
+            .install(&broken_client)
+            .expect("install broken client");
+        broken_client
+            .shutdown(Shutdown::Both)
+            .expect("shut down broken client");
+        drop(broken_peer);
+        frame_sender
+            .send_application(&ui, (128, 128))
+            .expect_err("failed socket write");
+        let state = frame_sender.state.lock().expect("frame sender lock");
+        assert_eq!(state.next_frame_id, 2);
+        assert_eq!(
+            state
+                .last_application_frame
+                .as_ref()
+                .expect("last successfully sent application frame")
+                .pixels(),
+            first_pixels
+        );
+        drop(state);
+        assert!(!current.clear_if_current(&broken_token));
+        assert!(matches!(
+            frame_sender.send_application(&ui, (128, 128)),
+            Ok(ApplicationSend::NoConnection)
+        ));
+
+        let (_token, mut second_peer) = install_connection(&listener, &current);
+        let mut input = ApplicationInput::default();
+        let mut rendered_viewport = None;
+        let resent = replace_hello_frame(
+            &frame_sender,
+            &ui,
+            &mut input,
+            &mut rendered_viewport,
+            (128, 128),
+        )
+        .expect("Hello replacement")
+        .expect("active connection");
+        assert_eq!(resent.sent.frame_id, 2);
+        assert!(input.is_active());
+        read_sent_frame(&mut second_peer, resent.sent);
+        assert!(matches!(
+            frame_sender.send_application(&ui, (128, 128)),
+            Ok(ApplicationSend::Unchanged)
+        ));
     }
 
     #[test]
