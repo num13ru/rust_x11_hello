@@ -4,17 +4,16 @@
 //! [`crate::ui::button::PointerEvent`]. Rendering is delegated to the sibling
 //! adapter, and the UI layer never sees X11 types.
 
-use super::framebuffer::{PreparedBitmap, X11BitmapAdapter};
-use super::render::draw;
+use super::backend::X11DisplayBackend;
 
 use crate::app::{Activation, AppState, GeometryUpdate, Redraw, RemotePointerEvent};
-use crate::display::RemoteFrameCache;
+use crate::display::{DisplayBackend, RedrawCause, RemoteFrame};
 use crate::net::Paperspoon;
 use crate::ui::button::{PointerEvent, PointerEventKind};
 use crate::ui::screen::{PhysicalPoint, ScreenLayout};
 use anyhow::{Context, Result, anyhow};
 use paper_protocol::V2PointerPhase;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
 use x11rb::protocol::xproto::{ButtonPressEvent, ConnectionExt, Gcontext, Window};
@@ -35,82 +34,25 @@ pub fn event_loop(
     initial_size: (u16, u16),
     paperspoon: &mut Paperspoon,
 ) -> Result<EventLoopExit> {
-    let mut app = AppState::new(initial_size);
-    let framebuffer_adapter = match X11BitmapAdapter::from_connection(conn) {
-        Ok(adapter) => {
-            eprintln!("framebuffer adapter ready {adapter}");
-            Some(adapter)
-        }
-        Err(error) => {
-            eprintln!("framebuffer adapter unavailable: {error:#}");
-            None
-        }
-    };
-    let mut remote_frame_cache = RemoteFrameCache::default();
+    let mut display = X11DisplayBackend::new(conn, win, gc, initial_size);
+    let mut app = AppState::new(display.dimensions());
 
     loop {
         if let Some(frame) = paperspoon.poll_frame() {
-            let receive_decode_us = frame.receive_decode_us();
-            match framebuffer_adapter.as_ref() {
-                Some(adapter) => {
-                    let prepare_started = Instant::now();
-                    let prepared = adapter.prepare(frame.width(), frame.height(), frame.pixels());
-                    let prepare_us = prepare_started.elapsed().as_micros();
-                    match prepared {
-                        Ok(bitmap) => {
-                            // Checked PutImage requests and flush are included in upload time.
-                            let upload_started = Instant::now();
-                            let uploaded = adapter.blit(
-                                conn,
-                                win,
-                                gc,
-                                remote_viewport_origin(app.size()),
-                                &bitmap,
-                            );
-                            let x11_upload_us = upload_started.elapsed().as_micros();
-                            match uploaded {
-                                Ok(chunks) => {
-                                    eprintln!(
-                                        "frame uploaded id={} width={} height={} wire_stride={} wire_bytes={} x11_stride={} x11_bytes={} chunks={} receive_decode_us={receive_decode_us} prepare_us={prepare_us} x11_upload_us={x11_upload_us} cache=updated",
-                                        frame.frame_id(),
-                                        frame.width(),
-                                        frame.height(),
-                                        frame.stride(),
-                                        frame.pixels().len(),
-                                        bitmap.stride(),
-                                        bitmap.bytes().len(),
-                                        chunks
-                                    );
-                                    remote_frame_cache.replace(
-                                        frame.frame_id(),
-                                        frame.width(),
-                                        frame.height(),
-                                        bitmap,
-                                    );
-                                }
-                                Err(error) => eprintln!(
-                                    "frame upload error id={} width={} height={} receive_decode_us={receive_decode_us} prepare_us={prepare_us} x11_upload_us={x11_upload_us}: {error:#}",
-                                    frame.frame_id(),
-                                    frame.width(),
-                                    frame.height()
-                                ),
-                            }
-                        }
-                        Err(error) => eprintln!(
-                            "frame prepare error id={} width={} height={} receive_decode_us={receive_decode_us} prepare_us={prepare_us}: {error:#}",
-                            frame.frame_id(),
-                            frame.width(),
-                            frame.height()
-                        ),
-                    }
-                }
-                None => eprintln!(
-                    "frame accepted id={} width={} height={} stride={} bytes={} receive_decode_us={receive_decode_us} render=unavailable",
+            match RemoteFrame::new(
+                frame.frame_id(),
+                frame.width(),
+                frame.height(),
+                frame.stride(),
+                frame.pixels(),
+                frame.receive_decode_us(),
+            ) {
+                Ok(frame) => display.display_remote_frame(frame),
+                Err(error) => eprintln!(
+                    "frame validation error id={} width={} height={}: {error}",
                     frame.frame_id(),
                     frame.width(),
-                    frame.height(),
-                    frame.stride(),
-                    frame.pixels().len()
+                    frame.height()
                 ),
             }
         }
@@ -124,16 +66,8 @@ pub fn event_loop(
 
         match event {
             Event::Expose(event) if event.window == win && event.count == 0 => {
-                draw_surface(
-                    conn,
-                    win,
-                    gc,
-                    app.redraw(),
-                    framebuffer_adapter.as_ref(),
-                    &remote_frame_cache,
-                    "Expose",
-                )
-                .context("failed to redraw final Expose batch")?;
+                draw_surface(&display, app.redraw(), RedrawCause::SurfaceDamage)
+                    .context("failed to redraw final Expose batch")?;
             }
             Event::Expose(_) => {}
             Event::ConfigureNotify(event) if event.window == win => {
@@ -151,7 +85,7 @@ pub fn event_loop(
                         if let Err(error) = paperspoon.send_viewport_changed(viewport) {
                             eprintln!("transport error sending viewport change: {error:#}");
                         }
-                        if let Some(frame) = remote_frame_cache.invalidate_mismatched(viewport) {
+                        if let Some(frame) = display.set_dimensions((width, height)) {
                             eprintln!(
                                 "frame cache invalidated id={} width={} height={} viewport_width={} viewport_height={}",
                                 frame.frame_id(),
@@ -165,16 +99,8 @@ pub fn event_loop(
                             "event type=ConfigureNotify x={} y={} width={width} height={height} window=0x{:x}",
                             event.x, event.y, event.window
                         );
-                        draw_surface(
-                            conn,
-                            win,
-                            gc,
-                            redraw,
-                            framebuffer_adapter.as_ref(),
-                            &remote_frame_cache,
-                            "ConfigureNotify",
-                        )
-                        .context("failed to redraw after ConfigureNotify")?;
+                        draw_surface(&display, redraw, RedrawCause::GeometryChange)
+                            .context("failed to redraw after ConfigureNotify")?;
                     }
                 }
             }
@@ -260,54 +186,10 @@ pub(crate) fn remote_viewport_size(physical_size: (u16, u16)) -> (u16, u16) {
         .unwrap_or((0, 0))
 }
 
-fn remote_viewport_origin(physical_size: (u16, u16)) -> (i16, i16) {
-    ScreenLayout::new(physical_size.0, physical_size.1)
-        .map(|layout| {
-            (
-                layout.remote_viewport.x as i16,
-                layout.remote_viewport.y as i16,
-            )
-        })
-        .unwrap_or((0, 0))
-}
-
-fn draw_local_ui(conn: &RustConnection, win: Window, gc: Gcontext, redraw: Redraw) -> Result<()> {
-    let (width, height) = redraw.size();
-    draw(conn, win, gc, width, height)
-}
-
-fn draw_surface(
-    conn: &RustConnection,
-    win: Window,
-    gc: Gcontext,
-    redraw: Redraw,
-    framebuffer_adapter: Option<&X11BitmapAdapter>,
-    remote_frame_cache: &RemoteFrameCache<PreparedBitmap>,
-    cause: &str,
-) -> Result<()> {
-    let size = redraw.size();
-    draw_local_ui(conn, win, gc, redraw)?;
-
-    let (Some(adapter), Some(frame)) = (framebuffer_adapter, remote_frame_cache.current()) else {
-        return Ok(());
-    };
-    match adapter.blit(conn, win, gc, remote_viewport_origin(size), frame.payload()) {
-        Ok(chunks) => eprintln!(
-            "frame redrawn id={} width={} height={} chunks={} cause={} cache=hit",
-            frame.frame_id(),
-            frame.dimensions().0,
-            frame.dimensions().1,
-            chunks,
-            cause
-        ),
-        Err(error) => eprintln!(
-            "frame redraw error id={} width={} height={} cause={}: {error:#}",
-            frame.frame_id(),
-            frame.dimensions().0,
-            frame.dimensions().1,
-            cause
-        ),
-    }
+fn draw_surface(display: &dyn DisplayBackend, redraw: Redraw, cause: RedrawCause) -> Result<()> {
+    debug_assert_eq!(display.dimensions(), redraw.size());
+    display.draw_system_ui()?;
+    display.redraw_cached_frame(cause);
     Ok(())
 }
 
@@ -391,6 +273,5 @@ mod tests {
         assert_eq!(remote_viewport_size((1272, 1696)), (1272, 1624));
         assert_eq!(remote_viewport_size((100, 40)), (100, 0));
         assert_eq!(remote_viewport_size((0, 40)), (0, 0));
-        assert_eq!(remote_viewport_origin((1272, 1696)), (0, 0));
     }
 }
