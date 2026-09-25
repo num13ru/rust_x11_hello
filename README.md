@@ -1,8 +1,10 @@
 # Paperpad
 
-Paperpad is a bounded Kindle/KUAL grid remote. It translates core X11 touch
-events into stable semantic actions, sends them over Wi-Fi to the PaperSpoon
-macOS companion, and renders short status commands returned by PaperSpoon.
+PaperPad is a bounded Kindle/KUAL remote framebuffer client. It displays the
+application UI rendered by the PaperSpoon macOS companion, forwards
+viewport-relative core X11 pointer events over Wi-Fi, and owns a separate
+device-local Exit control. PaperSpoon handles application hit testing and
+semantic actions.
 
 The repository, Cargo package, device binary, environment variables, and
 extension path retain the MVP identifier `rust_x11_hello`. The KUAL launcher
@@ -16,19 +18,19 @@ revalidating the recorded PID and executable.
 | --- | --- |
 | Process setup and teardown | `src/main.rs` |
 | Environment parsing and validation | `src/config.rs` |
-| UI state and activation decisions | `src/app.rs`, using pure logic from `src/ui/` |
+| Remote pointer normalization and local Exit decisions | `src/app.rs`, using pure logic from `src/ui/` |
 | X11 resources, event translation, and rendering | `src/x11/` |
-| Paperpad TCP lifecycle, workers, queues, and display mailbox | `src/net/` |
+| PaperPad TCP lifecycle, workers, pointer queue, and frame mailbox | `src/net/` |
 | Unique-endpoint discovery policy | `src/discovery.rs` |
 | Shared wire constants, framebuffer representation, formatting, and parsing | `crates/paper-protocol/` |
-| PaperSpoon listener, current connection, discovery responder, and forwarding | `tools/paperspoon/` |
+| PaperSpoon listener, application rendering/input, discovery responder, and forwarding | `tools/paperspoon/` |
 | KUAL lifecycle and MTP packaging | `kindle-extension/` and `scripts/deploy-kindle-mtp.sh` |
 
 The dependency direction is deliberate: protocol code depends only on
-`std`; UI geometry and decisions know nothing about X11 or sockets; X11 and
-network modules adapt external events into those decisions. The X11 thread
+`std`; PaperPad's viewport and Exit logic know nothing about X11 or sockets;
+PaperSpoon owns application geometry and contact decisions. The X11 thread
 owns the window and `AppState`. Network workers own blocking connection work,
-with actions crossing a bounded queue and display updates crossing a
+with pointer messages crossing a bounded queue and frames crossing a
 single-slot latest-value mailbox.
 
 ## Conditions under which this works
@@ -43,29 +45,26 @@ single-slot latest-value mailbox.
 ## Geometry-aware rendering
 
 - The app opens a borderless window at `(0,0)` covering the selected X11 screen. The Paperwhite 6 reports `1272 x 1696` in portrait; runtime dimensions come from X11 rather than a fixed device resolution.
-- Paperpad partitions that physical extent into a top remote-content viewport and a fixed 72px Paperpad-owned system strip at the bottom. On the Paperwhite the remote viewport is `(0,0) 1272 x 1624`, and the system strip is `(0,1624) 1272 x 72`. PaperSpoon must render only the remote viewport.
-- Each of the nine grid cells is square, with side length `(screen width / 3) - (20 * 2)` using integer division. On this Kindle, cells are `384 x 384`, with 20px outer margins and 40px gaps between rows and columns. Any division remainder is absorbed by the column gaps so both outer edges stay aligned.
-- The title sits above the grid. Exit occupies the local bottom strip, spanning `screen width - 40px` with 20px horizontal margins. The transitional 40px PaperSpoon `display` status strip remains inside the bottom of the remote viewport, immediately above Exit.
-- Shorter windows reduce the cell side to fit the application grid and status strip inside the remote viewport without stretching the cells. Windows too small for the application layout have no application buttons; local Exit remains available whenever the window is at least 41px wide and 72px tall. Layout coordinates are capped at X11's signed-coordinate limit.
-- The final event in each `Expose` batch clears and redraws the current window extent.
-- A size-changing `ConfigureNotify` updates drawing and hit testing together and cancels an active contact. Duplicate geometry is ignored; a zero-width/zero-height report is logged without replacing the last valid extent.
+- PaperPad partitions that physical extent into a top remote-content viewport and a fixed 72px PaperPad-owned system strip at the bottom. On the Paperwhite the remote viewport is `(0,0) 1272 x 1624`, and the system strip is `(0,1624) 1272 x 72`. PaperSpoon must render only the remote viewport.
+- PaperSpoon's application layout uses square grid cells. On this Kindle, cells are `384 x 384`, with 20px outer margins and 40px gaps between rows and columns. Any division remainder is absorbed by the column gaps so both outer edges stay aligned.
+- PaperSpoon draws the title above the grid and reserves a 40px status region within the remote viewport. PaperPad draws Exit in its local bottom strip, spanning `screen width - 40px` with 20px horizontal margins. The status region is not a `display` command target.
+- For shorter viewports, PaperSpoon reduces the cell side to fit the grid and status region without stretching cells; sufficiently small viewports have no application buttons. PaperPad's Exit remains available whenever the window is at least 41px wide and 72px tall. Device layout coordinates are capped at X11's signed-coordinate limit.
+- The final event in each `Expose` batch redraws PaperPad's local UI and the last successfully uploaded remote frame, if cached.
+- A size-changing `ConfigureNotify` updates PaperPad's viewport and Exit geometry, clears its local contact state, and queues `ViewportChanged` for PaperSpoon. Duplicate geometry is ignored; a zero-width/zero-height report is logged without replacing the last valid extent.
 
-Host tests cover the portrait layout, smaller and landscape windows, division remainders, gaps, aligned Exit bounds, and zero/maximum dimensions. ARM/static checks verify buildability. Full-screen rendering and touch behavior still require a physical Kindle run.
+Host tests cover the host application layout and input decisions, PaperPad viewport and Exit geometry, smaller and landscape windows, division remainders, gaps, and zero/maximum dimensions. ARM/static checks verify buildability. Full-screen rendering and touch behavior still require a physical Kindle run.
 
 ## Logical hit testing
 
-The remote viewport contains nine logical application buttons in a 3×3 grid. The bottom system strip contains a separate local Exit control. Their geometry is independent of X11 event structures and uses half-open bounds, so trailing edges and gaps do not activate a control.
+The remote viewport contains PaperSpoon's nine application buttons in a 3×3 grid. The bottom system strip contains PaperPad's separate local Exit control. Both use half-open bounds, so trailing edges and gaps do not activate a control.
 
-X11 pointer events use signed, physical window coordinates. Paperpad maps application contacts into unsigned coordinates relative to the remote viewport before application hit testing; physical points in the system strip or outside the window have no remote coordinate. A primary release without a remote coordinate cancels any armed application contact, while local Exit hit testing remains in physical coordinates.
+X11 pointer events use signed, physical window coordinates. PaperPad maps contacts inside the remote viewport to unsigned viewport-relative coordinates and sends binary `PointerDown`/`PointerUp` messages to PaperSpoon. Physical points in the system strip or outside the window have no remote coordinate. If a remote contact ends outside the viewport, PaperPad sends an out-of-bounds `PointerUp` to cancel it. Exit hit testing remains local, in physical coordinates.
 
-Only core-X11 `detail=1` participates in UI activation. A primary press arms the button under the initial coordinate; a matching primary release activates only when it remains inside that same button and emits:
-```text
-ui action=activate button=4 semantic=terminal.new_window
-```
-
-Every application-grid activation also emits its stable semantic action id.
-Exit is a Paperpad-local lifecycle control and never produces a remote semantic
-action. The current application grid maps buttons 1–9 to:
+Only core-X11 `detail=1` participates in remote pointer forwarding or local
+Exit activation. PaperSpoon arms an application button on a primary down and
+resolves an action only when the matching up remains inside that button.
+Exit is a PaperPad-local lifecycle control and sends no remote pointer or
+semantic action. PaperSpoon maps buttons 1–9 to:
 
 | Button | Semantic action id |
 | ------ | ------------------ |
@@ -79,20 +78,19 @@ action. The current application grid maps buttons 1–9 to:
 | 8 | `stub.button_8` |
 | 9 | `stub.button_9` |
 
-Exit has its own Paperpad `SystemUi` geometry and contact state rather than an
+Exit has its own PaperPad `SystemUi` geometry and contact state rather than an
 application button ID. Its activation is logged as `ui action=activate
 system=exit` and closes the window without writing to PaperSpoon.
 
-Buttons 7–9 send placeholder action IDs for future companion bindings. Rendering
-and touch behavior remain device-specific and must be rechecked after changes
-to geometry, event translation, or the X11 adapter.
+Buttons 7–9 resolve to placeholder action IDs for future companion bindings.
+Rendering and touch behavior remain device-specific and must be rechecked
+after changes to geometry, event translation, or the X11 adapter.
 
-These dotted ids are the wire units of the semantic protocol; the transport
-that carries them is described below. USBNetwork itself is not used: no
-maintained USBNetwork package targets this Paperwhite 6, so the transport is
-Wi-Fi.
+These dotted IDs are resolved on the host, not sent over the Kindle wire.
+USBNetwork itself is not used: no maintained USBNetwork package targets this
+Paperwhite 6, so the transport is Wi-Fi.
 
-Presses outside the grid, releases in another button or outside the grid, repeated primary presses, geometry changes, and window unmapping cancel the contact. Unmatched releases do nothing. Auxiliary details such as the observed Kindle `detail=6` and `detail=9` pairs retain their raw diagnostic lines but neither activate nor cancel the armed primary contact. Pointer motion remains unlogged.
+Presses in gaps cannot arm an application button. PaperSpoon cancels an armed contact on releases in another button or outside the grid, repeated primary downs, and viewport changes. PaperPad clears its local remote-contact state on geometry changes or window unmapping; these local cancellations do not themselves send a remote `PointerUp`. Unmatched releases do nothing. Auxiliary details such as the observed Kindle `detail=6` and `detail=9` pairs retain their raw diagnostic lines but neither activate nor cancel the armed primary contact. Pointer motion remains unlogged.
 
 ## Framebuffer protocol primitives
 
@@ -102,42 +100,26 @@ Protocol v2 also defines a 12-byte, big-endian binary header containing `PPFB` m
 
 Typed, big-endian payloads cover `Hello` (version, Mono1 support, remote viewport), `PointerDown`/`PointerUp` (viewport-relative `x/y`), `ViewportChanged` (new remote extent), and `Frame` (`u64` frame ID, extent, Mono1 format, pixels). Reserved payload bytes must be zero. Frame payloads are validated as borrowed bytes without copying; pointer bounds and frame dimensions remain the receiving endpoint's responsibility against its current negotiated viewport.
 
-PaperPad's inbound TCP reader now accepts complete `PPFB` v2 `Frame` messages alongside transitional `display` lines. Frames are validated against the current remote viewport and coalesced into a latest-frame mailbox. Corrupt or unexpected v2 messages end the connection and use the existing reconnect path; dimension mismatches are logged and skipped without replacing a valid pending frame.
+PaperPad's inbound TCP reader accepts complete `PPFB` v2 `Frame` messages only. Frames are validated against the current remote viewport and coalesced into a latest-frame mailbox. Legacy text, corrupt messages, and unexpected v2 message types end the connection and use the existing reconnect path; dimension mismatches are logged and skipped without replacing a valid pending frame.
 
-The X11 bitmap adapter converts accepted Mono1 frames to the server-advertised XYBitmap representation. It handles 8/16/32-bit scanline units, independent image-byte and bitmap-bit order, scanline padding, and whole-row chunking within the server's maximum request size. Each newly received frame is uploaded with checked depth-1 `PutImage` requests, confined to the remote viewport; the existing GC maps `1` to black and `0` to white. Unsupported formats, conversion failures, and X11 upload errors are logged without intentionally ending the event loop, leaving the local Exit region untouched. This transitional step does not cache frames yet, so an Expose or legacy redraw replaces the remote pixels until a later frame arrives. The line-oriented semantic action path and local Exit remain active until framebuffer rendering is implemented and verified.
+The X11 bitmap adapter converts accepted Mono1 frames to the server-advertised XYBitmap representation. It handles 8/16/32-bit scanline units, independent image-byte and bitmap-bit order, scanline padding, and whole-row chunking within the server's maximum request size. Each newly received frame is uploaded with checked depth-1 `PutImage` requests, confined to the remote viewport; the existing GC maps `1` to black and `0` to white. Only a successful upload replaces the cached frame. PaperPad redraws that frame after X11 `Expose` or same-viewport geometry redraws, and invalidates it when the viewport size changes. Unsupported formats, conversion failures, and X11 upload errors are logged without intentionally ending the event loop; they do not replace the cache or touch the local Exit region.
 
 ## TCP transport (Wi-Fi)
 
-The Kindle opens one persistent TCP connection to PaperSpoon on launch.
-Each activation sends one newline-terminated protocol line over that
-connection:
+The Kindle connects to PaperSpoon over TCP and sends a binary v2 `Hello` with
+the remote viewport size. While connected, it sends viewport-relative
+`PointerDown`/`PointerUp` and size changes as `ViewportChanged`. PaperSpoon
+responds with binary `Frame` messages, including an application frame after
+`Hello` and a replacement application frame after a viewport change. It
+retains the last successfully sent frame type for reconnect; a diagnostic
+pattern may therefore reappear after a new `Hello` when its dimensions match.
 
-```text
-event action=<semantic-id>;
-```
-
-PaperSpoon (a std-only Rust listener, `tools/paperspoon`) prints each
-received line and appends it to a log file. It also forwards lines typed on
-its stdin to the Kindle as control commands:
-
-```text
-display <text>
-```
-
-which renders `<text>` in the window's status strip (below the exit bar)
-and is logged on the device as `display: <text>`.
-
-Display commands are case-sensitive. Paperpad accepts `display <text>` and
-the manual-terminal alias `display:<text>`; it trims surrounding payload
-whitespace and ignores empty commands or other strings beginning with
-`display`.
-
-Control lines must be valid UTF-8 and remain bounded by the 8 KiB inbound-line
-limit. For the Kindle core X11 font, Paperpad preserves printable ASCII
-(`U+0020..=U+007E`), renders control and non-ASCII Unicode scalars as `?`, and
-draws at most 255 output bytes. Longer status text is truncated at that
-rendering boundary without terminating the app; diagnostics retain the
-original received text.
+PaperSpoon (a std-only Rust listener, `tools/paperspoon`) logs received
+pointer phases and any host-resolved application actions. A dropped connection
+starts PaperPad's reconnect path. Pointer events attempted while disconnected
+or when its bounded outbound queue is full are not replayed; the next
+connection sends a fresh `Hello` and receives an authoritative frame. PaperPad
+keeps its local Exit available throughout.
 
 ### Zero-config discovery (verified on this Paperwhite 6)
 
@@ -208,12 +190,11 @@ discovery chain (Test B), PaperPad restart (Test C), Mac DHCP address change
 bounded failure with the UI alive when PaperSpoon is absent (Test E).
 
 A PaperSpoon that is unreachable costs bounded time per attempt and is logged
-on the device; it never breaks the X11 event loop or the on-device activation
-log. PaperPad retries in the background every two seconds. Actions made while
+on the device; it never breaks the X11 event loop or the on-device input log.
+PaperPad retries in the background. Pointer messages attempted while
 disconnected fail immediately and are not queued or replayed after connection.
-The Kindle opens no listening TCP socket. During this transitional step,
-semantic action IDs leave the device while `display` commands and validated v2
-`Frame` messages can enter it.
+The Kindle opens no listening TCP socket. No application action IDs or text
+display commands cross the TCP connection.
 
 ### Running PaperSpoon
 
@@ -224,14 +205,9 @@ cargo build --release --package paperspoon
 ./target/release/paperspoon 5581 /tmp/paperspoon.log
 ```
 
-Then type a display command at its stdin:
-
-```text
-display hello
-```
-
-To exercise framebuffer transport and the X11 blitter, send a diagnostic frame
-whose dimensions exactly match PaperPad's current remote viewport. The standard
+The application UI is sent after PaperPad's `Hello`. To exercise framebuffer
+transport and the X11 blitter, type a diagnostic frame command at PaperSpoon's
+stdin whose dimensions exactly match PaperPad's current remote viewport. The standard
 Paperwhite portrait viewport is `1272x1624`:
 
 ```text
@@ -251,29 +227,28 @@ ui 1272x1624
 ```
 
 PaperSpoon prints `sent application frame ...`; PaperPad logs `frame uploaded
-... cache=updated`. During this transitional step, PaperPad still performs the
-matching application hit testing and semantic action forwarding, so the remote
-pixels can be checked against the existing tap behavior before pointer handling
-moves to the host. The 72-pixel local Exit strip remains PaperPad-rendered.
+... cache=updated`. PaperSpoon performs matching application hit testing and
+semantic action dispatch for taps on that frame. While a diagnostic pattern
+is authoritative, host application hit testing is inactive. The 72-pixel
+local Exit strip remains PaperPad-rendered in either case.
 
 Patterns are generated as validated Mono1 frames and assigned increasing frame
 IDs. PaperSpoon prints `sent frame ...`; PaperPad logs `frame uploaded ...
 cache=updated`. A mismatched extent or failed upload does not replace the last
 successfully displayed frame. PaperPad redraws that cached frame after X11
-Expose, legacy status, and same-viewport geometry redraws; successful cache
+Expose and same-viewport geometry redraws; successful cache
 redraws log `frame redrawn ... cache=hit`. A viewport-size change invalidates
 the old cache rather than stretching or clipping it.
 
 For the manual device check, verify the four differently sized blocks in
 `corners` occupy the expected corners, the `border` reaches the remote
 viewport's rightmost pixel and bottom row, black/white polarity is correct, and
-no pattern overwrites the 72-pixel local Exit strip. Press Exit after a frame to
-confirm it remains device-local and responsive. After a valid frame, send
-`display cache-check` and confirm the frame remains visible while PaperPad logs
-`frame redrawn ... cause=display cache=hit`. Stop PaperSpoon, trigger an X11
-Expose (brief sleep/wake on the tested Paperwhite), and confirm the cached frame
-returns without the host. A deliberately mismatched frame such as
-`frame white 1272x1623` must not replace the cached valid frame.
+no pattern overwrites the 72-pixel local Exit strip. A deliberately mismatched
+frame such as `frame white 1272x1623` must not replace the cached valid frame.
+In a separate run, stop PaperSpoon, trigger an X11 Expose (brief sleep/wake on
+the tested Paperwhite), and confirm the cached frame returns without the host;
+PaperPad logs `frame redrawn ... cause=Expose cache=hit`. Press Exit after a
+frame to confirm it remains device-local and responsive.
 
 For a Wi-Fi run, the listener binds `0.0.0.0` on TCP 5581 **and** starts the
 UDP discovery responder on `0.0.0.0:5580` (you should see both the TCP
@@ -289,8 +264,9 @@ advertises that actual port rather than `0` or the default.
 
 ### Hammering actions into the Mac (Hammerspoon)
 
-PaperSpoon forwards every received action line to Hammerspoon as a URL event:
-it runs `open -g hammerspoon://paperpad?action=<id>` once per action.
+PaperSpoon forwards each host-resolved application action to Hammerspoon as a
+URL event: it runs `open -g hammerspoon://paperpad?action=<id>` once per
+activation.
 Forwarding is on by default; pass `--no-forward-url` to disable it:
 
 ```sh
@@ -311,8 +287,10 @@ at `tools/hammerspoon/init.example.lua`) via `hs.urlevent.bind("paperpad",
   shortcuts (`cmd+n`, `cmd+shift+a`);
 - unknown ids raise a notification.
 
-`hs.urlevent` fires exactly once per URL open, so every Kindle tap dispatches
-exactly one action — no sockets to manage, no timers, no replay loops.
+Only a completed tap within the same host-rendered button resolves an action.
+PaperSpoon logs `host action button=... semantic=... dispatch=...` for that
+attempt. Hammerspoon delivery and the target application's response still
+depend on the host environment; no device-side replay is performed.
 
 ## Host checks and Kindle build
 
