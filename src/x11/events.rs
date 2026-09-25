@@ -13,7 +13,7 @@ use crate::ui::button::{PointerEvent, PointerEventKind};
 use crate::ui::screen::{PhysicalPoint, ScreenLayout};
 use anyhow::{Context, Result, anyhow};
 use paper_protocol::V2PointerPhase;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
 use x11rb::protocol::xproto::{ButtonPressEvent, ConnectionExt, Gcontext, Window};
@@ -91,42 +91,51 @@ pub fn event_loop(
         if let Some(frame) = paperspoon.poll_frame() {
             match framebuffer_adapter.as_ref() {
                 Some(adapter) => {
-                    match adapter.prepare(frame.width(), frame.height(), frame.pixels()) {
-                        Ok(bitmap) => match adapter.blit(
-                            conn,
-                            win,
-                            gc,
-                            remote_viewport_origin(app.size()),
-                            &bitmap,
-                        ) {
-                            Ok(chunks) => {
-                                eprintln!(
-                                    "frame uploaded id={} width={} height={} wire_stride={} wire_bytes={} x11_stride={} x11_bytes={} chunks={} cache=updated",
+                    let prepare_started = Instant::now();
+                    let prepared = adapter.prepare(frame.width(), frame.height(), frame.pixels());
+                    let prepare_us = prepare_started.elapsed().as_micros();
+                    match prepared {
+                        Ok(bitmap) => {
+                            // Checked PutImage requests and flush are included in upload time.
+                            let upload_started = Instant::now();
+                            let uploaded = adapter.blit(
+                                conn,
+                                win,
+                                gc,
+                                remote_viewport_origin(app.size()),
+                                &bitmap,
+                            );
+                            let x11_upload_us = upload_started.elapsed().as_micros();
+                            match uploaded {
+                                Ok(chunks) => {
+                                    eprintln!(
+                                        "frame uploaded id={} width={} height={} wire_stride={} wire_bytes={} x11_stride={} x11_bytes={} chunks={} prepare_us={prepare_us} x11_upload_us={x11_upload_us} cache=updated",
+                                        frame.frame_id(),
+                                        frame.width(),
+                                        frame.height(),
+                                        frame.stride(),
+                                        frame.pixels().len(),
+                                        bitmap.stride(),
+                                        bitmap.bytes().len(),
+                                        chunks
+                                    );
+                                    remote_frame_cache.replace(
+                                        frame.frame_id(),
+                                        frame.width(),
+                                        frame.height(),
+                                        bitmap,
+                                    );
+                                }
+                                Err(error) => eprintln!(
+                                    "frame upload error id={} width={} height={} prepare_us={prepare_us} x11_upload_us={x11_upload_us}: {error:#}",
                                     frame.frame_id(),
                                     frame.width(),
-                                    frame.height(),
-                                    frame.stride(),
-                                    frame.pixels().len(),
-                                    bitmap.stride(),
-                                    bitmap.bytes().len(),
-                                    chunks
-                                );
-                                remote_frame_cache.replace(
-                                    frame.frame_id(),
-                                    frame.width(),
-                                    frame.height(),
-                                    bitmap,
-                                );
+                                    frame.height()
+                                ),
                             }
-                            Err(error) => eprintln!(
-                                "frame upload error id={} width={} height={}: {error:#}",
-                                frame.frame_id(),
-                                frame.width(),
-                                frame.height()
-                            ),
-                        },
+                        }
                         Err(error) => eprintln!(
-                            "frame prepare error id={} width={} height={}: {error:#}",
+                            "frame prepare error id={} width={} height={} prepare_us={prepare_us}: {error:#}",
                             frame.frame_id(),
                             frame.width(),
                             frame.height()
