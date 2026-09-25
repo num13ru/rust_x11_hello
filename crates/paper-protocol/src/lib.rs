@@ -1,28 +1,21 @@
-//! Shared, std-only wire protocol for PaperPad and PaperSpoon.
-//!
-//! Kindle activations are newline-terminated action lines:
-//!
-//! ```text
-//! event action=<semantic-id>;
-//! ```
-//!
-//! PaperSpoon sends display commands in the other direction:
-//!
-//! ```text
-//! display <text>
-//! ```
+//! Shared, std-only protocol-v2 primitives for PaperPad and PaperSpoon.
 
-/// Prefix of a Kindle-to-PaperSpoon activation line.
-pub const EVENT_PREFIX: &str = "event action=";
-/// Terminator of an activation line, before its trailing newline.
-pub const ACTION_TERMINATOR: &str = ";";
-/// Prefix of a PaperSpoon-to-Kindle display command.
-pub const DISPLAY_PREFIX: &str = "display";
+mod framebuffer;
+mod v2;
+mod v2_payload;
 
-/// `:` suffix form of a display command, tolerated for manual terminal use.
-pub const DISPLAY_COLON_SPECIFIER: &str = ":";
-/// Space suffix form of a display command.
-pub const DISPLAY_SPACE_SPECIFIER: &str = " ";
+pub use framebuffer::{
+    Mono1Frame, Mono1FrameError, Mono1Pixel, mono1_payload_len, mono1_stride, validate_mono1_pixels,
+};
+pub use v2::{
+    V2_HEADER_LEN, V2_MAGIC, V2_MAX_PAYLOAD_LEN, V2_VERSION, V2DecodeError, V2DecodeResult,
+    V2EncodeError, V2Header, V2Message, V2MessageType, decode_v2_message, encode_v2_message,
+};
+pub use v2_payload::{
+    V2_FRAME_PREFIX_LEN, V2_HELLO_PAYLOAD_LEN, V2_POINTER_PAYLOAD_LEN, V2_VIEWPORT_PAYLOAD_LEN,
+    V2FramePayload, V2Hello, V2Payload, V2PayloadError, V2PixelFormat, V2Pointer, V2PointerPhase,
+    V2Viewport, decode_v2_payload, encode_v2_frame,
+};
 
 /// Default PaperSpoon TCP listener port.
 pub const DEFAULT_TCP_PORT: u16 = 5581;
@@ -30,44 +23,10 @@ pub const DEFAULT_TCP_PORT: u16 = 5581;
 pub const DISCOVERY_PORT: u16 = 5580;
 /// PaperPad UDP discovery client port.
 pub const DISCOVERY_CLIENT_PORT: u16 = 5582;
-/// Prefix of a discovery request datagram.
+/// Prefix for a discovery request datagram.
 pub const DISCOVER_PREFIX: &str = "PAPERPAD DISCOVER ";
-/// Prefix of a discovery response datagram.
+/// Prefix for a discovery response datagram.
 pub const HERE_PREFIX: &str = "PAPERSPOON HERE ";
-
-/// Build the one-line wire representation of a semantic activation.
-pub fn format_action_line(semantic_id: &str) -> String {
-    format!("{EVENT_PREFIX}{semantic_id}{ACTION_TERMINATOR}\n")
-}
-
-/// Parse an activation line after the transport has removed surrounding
-/// whitespace.
-///
-/// This intentionally preserves the existing permissive behavior: an empty
-/// action id is accepted, and a trailing newline is not removed here.
-pub fn parse_action_line(line: &str) -> Option<&str> {
-    line.strip_prefix(EVENT_PREFIX)?
-        .strip_suffix(ACTION_TERMINATOR)
-}
-
-/// Parse a PaperSpoon display command into its text payload.
-///
-/// Canonical `display <text>` and the manual-terminal alias
-/// `display:<text>` are accepted. The prefix is case-sensitive. Empty
-/// payloads, concatenated prefixes, and unrelated lines return `None`.
-pub fn parse_display_command(line: &str) -> Option<String> {
-    let line = line.trim_end_matches('\n');
-    let rest = line.strip_prefix(DISPLAY_PREFIX)?;
-    let rest = rest
-        .strip_prefix(DISPLAY_SPACE_SPECIFIER)
-        .or_else(|| rest.strip_prefix(DISPLAY_COLON_SPECIFIER))?;
-    let text = rest.trim();
-    if text.is_empty() {
-        None
-    } else {
-        Some(text.to_string())
-    }
-}
 
 /// Build a newline-terminated discovery request datagram.
 pub fn format_discover(nonce: &str) -> String {
@@ -108,52 +67,6 @@ pub fn parse_here(datagram: &[u8]) -> Option<(String, u16)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn action_line_roundtrip_matches_existing_wire_format() {
-        let line = format_action_line("media.play_pause");
-        assert_eq!(line, "event action=media.play_pause;\n");
-        assert_eq!(parse_action_line(line.trim()), Some("media.play_pause"));
-    }
-
-    #[test]
-    fn action_parser_preserves_permissive_payload_behavior() {
-        assert_eq!(parse_action_line("event action=;"), Some(""));
-        assert_eq!(parse_action_line("event action=x;;"), Some("x;"));
-        assert_eq!(parse_action_line("event action=x;\n"), None);
-        assert_eq!(parse_action_line("bogus action=x;"), None);
-    }
-
-    #[test]
-    fn display_command_parses_canonical_and_colon_forms() {
-        assert_eq!(
-            parse_display_command("display hello\n"),
-            Some("hello".to_string())
-        );
-        assert_eq!(
-            parse_display_command("display: world"),
-            Some("world".to_string())
-        );
-        assert_eq!(
-            parse_display_command("display:compact"),
-            Some("compact".to_string())
-        );
-        assert_eq!(
-            parse_display_command("display spaced "),
-            Some("spaced".to_string())
-        );
-    }
-
-    #[test]
-    fn display_parser_rejects_non_command_prefixes_and_empty_payloads() {
-        assert_eq!(parse_display_command("displayed"), None);
-        assert_eq!(parse_display_command("display-text"), None);
-        assert_eq!(parse_display_command("Display hello"), None);
-        assert_eq!(parse_display_command("display\n"), None);
-        assert_eq!(parse_display_command("display:\n"), None);
-        assert_eq!(parse_display_command("display \n"), None);
-        assert_eq!(parse_display_command("event action=x;\n"), None);
-    }
 
     #[test]
     fn discovery_request_roundtrip_preserves_nonce() {

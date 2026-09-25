@@ -1,18 +1,22 @@
-//! Persistent TCP transport for semantic activation events and PaperSpoon
-//! control.
+//! Persistent TCP transport for outbound PaperPad input and inbound PaperSpoon
+//! control/framebuffer messages.
 //!
 //! The Kindle connects out to PaperSpoon once at launch and keeps the
-//! connection for the run. Each activation queues one newline-terminated
-//! `event action=<semantic-id>;` line for a bounded writer. A reader thread
-//! consumes inbound PaperSpoon lines (control commands such as
-//! `display <text>`) and publishes the latest into a mailbox the X11 event loop
-//! drains between events and on a bounded idle poll interval.
+//! connection for the run. Protocol-v2 pointer phases use one bounded writer
+//! queue so their byte ordering is deterministic. A reader thread
+//! consumes inbound protocol-v2 Frame messages,
+//! publishing the latest of each into mailboxes the X11 event loop drains
+//! between events and on a bounded idle poll interval. Frames are validated
+//! against the current remote viewport but are not rendered yet.
 //!
 //! If startup fails, the background worker retries resolution and connection.
 //! If an established connection drops, the reconnector retries the same
 //! endpoint. Neither path blocks or breaks the X11 event loop.
 
-use paper_protocol::{format_action_line, parse_display_command};
+use paper_protocol::{
+    V2_HEADER_LEN, V2DecodeResult, V2Hello, V2MessageType, V2Payload, V2Pointer, V2PointerPhase,
+    V2Viewport, decode_v2_message, decode_v2_payload,
+};
 
 mod connection;
 pub mod discover;
@@ -32,12 +36,7 @@ const TCP_CONNECT_TIMEOUT: Duration = Duration::from_millis(150);
 const TCP_WRITE_TIMEOUT: Duration = Duration::from_millis(150);
 const STARTUP_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 const STARTUP_STOP_POLL_INTERVAL: Duration = Duration::from_millis(50);
-const ACTION_QUEUE_CAPACITY: usize = 16;
-const MAX_ACTION_LINE_BYTES: usize = 256;
-/// Maximum complete inbound TCP line, including its newline when present.
-/// Status rendering policy remains separate; this limit only bounds framing.
-const MAX_INBOUND_LINE_BYTES: usize = 8 * 1024;
-
+const OUTBOUND_QUEUE_CAPACITY: usize = 16;
 type StartupResult = Result<(SocketAddr, TcpStream)>;
 
 enum StartupUpdate {
@@ -79,18 +78,101 @@ fn wait_for_startup_retry(stopping: &AtomicBool, delay: Duration) -> bool {
     }
 }
 
-#[derive(Clone, Default)]
-struct DisplayMailbox {
-    pending: Arc<Mutex<Option<String>>>,
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) struct ReceivedFrame {
+    frame_id: u64,
+    width: u16,
+    height: u16,
+    stride: usize,
+    encoded: Vec<u8>,
+    receive_decode_elapsed: Duration,
 }
 
-impl DisplayMailbox {
-    fn publish(&self, text: String) {
-        *self.pending.lock().expect("display mailbox lock") = Some(text);
+impl ReceivedFrame {
+    pub(crate) fn frame_id(&self) -> u64 {
+        self.frame_id
     }
 
-    fn take(&self) -> Option<String> {
-        self.pending.lock().expect("display mailbox lock").take()
+    pub(crate) fn width(&self) -> u16 {
+        self.width
+    }
+
+    pub(crate) fn height(&self) -> u16 {
+        self.height
+    }
+
+    pub(crate) fn stride(&self) -> usize {
+        self.stride
+    }
+
+    pub(crate) fn pixels(&self) -> &[u8] {
+        &self.encoded[V2_HEADER_LEN + paper_protocol::V2_FRAME_PREFIX_LEN..]
+    }
+
+    pub(crate) fn receive_decode_us(&self) -> u128 {
+        self.receive_decode_elapsed.as_micros()
+    }
+}
+
+#[derive(Default)]
+struct FrameMailboxState {
+    viewport: (u16, u16),
+    pending: Option<ReceivedFrame>,
+}
+
+#[derive(Clone, Default)]
+struct FrameMailbox {
+    state: Arc<Mutex<FrameMailboxState>>,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct FrameDimensionMismatch {
+    expected: (u16, u16),
+    actual: (u16, u16),
+}
+
+impl std::fmt::Display for FrameDimensionMismatch {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "frame dimensions {}x{} do not match remote viewport {}x{}",
+            self.actual.0, self.actual.1, self.expected.0, self.expected.1
+        )
+    }
+}
+
+impl FrameMailbox {
+    fn set_viewport(&self, viewport: (u16, u16)) {
+        let mut state = self.state.lock().expect("frame mailbox lock");
+        state.viewport = viewport;
+        if state
+            .pending
+            .as_ref()
+            .is_some_and(|frame| (frame.width(), frame.height()) != viewport)
+        {
+            state.pending = None;
+        }
+    }
+
+    fn publish(&self, frame: ReceivedFrame) -> Result<(), FrameDimensionMismatch> {
+        let mut state = self.state.lock().expect("frame mailbox lock");
+        let actual = (frame.width(), frame.height());
+        if actual != state.viewport {
+            return Err(FrameDimensionMismatch {
+                expected: state.viewport,
+                actual,
+            });
+        }
+        state.pending = Some(frame);
+        Ok(())
+    }
+
+    fn take(&self) -> Option<ReceivedFrame> {
+        self.state
+            .lock()
+            .expect("frame mailbox lock")
+            .pending
+            .take()
     }
 }
 
@@ -99,8 +181,9 @@ impl DisplayMailbox {
 pub struct Paperspoon {
     /// Shared with the reconnector thread; owns the active socket.
     connection: Arc<Mutex<ConnectionState>>,
-    display: DisplayMailbox,
-    action_tx: Option<SyncSender<QueuedAction>>,
+    remote_viewport: Arc<Mutex<(u16, u16)>>,
+    frames: FrameMailbox,
+    outbound_tx: Option<SyncSender<QueuedOutbound>>,
     wake_tx: Option<Sender<()>>,
     stopping: Arc<AtomicBool>,
     writer: Option<JoinHandle<()>>,
@@ -108,37 +191,49 @@ pub struct Paperspoon {
     startup_rx: Option<Receiver<StartupUpdate>>,
 }
 
-struct QueuedAction {
-    connection: ConnectionToken,
-    line: String,
+fn write_hello(stream: &mut TcpStream, viewport: (u16, u16)) -> Result<()> {
+    let encoded = V2Hello::new(viewport.0, viewport.1).encode_message()?;
+    stream
+        .write_all(&encoded)
+        .context("failed to write Hello to PaperSpoon")
 }
 
-fn write_action(connection: &Arc<Mutex<ConnectionState>>, action: &QueuedAction) -> Result<()> {
+struct QueuedOutbound {
+    connection: ConnectionToken,
+    bytes: Vec<u8>,
+    description: &'static str,
+}
+
+fn write_outbound(
+    connection: &Arc<Mutex<ConnectionState>>,
+    outbound: &QueuedOutbound,
+) -> Result<()> {
     let mut write_stream = {
         let guard = connection.lock().expect("shared stream lock");
-        guard.clone_stream_for(&action.connection)?
+        guard.clone_stream_for(&outbound.connection)?
     };
-    if let Err(error) = write_stream.stream_mut().write_all(action.line.as_bytes()) {
+    if let Err(error) = write_stream.stream_mut().write_all(&outbound.bytes) {
         connection
             .lock()
             .expect("shared stream lock")
             .disconnect_if_current(&write_stream);
-        return Err(error).context("failed to write action to PaperSpoon");
+        return Err(error)
+            .with_context(|| format!("failed to write {} to PaperSpoon", outbound.description));
     }
     Ok(())
 }
 
 fn spawn_writer(
     connection: Arc<Mutex<ConnectionState>>,
-    action_rx: Receiver<QueuedAction>,
+    outbound_rx: Receiver<QueuedOutbound>,
     stopping: Arc<AtomicBool>,
 ) -> JoinHandle<()> {
     std::thread::spawn(move || {
-        while let Ok(action) = action_rx.recv() {
+        while let Ok(outbound) = outbound_rx.recv() {
             if stopping.load(Ordering::Acquire) {
                 break;
             }
-            match write_action(&connection, &action) {
+            match write_outbound(&connection, &outbound) {
                 Err(error) if !stopping.load(Ordering::Acquire) => {
                     eprintln!("transport error: {error:#}");
                 }
@@ -148,51 +243,102 @@ fn spawn_writer(
     })
 }
 
-fn enqueue_action<T>(action_tx: &SyncSender<T>, action: T) -> Result<()> {
-    match action_tx.try_send(action) {
+fn enqueue_outbound<T>(outbound_tx: &SyncSender<T>, outbound: T) -> Result<()> {
+    match outbound_tx.try_send(outbound) {
         Ok(()) => Ok(()),
-        Err(TrySendError::Full(_)) => Err(anyhow::anyhow!("PaperSpoon action queue full")),
+        Err(TrySendError::Full(_)) => Err(anyhow::anyhow!("PaperSpoon outbound queue full")),
         Err(TrySendError::Disconnected(_)) => {
-            Err(anyhow::anyhow!("PaperSpoon action worker stopped"))
+            Err(anyhow::anyhow!("PaperSpoon outbound worker stopped"))
         }
     }
 }
 
-fn spawn_reader(stream: TcpStream, display: DisplayMailbox, wake_tx: Sender<()>) -> JoinHandle<()> {
+fn spawn_reader(stream: TcpStream, frames: FrameMailbox, wake_tx: Sender<()>) -> JoinHandle<()> {
     std::thread::spawn(move || {
         let mut reader = BufReader::new(stream);
-        while let Ok(Some(line)) = read_inbound_line(&mut reader) {
-            if let Some(text) = parse_display_command(&line) {
-                display.publish(text);
+        loop {
+            match read_inbound_frame(&mut reader) {
+                Ok(Some(frame)) => match frames.publish(frame) {
+                    Ok(()) => {}
+                    Err(error) => eprintln!("frame rejected: {error}"),
+                },
+                Ok(None) => break,
+                Err(error) => {
+                    eprintln!("transport error reading PaperSpoon: {error}");
+                    break;
+                }
             }
         }
         let _ = wake_tx.send(());
     })
 }
 
-fn read_inbound_line<R: BufRead>(reader: &mut R) -> io::Result<Option<String>> {
-    let mut bytes = Vec::new();
-    reader
-        .take((MAX_INBOUND_LINE_BYTES + 1) as u64)
-        .read_until(b'\n', &mut bytes)?;
-    if bytes.is_empty() {
+fn read_inbound_frame<R: BufRead>(reader: &mut R) -> io::Result<Option<ReceivedFrame>> {
+    if reader.fill_buf()?.is_empty() {
         return Ok(None);
     }
-    if bytes.len() > MAX_INBOUND_LINE_BYTES {
+    read_v2_frame(reader).map(Some)
+}
+
+fn read_v2_frame<R: Read>(reader: &mut R) -> io::Result<ReceivedFrame> {
+    // The production reader calls this after fill_buf sees the first frame bytes.
+    // Idle time before a frame begins is excluded from this measurement.
+    let receive_decode_started = Instant::now();
+    let mut encoded = vec![0; V2_HEADER_LEN];
+    reader.read_exact(&mut encoded)?;
+
+    let additional = match decode_v2_message(&encoded).map_err(invalid_v2_data)? {
+        V2DecodeResult::Incomplete { additional } => additional,
+        V2DecodeResult::Complete { .. } => 0,
+    };
+    if additional > 0 {
+        let header_len = encoded.len();
+        encoded.resize(header_len + additional, 0);
+        reader.read_exact(&mut encoded[header_len..])?;
+    }
+
+    let V2DecodeResult::Complete { message, consumed } =
+        decode_v2_message(&encoded).map_err(invalid_v2_data)?
+    else {
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "incomplete protocol-v2 message",
+        ));
+    };
+    if consumed != encoded.len() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "PaperSpoon inbound line exceeds 8192 bytes",
+            "protocol-v2 reader consumed an unexpected byte count",
         ));
     }
-    if bytes.last() == Some(&b'\n') {
-        bytes.pop();
-        if bytes.last() == Some(&b'\r') {
-            bytes.pop();
-        }
+    if message.message_type() != V2MessageType::Frame {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "PaperSpoon sent unexpected {:?} message",
+                message.message_type()
+            ),
+        ));
     }
-    String::from_utf8(bytes)
-        .map(Some)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+
+    let V2Payload::Frame(frame) = decode_v2_payload(message).map_err(invalid_v2_data)? else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "PaperSpoon message type and typed payload disagreed",
+        ));
+    };
+    Ok(ReceivedFrame {
+        frame_id: frame.frame_id(),
+        width: frame.width(),
+        height: frame.height(),
+        stride: frame.stride(),
+        encoded,
+        receive_decode_elapsed: receive_decode_started.elapsed(),
+    })
+}
+
+fn invalid_v2_data(error: impl std::fmt::Display) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, error.to_string())
 }
 
 /// Resolve the PaperSpoon address.
@@ -221,8 +367,9 @@ impl Paperspoon {
     pub fn disconnected() -> Self {
         Self {
             connection: Arc::new(Mutex::new(ConnectionState::disconnected())),
-            display: DisplayMailbox::default(),
-            action_tx: None,
+            remote_viewport: Arc::new(Mutex::new((0, 0))),
+            frames: FrameMailbox::default(),
+            outbound_tx: None,
             wake_tx: None,
             stopping: Arc::new(AtomicBool::new(false)),
             writer: None,
@@ -232,21 +379,27 @@ impl Paperspoon {
     }
 
     /// Start retrying PaperSpoon connection attempts without blocking X11.
-    pub fn start(config: PaperpadConfig) -> Self {
+    pub fn start(config: PaperpadConfig, remote_viewport: (u16, u16)) -> Self {
         Self::start_with(
             move || {
                 let addr = paperspoon_addr(config.host(), config.port())?;
                 connect_stream(addr).map(|stream| (addr, stream))
             },
             Some(STARTUP_RETRY_INTERVAL),
+            remote_viewport,
         )
     }
 
-    fn start_with<F>(mut connect: F, retry_interval: Option<Duration>) -> Self
+    fn start_with<F>(
+        mut connect: F,
+        retry_interval: Option<Duration>,
+        remote_viewport: (u16, u16),
+    ) -> Self
     where
         F: FnMut() -> StartupResult + Send + 'static,
     {
         let mut paperspoon = Self::disconnected();
+        paperspoon.set_remote_viewport(remote_viewport);
         let worker_stopping = Arc::clone(&paperspoon.stopping);
         let (startup_tx, startup_rx) = mpsc::sync_channel(1);
         // OS hostname resolution cannot be cancelled through std. Detaching
@@ -292,19 +445,26 @@ impl Paperspoon {
     /// Internal and `pub(crate)`: tests inject an ephemeral listener this
     /// way so they never depend on process-global env vars.
     #[cfg(test)]
-    pub(crate) fn connect_to(addr: SocketAddr) -> Result<Self> {
+    pub(crate) fn connect_to(addr: SocketAddr, remote_viewport: (u16, u16)) -> Result<Self> {
         let stream = connect_stream(addr)?;
-        Self::from_stream(addr, stream)
+        Self::from_stream(addr, stream, FrameMailbox::default(), remote_viewport)
     }
 
-    fn from_stream(addr: SocketAddr, stream: TcpStream) -> Result<Self> {
+    fn from_stream(
+        addr: SocketAddr,
+        mut stream: TcpStream,
+        frames: FrameMailbox,
+        remote_viewport: (u16, u16),
+    ) -> Result<Self> {
         // The socket is shared with a reconnector thread. When the reader
         // hits EOF, it clears the shared slot and wakes the reconnector,
         // which retries until PaperSpoon is reachable again and swaps in a
         // fresh socket — proactive auto-reconnect without user input.
+        frames.set_viewport(remote_viewport);
+        write_hello(&mut stream, remote_viewport)?;
         let connection = Arc::new(Mutex::new(ConnectionState::connected(stream)));
-        let display = DisplayMailbox::default();
-        let (action_tx, action_rx) = mpsc::sync_channel(ACTION_QUEUE_CAPACITY);
+        let remote_viewport = Arc::new(Mutex::new(remote_viewport));
+        let (outbound_tx, outbound_rx) = mpsc::sync_channel(OUTBOUND_QUEUE_CAPACITY);
         let (wake_tx, wake_rx) = mpsc::channel::<()>();
 
         let reader_stream = connection
@@ -312,16 +472,17 @@ impl Paperspoon {
             .expect("shared stream lock")
             .clone_stream()?
             .into_stream();
-        let reader_handle = spawn_reader(reader_stream, display.clone(), wake_tx.clone());
+        let reader_handle = spawn_reader(reader_stream, frames.clone(), wake_tx.clone());
 
         // Reconnector: wake on EOF, clear slot, retry connect until success,
         // install fresh socket + reader, then wait for the next EOF.
         let worker_connection = Arc::clone(&connection);
         let stopping = Arc::new(AtomicBool::new(false));
-        let writer = spawn_writer(Arc::clone(&connection), action_rx, Arc::clone(&stopping));
+        let writer = spawn_writer(Arc::clone(&connection), outbound_rx, Arc::clone(&stopping));
         let worker_stopping = Arc::clone(&stopping);
-        let worker_display = display.clone();
+        let worker_frames = frames.clone();
         let worker_wake_tx = wake_tx.clone();
+        let worker_remote_viewport = Arc::clone(&remote_viewport);
         let reconnector = std::thread::spawn(move || {
             let mut active_reader = Some(reader_handle);
             'reconnector: loop {
@@ -343,8 +504,15 @@ impl Paperspoon {
                         break 'reconnector;
                     }
                     match TcpStream::connect_timeout(&addr, TCP_CONNECT_TIMEOUT) {
-                        Ok(new_stream) => {
+                        Ok(mut new_stream) => {
                             if configure_stream(&new_stream).is_err() {
+                                let _ = new_stream.shutdown(Shutdown::Both);
+                                std::thread::sleep(TCP_CONNECT_TIMEOUT);
+                                continue;
+                            }
+                            let viewport =
+                                *worker_remote_viewport.lock().expect("remote viewport lock");
+                            if write_hello(&mut new_stream, viewport).is_err() {
                                 let _ = new_stream.shutdown(Shutdown::Both);
                                 std::thread::sleep(TCP_CONNECT_TIMEOUT);
                                 continue;
@@ -361,7 +529,7 @@ impl Paperspoon {
                             }
                             active_reader = Some(spawn_reader(
                                 fresh_reader,
-                                worker_display.clone(),
+                                worker_frames.clone(),
                                 worker_wake_tx.clone(),
                             ));
                             break;
@@ -374,8 +542,9 @@ impl Paperspoon {
 
         Ok(Self {
             connection,
-            display,
-            action_tx: Some(action_tx),
+            remote_viewport,
+            frames,
+            outbound_tx: Some(outbound_tx),
             wake_tx: Some(wake_tx),
             stopping,
             writer: Some(writer),
@@ -399,17 +568,20 @@ impl Paperspoon {
         };
 
         match update {
-            StartupUpdate::Connected { addr, stream } => match Self::from_stream(addr, stream) {
-                Ok(paperspoon) => {
-                    self.startup_rx.take();
-                    *self = paperspoon;
-                    eprintln!("transport: connected to PaperSpoon");
+            StartupUpdate::Connected { addr, stream } => {
+                let remote_viewport = *self.remote_viewport.lock().expect("remote viewport lock");
+                match Self::from_stream(addr, stream, self.frames.clone(), remote_viewport) {
+                    Ok(paperspoon) => {
+                        self.startup_rx.take();
+                        *self = paperspoon;
+                        eprintln!("transport: connected to PaperSpoon");
+                    }
+                    Err(error) => {
+                        self.startup_rx.take();
+                        eprintln!("transport error at startup: {error:#}");
+                    }
                 }
-                Err(error) => {
-                    self.startup_rx.take();
-                    eprintln!("transport error at startup: {error:#}");
-                }
-            },
+            }
             StartupUpdate::Failed { error, retry_after } => {
                 if let Some(delay) = retry_after {
                     eprintln!(
@@ -424,36 +596,94 @@ impl Paperspoon {
         }
     }
 
-    /// Queue one semantic activation for ordered background delivery.
+    /// Queue one viewport-relative pointer phase for ordered background delivery.
     ///
-    /// Disconnected, oversized, full-queue, and stopped-worker states fail
-    /// immediately. Accepted actions are not retried, and shutdown discards
-    /// actions the writer has not started.
-    pub fn send_action(&mut self, semantic_id: &str) -> Result<()> {
-        let line = format_action_line(semantic_id);
-        anyhow::ensure!(
-            line.len() <= MAX_ACTION_LINE_BYTES,
-            "PaperSpoon action line exceeds {MAX_ACTION_LINE_BYTES} bytes"
-        );
+    /// Disconnected, full-queue, and stopped-worker states fail immediately.
+    /// Accepted pointer events are not retried after reconnect.
+    pub fn send_pointer(&mut self, phase: V2PointerPhase, x: u16, y: u16) -> Result<()> {
+        let encoded = V2Pointer::new(phase, x, y).encode_message()?;
+        self.enqueue_bytes(encoded, "pointer event")
+    }
+
+    /// Retain a changed remote viewport and queue it ahead of later pointers.
+    ///
+    /// A disconnected transport keeps the dimensions for the next `Hello`.
+    /// If a connected transport cannot queue the state change, it is closed so
+    /// later pointers cannot reach PaperSpoon with stale coordinate geometry.
+    pub(crate) fn send_viewport_changed(&mut self, viewport: (u16, u16)) -> Result<()> {
+        let previous = {
+            let mut current = self.remote_viewport.lock().expect("remote viewport lock");
+            let previous = *current;
+            *current = viewport;
+            previous
+        };
+        self.frames.set_viewport(viewport);
+        if previous == viewport {
+            return Ok(());
+        }
+
+        self.promote_startup();
+        let connection = {
+            let guard = self.connection.lock().expect("shared stream lock");
+            match guard.current_token() {
+                Ok(connection) => connection,
+                Err(_) => return Ok(()),
+            }
+        };
+        let encoded = V2Viewport::new(viewport.0, viewport.1).encode_message()?;
+        let result = self
+            .outbound_tx
+            .as_ref()
+            .context("PaperSpoon outbound worker not running")
+            .and_then(|outbound_tx| {
+                enqueue_outbound(
+                    outbound_tx,
+                    QueuedOutbound {
+                        connection,
+                        bytes: encoded,
+                        description: "viewport change",
+                    },
+                )
+            });
+        if result.is_err() {
+            self.connection
+                .lock()
+                .expect("shared stream lock")
+                .disconnect();
+        }
+        result
+    }
+
+    fn enqueue_bytes(&mut self, bytes: Vec<u8>, description: &'static str) -> Result<()> {
         self.promote_startup();
         let connection = {
             let guard = self.connection.lock().expect("shared stream lock");
             guard.current_token()?
         };
-        let action_tx = self
-            .action_tx
+        let outbound_tx = self
+            .outbound_tx
             .as_ref()
-            .context("PaperSpoon action worker not running")?;
-        enqueue_action(action_tx, QueuedAction { connection, line })
+            .context("PaperSpoon outbound worker not running")?;
+        enqueue_outbound(
+            outbound_tx,
+            QueuedOutbound {
+                connection,
+                bytes,
+                description,
+            },
+        )
     }
 
-    /// Drain any display commands received since the last call.
-    ///
-    /// Returns the latest pending display text, if any, and empties the
-    /// single-slot mailbox. It never blocks on network I/O.
-    pub fn poll_display(&mut self) -> Option<String> {
+    /// Update dimensions that inbound remote frames must match.
+    pub(crate) fn set_remote_viewport(&self, viewport: (u16, u16)) {
+        *self.remote_viewport.lock().expect("remote viewport lock") = viewport;
+        self.frames.set_viewport(viewport);
+    }
+
+    /// Drain the latest validated frame without blocking on network I/O.
+    pub(crate) fn poll_frame(&mut self) -> Option<ReceivedFrame> {
         self.promote_startup();
-        self.display.take()
+        self.frames.take()
     }
 }
 
@@ -469,7 +699,7 @@ impl Drop for Paperspoon {
         if let Some(wake_tx) = self.wake_tx.take() {
             let _ = wake_tx.send(());
         }
-        self.action_tx.take();
+        self.outbound_tx.take();
         if let Some(writer) = self.writer.take() {
             let _ = writer.join();
         }
@@ -483,6 +713,14 @@ impl Drop for Paperspoon {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    const TEST_VIEWPORT: (u16, u16) = (1272, 1624);
+
+    fn received_frame(frame_id: u64, width: u16, height: u16, pixels: Vec<u8>) -> ReceivedFrame {
+        let frame = paper_protocol::Mono1Frame::new(width, height, pixels).expect("valid Mono1");
+        let encoded = paper_protocol::encode_v2_frame(frame_id, &frame).expect("encode Frame");
+        read_v2_frame(&mut Cursor::new(encoded)).expect("decode Frame")
+    }
 
     fn accept_before(listener: &std::net::TcpListener, timeout: Duration) -> TcpStream {
         listener.set_nonblocking(true).expect("set nonblocking");
@@ -502,8 +740,56 @@ mod tests {
         }
     }
 
+    fn read_expected_pointer(peer: &mut TcpStream, expected: V2Pointer) {
+        let message_len = V2_HEADER_LEN + paper_protocol::V2_POINTER_PAYLOAD_LEN;
+        let mut encoded = vec![0; message_len];
+        peer.read_exact(&mut encoded).expect("read pointer message");
+        let V2DecodeResult::Complete { message, consumed } =
+            decode_v2_message(&encoded).expect("decode pointer message")
+        else {
+            panic!("complete pointer message expected");
+        };
+        assert_eq!(consumed, message_len);
+        assert_eq!(decode_v2_payload(message), Ok(V2Payload::Pointer(expected)));
+    }
+
+    fn read_expected_hello(peer: &mut TcpStream, expected: (u16, u16)) {
+        let message_len = V2_HEADER_LEN + paper_protocol::V2_HELLO_PAYLOAD_LEN;
+        let mut encoded = vec![0; message_len];
+        peer.read_exact(&mut encoded).expect("read Hello message");
+        let V2DecodeResult::Complete { message, consumed } =
+            decode_v2_message(&encoded).expect("decode Hello message")
+        else {
+            panic!("complete Hello message expected");
+        };
+        assert_eq!(consumed, message_len);
+        assert_eq!(
+            decode_v2_payload(message),
+            Ok(V2Payload::Hello(V2Hello::new(expected.0, expected.1)))
+        );
+    }
+
+    fn read_expected_viewport(peer: &mut TcpStream, expected: (u16, u16)) {
+        let message_len = V2_HEADER_LEN + paper_protocol::V2_VIEWPORT_PAYLOAD_LEN;
+        let mut encoded = vec![0; message_len];
+        peer.read_exact(&mut encoded)
+            .expect("read ViewportChanged message");
+        let V2DecodeResult::Complete { message, consumed } =
+            decode_v2_message(&encoded).expect("decode ViewportChanged message")
+        else {
+            panic!("complete ViewportChanged message expected");
+        };
+        assert_eq!(consumed, message_len);
+        assert_eq!(
+            decode_v2_payload(message),
+            Ok(V2Payload::ViewportChanged(V2Viewport::new(
+                expected.0, expected.1
+            )))
+        );
+    }
+
     #[test]
-    fn background_start_rejects_actions_and_drop_is_nonblocking() {
+    fn background_start_rejects_pointer_and_drop_is_nonblocking() {
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let (finished_tx, finished_rx) = mpsc::channel();
@@ -515,6 +801,7 @@ mod tests {
                 Err(anyhow::anyhow!("injected delayed startup"))
             },
             None,
+            TEST_VIEWPORT,
         );
         started_rx
             .recv_timeout(Duration::from_secs(2))
@@ -522,8 +809,8 @@ mod tests {
 
         assert!(
             paperspoon
-                .send_action("media.play_pause")
-                .expect_err("pending startup must not accept actions")
+                .send_pointer(V2PointerPhase::Down, 1, 2)
+                .expect_err("pending startup must not accept pointer input")
                 .to_string()
                 .contains("PaperSpoon not connected")
         );
@@ -553,6 +840,7 @@ mod tests {
                 Err(anyhow::anyhow!("injected retryable failure"))
             },
             Some(Duration::from_millis(100)),
+            TEST_VIEWPORT,
         );
         attempt_rx
             .recv_timeout(Duration::from_secs(2))
@@ -574,21 +862,19 @@ mod tests {
 
     #[test]
     fn background_start_promotes_connected_transport() {
-        use std::io::BufRead as _;
-
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind");
         let addr = listener.local_addr().expect("addr");
         let mut paperspoon = Paperspoon::start_with(
             move || connect_stream(addr).map(|stream| (addr, stream)),
             None,
+            TEST_VIEWPORT,
         );
-        let peer = accept_before(&listener, Duration::from_secs(2));
+        let mut peer = accept_before(&listener, Duration::from_secs(2));
         peer.set_read_timeout(Some(Duration::from_secs(2)))
             .expect("set peer timeout");
-
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         loop {
-            match paperspoon.send_action("media.play_pause") {
+            match paperspoon.send_pointer(V2PointerPhase::Down, 123, 456) {
                 Ok(()) => break,
                 Err(error) if error.to_string().contains("PaperSpoon not connected") => {
                     assert!(
@@ -597,21 +883,15 @@ mod tests {
                     );
                     std::thread::sleep(Duration::from_millis(10));
                 }
-                Err(error) => panic!("unexpected action error: {error:#}"),
+                Err(error) => panic!("unexpected pointer error: {error:#}"),
             }
         }
-
-        let mut line = String::new();
-        BufReader::new(peer)
-            .read_line(&mut line)
-            .expect("read action after startup");
-        assert_eq!(line, "event action=media.play_pause;\n");
+        read_expected_hello(&mut peer, TEST_VIEWPORT);
+        read_expected_pointer(&mut peer, V2Pointer::new(V2PointerPhase::Down, 123, 456));
     }
 
     #[test]
     fn background_start_retries_then_promotes_connection() {
-        use std::io::BufRead as _;
-
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind");
         let addr = listener.local_addr().expect("addr");
         let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -624,11 +904,12 @@ mod tests {
                 connect_stream(addr).map(|stream| (addr, stream))
             },
             Some(Duration::from_millis(20)),
+            TEST_VIEWPORT,
         );
 
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         while attempts.load(Ordering::Acquire) < 2 {
-            paperspoon.poll_display();
+            paperspoon.promote_startup();
             assert!(
                 std::time::Instant::now() < deadline,
                 "startup was not retried"
@@ -636,11 +917,11 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
 
-        let peer = accept_before(&listener, Duration::from_secs(2));
+        let mut peer = accept_before(&listener, Duration::from_secs(2));
         peer.set_read_timeout(Some(Duration::from_secs(2)))
             .expect("set peer timeout");
         loop {
-            match paperspoon.send_action("tmux.work") {
+            match paperspoon.send_pointer(V2PointerPhase::Up, 321, 654) {
                 Ok(()) => break,
                 Err(error) if error.to_string().contains("PaperSpoon not connected") => {
                     assert!(
@@ -649,25 +930,24 @@ mod tests {
                     );
                     std::thread::sleep(Duration::from_millis(10));
                 }
-                Err(error) => panic!("unexpected action error: {error:#}"),
+                Err(error) => panic!("unexpected pointer error: {error:#}"),
             }
         }
-
-        let mut line = String::new();
-        BufReader::new(peer)
-            .read_line(&mut line)
-            .expect("read action after retry");
-        assert_eq!(line, "event action=tmux.work;\n");
+        read_expected_hello(&mut peer, TEST_VIEWPORT);
+        read_expected_pointer(&mut peer, V2Pointer::new(V2PointerPhase::Up, 321, 654));
         assert_eq!(attempts.load(Ordering::Acquire), 2);
     }
 
     #[test]
     fn background_start_failure_remains_disconnected() {
-        let mut paperspoon =
-            Paperspoon::start_with(|| Err(anyhow::anyhow!("injected startup failure")), None);
+        let mut paperspoon = Paperspoon::start_with(
+            || Err(anyhow::anyhow!("injected startup failure")),
+            None,
+            TEST_VIEWPORT,
+        );
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         while paperspoon.startup_rx.is_some() {
-            paperspoon.poll_display();
+            paperspoon.promote_startup();
             assert!(
                 std::time::Instant::now() < deadline,
                 "startup failure was not collected"
@@ -677,7 +957,7 @@ mod tests {
 
         assert!(
             paperspoon
-                .send_action("media.play_pause")
+                .send_pointer(V2PointerPhase::Down, 1, 2)
                 .expect_err("failed startup must remain disconnected")
                 .to_string()
                 .contains("PaperSpoon not connected")
@@ -706,7 +986,8 @@ mod tests {
     fn connected_transport_has_bounded_write_timeout() {
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind");
         let paperspoon =
-            Paperspoon::connect_to(listener.local_addr().expect("addr")).expect("connect");
+            Paperspoon::connect_to(listener.local_addr().expect("addr"), TEST_VIEWPORT)
+                .expect("connect");
         let _peer = accept_before(&listener, Duration::from_secs(2));
         assert_eq!(
             transport_write_timeout(&paperspoon),
@@ -715,204 +996,327 @@ mod tests {
     }
 
     #[test]
-    fn writer_delivers_queued_action_line() {
-        use std::io::BufRead as _;
+    fn writer_delivers_ordered_binary_pointer_phases() {
+        use std::io::Read as _;
 
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind");
         let mut paperspoon =
-            Paperspoon::connect_to(listener.local_addr().expect("addr")).expect("connect");
-        let peer = accept_before(&listener, Duration::from_secs(2));
+            Paperspoon::connect_to(listener.local_addr().expect("addr"), TEST_VIEWPORT)
+                .expect("connect");
+        let mut peer = accept_before(&listener, Duration::from_secs(2));
         peer.set_read_timeout(Some(Duration::from_secs(2)))
             .expect("set peer timeout");
+        read_expected_hello(&mut peer, TEST_VIEWPORT);
 
+        let expected = [
+            V2Pointer::new(V2PointerPhase::Down, 0x1234, 0xabcd),
+            V2Pointer::new(V2PointerPhase::Up, u16::MAX, 0),
+        ];
+        let changed_viewport = (800, 600);
         paperspoon
-            .send_action("media.play_pause")
-            .expect("queue action");
+            .send_viewport_changed(changed_viewport)
+            .expect("queue changed viewport");
         paperspoon
-            .send_action("tmux.work")
-            .expect("queue second action");
-        let mut line = String::new();
-        let mut reader = BufReader::new(peer);
-        reader.read_line(&mut line).expect("read queued action");
-        assert_eq!(line, "event action=media.play_pause;\n");
-        line.clear();
-        reader
-            .read_line(&mut line)
-            .expect("read second queued action");
-        assert_eq!(line, "event action=tmux.work;\n");
+            .send_viewport_changed(changed_viewport)
+            .expect("unchanged viewport is a no-op");
+        for pointer in expected {
+            paperspoon
+                .send_pointer(pointer.phase(), pointer.x(), pointer.y())
+                .expect("queue pointer");
+        }
+
+        read_expected_viewport(&mut peer, changed_viewport);
+
+        let message_len = V2_HEADER_LEN + paper_protocol::V2_POINTER_PAYLOAD_LEN;
+        let mut encoded = vec![0; message_len * expected.len()];
+        peer.read_exact(&mut encoded)
+            .expect("read pointer messages");
+        for (bytes, pointer) in encoded.chunks_exact(message_len).zip(expected) {
+            let V2DecodeResult::Complete { message, consumed } =
+                decode_v2_message(bytes).expect("decode pointer message")
+            else {
+                panic!("complete pointer message expected");
+            };
+            assert_eq!(consumed, message_len);
+            assert_eq!(decode_v2_payload(message), Ok(V2Payload::Pointer(pointer)));
+        }
     }
 
     #[test]
-    fn action_enqueue_rejects_full_and_stopped_queue() {
+    fn reader_publishes_valid_frame_from_tcp_stream() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind");
+        let mut paperspoon =
+            Paperspoon::connect_to(listener.local_addr().expect("addr"), TEST_VIEWPORT)
+                .expect("connect");
+        paperspoon.set_remote_viewport((9, 2));
+        let mut peer = accept_before(&listener, Duration::from_secs(2));
+        let frame = paper_protocol::Mono1Frame::new(9, 2, vec![0xaa, 0x80, 0x55, 0x00])
+            .expect("valid Mono1");
+        let encoded = paper_protocol::encode_v2_frame(17, &frame).expect("encode Frame");
+        peer.write_all(&encoded).expect("write Frame");
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        let received = loop {
+            if let Some(frame) = paperspoon.poll_frame() {
+                break frame;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "reader did not publish Frame"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert_eq!(received.frame_id(), 17);
+        assert_eq!((received.width(), received.height()), (9, 2));
+        assert_eq!(received.pixels(), &[0xaa, 0x80, 0x55, 0x00]);
+    }
+
+    #[test]
+    fn outbound_enqueue_rejects_full_and_stopped_queue() {
         let (tx, rx) = mpsc::sync_channel(1);
-        enqueue_action(&tx, "first".to_string()).expect("fill queue");
+        enqueue_outbound(&tx, "first".to_string()).expect("fill queue");
         assert!(
-            enqueue_action(&tx, "second".to_string())
+            enqueue_outbound(&tx, "second".to_string())
                 .expect_err("full queue must reject")
                 .to_string()
-                .contains("action queue full")
+                .contains("outbound queue full")
         );
 
         drop(rx);
         assert!(
-            enqueue_action(&tx, "third".to_string())
+            enqueue_outbound(&tx, "third".to_string())
                 .expect_err("stopped queue must reject")
                 .to_string()
-                .contains("action worker stopped")
+                .contains("outbound worker stopped")
         );
     }
 
     #[test]
-    fn send_action_rejects_disconnected_and_overlong_input() {
+    fn send_pointer_rejects_disconnected_transport() {
         let mut paperspoon = Paperspoon::disconnected();
         assert!(
             paperspoon
-                .send_action("media.play_pause")
-                .expect_err("disconnected send must fail")
+                .send_pointer(V2PointerPhase::Down, 1, 2)
+                .expect_err("disconnected pointer send must fail")
                 .to_string()
                 .contains("PaperSpoon not connected")
         );
-
-        let overlong = "x".repeat(MAX_ACTION_LINE_BYTES);
-        assert!(
-            paperspoon
-                .send_action(&overlong)
-                .expect_err("overlong action must fail")
-                .to_string()
-                .contains("action line exceeds")
+        paperspoon
+            .send_viewport_changed((800, 600))
+            .expect("disconnected viewport change is retained");
+        assert_eq!(
+            *paperspoon
+                .remote_viewport
+                .lock()
+                .expect("remote viewport lock"),
+            (800, 600)
         );
     }
 
     #[test]
-    fn display_mailbox_coalesces_to_latest_unread_text() {
-        let mailbox = DisplayMailbox::default();
+    fn frame_mailbox_accepts_matching_frame_and_coalesces_latest() {
+        let mailbox = FrameMailbox::default();
+        mailbox.set_viewport((9, 2));
+        mailbox
+            .publish(received_frame(1, 9, 2, vec![0xaa, 0x80, 0x55, 0x00]))
+            .expect("matching frame");
+        mailbox
+            .publish(received_frame(2, 9, 2, vec![0x00; 4]))
+            .expect("replacement frame");
+
+        let frame = mailbox.take().expect("pending frame");
+        assert_eq!(frame.frame_id(), 2);
+        assert_eq!((frame.width(), frame.height()), (9, 2));
+        assert_eq!(frame.stride(), 2);
+        assert_eq!(frame.pixels(), &[0x00; 4]);
         assert_eq!(mailbox.take(), None);
-        mailbox.publish("first".to_string());
-        mailbox.publish("second".to_string());
-        assert_eq!(mailbox.take(), Some("second".to_string()));
+    }
+
+    #[test]
+    fn mismatched_frame_does_not_replace_valid_pending_frame() {
+        let mailbox = FrameMailbox::default();
+        mailbox.set_viewport((8, 2));
+        mailbox
+            .publish(received_frame(3, 8, 2, vec![0xff; 2]))
+            .expect("matching frame");
+
+        assert_eq!(
+            mailbox
+                .publish(received_frame(4, 8, 1, vec![0x00]))
+                .expect_err("mismatched frame"),
+            FrameDimensionMismatch {
+                expected: (8, 2),
+                actual: (8, 1),
+            }
+        );
+        assert_eq!(mailbox.take().expect("original frame").frame_id(), 3);
+    }
+
+    #[test]
+    fn viewport_change_discards_only_incompatible_pending_frame() {
+        let mailbox = FrameMailbox::default();
+        mailbox.set_viewport((8, 2));
+        mailbox
+            .publish(received_frame(5, 8, 2, vec![0x00; 2]))
+            .expect("matching frame");
+        mailbox.set_viewport((8, 2));
+        assert_eq!(mailbox.take().expect("compatible frame").frame_id(), 5);
+
+        mailbox
+            .publish(received_frame(6, 8, 2, vec![0xff; 2]))
+            .expect("matching frame");
+        mailbox.set_viewport((9, 2));
         assert_eq!(mailbox.take(), None);
     }
 
     #[test]
-    fn inbound_line_reader_preserves_lines_semantics() {
-        let mut input = Cursor::new(b"display first\r\ndisplay second\nfinal".to_vec());
-        assert_eq!(
-            read_inbound_line(&mut input).expect("read CRLF line"),
-            Some("display first".to_string())
+    fn inbound_reader_accepts_consecutive_binary_frames() {
+        let first = paper_protocol::Mono1Frame::new(9, 2, vec![0xaa, 0x80, 0x55, 0x00])
+            .expect("valid first Mono1");
+        let second = paper_protocol::Mono1Frame::new(8, 1, vec![0xff]).expect("valid second Mono1");
+        let mut stream = paper_protocol::encode_v2_frame(7, &first).expect("encode first Frame");
+        stream.extend_from_slice(
+            &paper_protocol::encode_v2_frame(8, &second).expect("encode second Frame"),
         );
-        assert_eq!(
-            read_inbound_line(&mut input).expect("read LF line"),
-            Some("display second".to_string())
-        );
-        assert_eq!(
-            read_inbound_line(&mut input).expect("read final line"),
-            Some("final".to_string())
-        );
-        assert_eq!(read_inbound_line(&mut input).expect("read EOF"), None);
+        let mut reader = BufReader::new(Cursor::new(stream));
+
+        let frame = read_inbound_frame(&mut reader)
+            .expect("read first frame")
+            .expect("first frame");
+        assert_eq!(frame.frame_id(), 7);
+        assert_eq!((frame.width(), frame.height(), frame.stride()), (9, 2, 2));
+        assert_eq!(frame.pixels(), &[0xaa, 0x80, 0x55, 0x00]);
+
+        let frame = read_inbound_frame(&mut reader)
+            .expect("read second frame")
+            .expect("second frame");
+        assert_eq!(frame.frame_id(), 8);
+        assert_eq!((frame.width(), frame.height(), frame.stride()), (8, 1, 1));
+        assert_eq!(frame.pixels(), &[0xff]);
+        assert!(read_inbound_frame(&mut reader).expect("read EOF").is_none());
     }
 
     #[test]
-    fn inbound_line_reader_accepts_exact_limit() {
-        let mut input = Cursor::new(vec![b'x'; MAX_INBOUND_LINE_BYTES]);
-        let line = read_inbound_line(&mut input)
-            .expect("read bounded line")
-            .expect("line");
-        assert_eq!(line.len(), MAX_INBOUND_LINE_BYTES);
-    }
-
-    #[test]
-    fn inbound_line_reader_rejects_oversize_and_invalid_utf8() {
-        let mut oversized = Cursor::new(vec![b'x'; MAX_INBOUND_LINE_BYTES + 1]);
+    fn inbound_reader_rejects_malformed_or_unexpected_v2_messages() {
+        let frame = paper_protocol::Mono1Frame::new(8, 1, vec![0x00]).expect("valid Mono1");
+        let mut malformed = paper_protocol::encode_v2_frame(8, &frame).expect("encode Frame");
+        malformed[V2_HEADER_LEN + 13] = 1;
         assert_eq!(
-            read_inbound_line(&mut oversized)
-                .expect_err("oversized line must fail")
+            read_inbound_frame(&mut BufReader::new(Cursor::new(malformed)))
+                .expect_err("nonzero Frame reserved byte")
                 .kind(),
             io::ErrorKind::InvalidData
         );
 
-        let mut invalid_utf8 = Cursor::new(vec![0xff, b'\n']);
+        let hello = paper_protocol::V2Hello::new(8, 1)
+            .encode_message()
+            .expect("encode Hello");
         assert_eq!(
-            read_inbound_line(&mut invalid_utf8)
-                .expect_err("invalid UTF-8 must fail")
+            read_inbound_frame(&mut BufReader::new(Cursor::new(hello)))
+                .expect_err("unexpected inbound Hello")
                 .kind(),
             io::ErrorKind::InvalidData
         );
     }
 
     #[test]
-    fn oversized_inbound_line_reconnects_without_peer_eof() {
+    fn inbound_reader_rejects_oversized_v2_header_before_payload() {
+        let mut header = [0_u8; V2_HEADER_LEN];
+        header[0..4].copy_from_slice(&paper_protocol::V2_MAGIC);
+        header[4] = paper_protocol::V2_VERSION;
+        header[5] = V2MessageType::Frame as u8;
+        header[8..12]
+            .copy_from_slice(&((paper_protocol::V2_MAX_PAYLOAD_LEN + 1) as u32).to_be_bytes());
+
+        assert_eq!(
+            read_inbound_frame(&mut BufReader::new(Cursor::new(header)))
+                .expect_err("oversized payload header")
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn legacy_inbound_line_reconnects_without_peer_eof() {
         use std::io::Write;
         use std::net::TcpListener;
 
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind");
         let addr = listener.local_addr().expect("addr");
-        let mut paperspoon = Paperspoon::connect_to(addr).expect("connect");
+        let mut paperspoon = Paperspoon::connect_to(addr, TEST_VIEWPORT).expect("connect");
         let mut first_peer = accept_before(&listener, Duration::from_secs(2));
 
-        let mut oversized = vec![b'x'; MAX_INBOUND_LINE_BYTES + 1];
-        oversized.push(b'\n');
         first_peer
-            .write_all(&oversized)
-            .expect("write oversized line");
+            .write_all(b"legacy line protocol\n")
+            .expect("write legacy line");
 
         // Keep the original peer open: a second accept proves the reader
         // rejected the frame and woke the reconnector instead of seeing EOF.
         let mut replacement_peer = accept_before(&listener, Duration::from_secs(5));
-        writeln!(replacement_peer, "display recovered").expect("write recovered display");
+        read_expected_hello(&mut replacement_peer, TEST_VIEWPORT);
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         loop {
-            if paperspoon.poll_display() == Some("recovered".to_string()) {
-                break;
+            match paperspoon.send_pointer(V2PointerPhase::Down, 7, 8) {
+                Ok(()) => break,
+                Err(error) if error.to_string().contains("PaperSpoon not connected") => {}
+                Err(error) => panic!("unexpected pointer error after reconnect: {error:#}"),
             }
             assert!(
                 std::time::Instant::now() < deadline,
-                "no display after oversized-line reconnect"
+                "legacy-line reconnect was not promoted"
             );
             std::thread::sleep(Duration::from_millis(10));
         }
+        read_expected_pointer(
+            &mut replacement_peer,
+            V2Pointer::new(V2PointerPhase::Down, 7, 8),
+        );
     }
 
     #[test]
     fn auto_reconnects_when_paperspoon_returns() {
-        use std::io::{Read, Write};
+        use std::io::Read;
         use std::net::TcpListener;
         use std::time::Duration;
 
         // Start a listener (PaperSpoon), connect, then stop it to force EOF.
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind");
         let addr = listener.local_addr().expect("addr");
-        let mut paperspoon = Paperspoon::connect_to(addr).expect("connect");
+        let mut paperspoon = Paperspoon::connect_to(addr, TEST_VIEWPORT).expect("connect");
         let mut first = accept_before(&listener, Duration::from_secs(2));
-        writeln!(first, "display first").expect("write first");
-        let deadline = std::time::Instant::now() + Duration::from_secs(2);
-        loop {
-            if paperspoon.poll_display() == Some("first".to_string()) {
-                break;
-            }
-            assert!(std::time::Instant::now() < deadline, "no first display");
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        read_expected_hello(&mut first, TEST_VIEWPORT);
+        let resized_viewport = (800, 600);
+        paperspoon
+            .send_viewport_changed(resized_viewport)
+            .expect("send viewport change before reconnect");
+        read_expected_viewport(&mut first, resized_viewport);
         drop(first);
         drop(listener); // Force EOF: the reconnector must notice.
 
         // A new PaperSpoon appears; the reconnector should restore the stream
-        // without any send_action call from us. The reconnector loops forever
+        // without any outbound pointer call from us. The reconnector loops forever
         // retrying `addr` (now free), so rebinding the SAME port and
         // accepting proves the auto-restore.
         let listener3 = TcpListener::bind(addr).expect("rebind same port");
         let mut reconnected_peer = accept_before(&listener3, Duration::from_secs(5));
-        writeln!(reconnected_peer, "display again").expect("write again");
+        read_expected_hello(&mut reconnected_peer, resized_viewport);
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         loop {
-            if paperspoon.poll_display() == Some("again".to_string()) {
-                break;
+            match paperspoon.send_pointer(V2PointerPhase::Up, 9, 10) {
+                Ok(()) => break,
+                Err(error) if error.to_string().contains("PaperSpoon not connected") => {}
+                Err(error) => panic!("unexpected pointer error after reconnect: {error:#}"),
             }
             assert!(
                 std::time::Instant::now() < deadline,
-                "no reconnected display"
+                "reconnected transport was not promoted"
             );
             std::thread::sleep(Duration::from_millis(10));
         }
+        read_expected_pointer(
+            &mut reconnected_peer,
+            V2Pointer::new(V2PointerPhase::Up, 9, 10),
+        );
 
         // Drop must stop and join the reader even while its peer remains idle.
         assert_eq!(

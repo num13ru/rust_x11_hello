@@ -17,6 +17,13 @@ struct ActiveConnection {
 pub(crate) struct ConnectionToken(Arc<()>);
 
 impl CurrentConnection {
+    pub(crate) fn is_active(&self) -> bool {
+        self.inner
+            .lock()
+            .expect("current connection lock")
+            .is_some()
+    }
+
     pub(crate) fn install(&self, stream: &TcpStream) -> io::Result<ConnectionToken> {
         let token = Arc::new(());
         let active = ActiveConnection {
@@ -39,25 +46,21 @@ impl CurrentConnection {
         true
     }
 
-    /// Write one newline-terminated control line to the current connection.
+    /// Write exact binary bytes to the current connection.
     ///
     /// Returns `Ok(false)` when no PaperPad is connected. A failed write
-    /// closes and clears only the generation used for that write.
-    pub(crate) fn forward_line(&self, line: &str) -> io::Result<bool> {
-        let (token, mut stream) = {
-            let guard = self.inner.lock().expect("current connection lock");
-            let Some(active) = guard.as_ref() else {
-                return Ok(false);
-            };
-            (
-                ConnectionToken(Arc::clone(&active.token)),
-                active.stream.try_clone()?,
-            )
+    /// closes and clears the connection generation used for the write.
+    /// Holding the connection lock across `write_all` prevents concurrent
+    /// frame producers from interleaving protocol bytes on cloned sockets.
+    pub(crate) fn forward_bytes(&self, bytes: &[u8]) -> io::Result<bool> {
+        let mut guard = self.inner.lock().expect("current connection lock");
+        let Some(active) = guard.as_mut() else {
+            return Ok(false);
         };
 
-        if let Err(error) = writeln!(stream, "{line}") {
-            let _ = stream.shutdown(Shutdown::Both);
-            self.clear_if_current(&token);
+        if let Err(error) = active.stream.write_all(bytes) {
+            let _ = active.stream.shutdown(Shutdown::Both);
+            guard.take();
             return Err(error);
         }
         Ok(true)
@@ -67,7 +70,7 @@ impl CurrentConnection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{BufRead, BufReader};
+    use std::io::Read;
     use std::net::TcpListener;
     use std::time::Duration;
 
@@ -82,47 +85,35 @@ mod tests {
     #[test]
     fn forwarding_follows_connection_replacement() {
         let current = CurrentConnection::default();
-        assert!(!current.forward_line("display nobody").expect("no target"));
+        assert!(!current.forward_bytes(b"nobody").expect("no target"));
 
-        let (first, first_peer) = tcp_pair();
+        let (first, mut first_peer) = tcp_pair();
         first_peer
             .set_read_timeout(Some(Duration::from_secs(2)))
             .expect("set first timeout");
         let first_token = current.install(&first).expect("install first");
-        assert!(
-            current
-                .forward_line("display first")
-                .expect("forward first")
-        );
-        let mut first_line = String::new();
-        BufReader::new(first_peer)
-            .read_line(&mut first_line)
-            .expect("read first line");
-        assert_eq!(first_line, "display first\n");
+        assert!(current.forward_bytes(&[1, 2]).expect("forward first"));
+        let mut first_bytes = [0; 2];
+        first_peer
+            .read_exact(&mut first_bytes)
+            .expect("read first bytes");
+        assert_eq!(first_bytes, [1, 2]);
 
-        let (second, second_peer) = tcp_pair();
+        let (second, mut second_peer) = tcp_pair();
         second_peer
             .set_read_timeout(Some(Duration::from_secs(2)))
             .expect("set second timeout");
         let second_token = current.install(&second).expect("install second");
         assert!(!current.clear_if_current(&first_token));
-        assert!(
-            current
-                .forward_line("display second")
-                .expect("forward second")
-        );
-        let mut second_line = String::new();
-        BufReader::new(second_peer)
-            .read_line(&mut second_line)
-            .expect("read second line");
-        assert_eq!(second_line, "display second\n");
+        assert!(current.forward_bytes(&[3, 4]).expect("forward second"));
+        let mut second_bytes = [0; 2];
+        second_peer
+            .read_exact(&mut second_bytes)
+            .expect("read second bytes");
+        assert_eq!(second_bytes, [3, 4]);
 
         assert!(current.clear_if_current(&second_token));
-        assert!(
-            !current
-                .forward_line("display nobody")
-                .expect("cleared target")
-        );
+        assert!(!current.forward_bytes(b"nobody").expect("cleared target"));
     }
 
     #[test]
@@ -134,12 +125,63 @@ mod tests {
         drop(peer);
 
         current
-            .forward_line("display failure")
+            .forward_bytes(b"failure")
             .expect_err("closed stream write must fail");
+        assert!(!current.forward_bytes(b"nobody").expect("cleared target"));
+    }
+
+    #[test]
+    fn binary_forwarding_preserves_exact_bytes_without_newline() {
+        let current = CurrentConnection::default();
+        let (stream, mut peer) = tcp_pair();
+        peer.set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("set timeout");
+        current.install(&stream).expect("install");
+
+        let expected = [b'P', b'P', b'F', b'B', 0, 2, 0xff];
+        assert!(current.forward_bytes(&expected).expect("forward bytes"));
+        let mut actual = [0; 7];
+        peer.read_exact(&mut actual).expect("read exact bytes");
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn concurrent_forwarders_preserve_whole_message_boundaries() {
+        let current = CurrentConnection::default();
+        let (stream, mut peer) = tcp_pair();
+        current.install(&stream).expect("install connection");
+        let barrier = Arc::new(std::sync::Barrier::new(3));
+        let message_len = 128 * 1024;
+
+        let first = {
+            let current = current.clone();
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                current
+                    .forward_bytes(&vec![0x11; message_len])
+                    .expect("forward first")
+            })
+        };
+        let second = {
+            let current = current.clone();
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                current
+                    .forward_bytes(&vec![0x22; message_len])
+                    .expect("forward second")
+            })
+        };
+
+        barrier.wait();
+        let mut received = vec![0; message_len * 2];
+        peer.read_exact(&mut received).expect("read both messages");
+        assert!(first.join().expect("join first"));
+        assert!(second.join().expect("join second"));
         assert!(
-            !current
-                .forward_line("display nobody")
-                .expect("cleared target")
+            received == [vec![0x11; message_len], vec![0x22; message_len]].concat()
+                || received == [vec![0x22; message_len], vec![0x11; message_len]].concat()
         );
     }
 }

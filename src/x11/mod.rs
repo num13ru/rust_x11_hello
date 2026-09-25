@@ -6,4 +6,5 @@
 
 pub mod display;
 pub mod events;
+mod framebuffer;
 mod render;
