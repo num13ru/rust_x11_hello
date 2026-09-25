@@ -85,6 +85,7 @@ pub(crate) struct ReceivedFrame {
     height: u16,
     stride: usize,
     encoded: Vec<u8>,
+    receive_decode_elapsed: Duration,
 }
 
 impl ReceivedFrame {
@@ -106,6 +107,10 @@ impl ReceivedFrame {
 
     pub(crate) fn pixels(&self) -> &[u8] {
         &self.encoded[V2_HEADER_LEN + paper_protocol::V2_FRAME_PREFIX_LEN..]
+    }
+
+    pub(crate) fn receive_decode_us(&self) -> u128 {
+        self.receive_decode_elapsed.as_micros()
     }
 }
 
@@ -276,6 +281,9 @@ fn read_inbound_frame<R: BufRead>(reader: &mut R) -> io::Result<Option<ReceivedF
 }
 
 fn read_v2_frame<R: Read>(reader: &mut R) -> io::Result<ReceivedFrame> {
+    // The production reader calls this after fill_buf sees the first frame bytes.
+    // Idle time before a frame begins is excluded from this measurement.
+    let receive_decode_started = Instant::now();
     let mut encoded = vec![0; V2_HEADER_LEN];
     reader.read_exact(&mut encoded)?;
 
@@ -325,6 +333,7 @@ fn read_v2_frame<R: Read>(reader: &mut R) -> io::Result<ReceivedFrame> {
         height: frame.height(),
         stride: frame.stride(),
         encoded,
+        receive_decode_elapsed: receive_decode_started.elapsed(),
     })
 }
 

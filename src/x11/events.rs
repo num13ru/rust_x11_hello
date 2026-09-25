@@ -89,6 +89,7 @@ pub fn event_loop(
 
     loop {
         if let Some(frame) = paperspoon.poll_frame() {
+            let receive_decode_us = frame.receive_decode_us();
             match framebuffer_adapter.as_ref() {
                 Some(adapter) => {
                     let prepare_started = Instant::now();
@@ -109,7 +110,7 @@ pub fn event_loop(
                             match uploaded {
                                 Ok(chunks) => {
                                     eprintln!(
-                                        "frame uploaded id={} width={} height={} wire_stride={} wire_bytes={} x11_stride={} x11_bytes={} chunks={} prepare_us={prepare_us} x11_upload_us={x11_upload_us} cache=updated",
+                                        "frame uploaded id={} width={} height={} wire_stride={} wire_bytes={} x11_stride={} x11_bytes={} chunks={} receive_decode_us={receive_decode_us} prepare_us={prepare_us} x11_upload_us={x11_upload_us} cache=updated",
                                         frame.frame_id(),
                                         frame.width(),
                                         frame.height(),
@@ -127,7 +128,7 @@ pub fn event_loop(
                                     );
                                 }
                                 Err(error) => eprintln!(
-                                    "frame upload error id={} width={} height={} prepare_us={prepare_us} x11_upload_us={x11_upload_us}: {error:#}",
+                                    "frame upload error id={} width={} height={} receive_decode_us={receive_decode_us} prepare_us={prepare_us} x11_upload_us={x11_upload_us}: {error:#}",
                                     frame.frame_id(),
                                     frame.width(),
                                     frame.height()
@@ -135,7 +136,7 @@ pub fn event_loop(
                             }
                         }
                         Err(error) => eprintln!(
-                            "frame prepare error id={} width={} height={} prepare_us={prepare_us}: {error:#}",
+                            "frame prepare error id={} width={} height={} receive_decode_us={receive_decode_us} prepare_us={prepare_us}: {error:#}",
                             frame.frame_id(),
                             frame.width(),
                             frame.height()
@@ -143,7 +144,7 @@ pub fn event_loop(
                     }
                 }
                 None => eprintln!(
-                    "frame accepted id={} width={} height={} stride={} bytes={} render=unavailable",
+                    "frame accepted id={} width={} height={} stride={} bytes={} receive_decode_us={receive_decode_us} render=unavailable",
                     frame.frame_id(),
                     frame.width(),
                     frame.height(),
