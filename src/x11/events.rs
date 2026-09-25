@@ -8,6 +8,7 @@ use super::framebuffer::{PreparedBitmap, X11BitmapAdapter};
 use super::render::draw;
 
 use crate::app::{Activation, AppState, GeometryUpdate, Redraw, RemotePointerEvent};
+use crate::display::RemoteFrameCache;
 use crate::net::Paperspoon;
 use crate::ui::button::{PointerEvent, PointerEventKind};
 use crate::ui::screen::{PhysicalPoint, ScreenLayout};
@@ -25,46 +26,6 @@ pub enum EventLoopExit {
 }
 
 const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(50);
-
-struct CachedRemoteFrame<T> {
-    frame_id: u64,
-    width: u16,
-    height: u16,
-    bitmap: T,
-}
-
-struct RemoteFrameCache<T> {
-    current: Option<CachedRemoteFrame<T>>,
-}
-
-impl<T> Default for RemoteFrameCache<T> {
-    fn default() -> Self {
-        Self { current: None }
-    }
-}
-
-impl<T> RemoteFrameCache<T> {
-    fn current(&self) -> Option<&CachedRemoteFrame<T>> {
-        self.current.as_ref()
-    }
-
-    fn replace(&mut self, frame_id: u64, width: u16, height: u16, bitmap: T) {
-        self.current = Some(CachedRemoteFrame {
-            frame_id,
-            width,
-            height,
-            bitmap,
-        });
-    }
-
-    fn invalidate_mismatched(&mut self, viewport: (u16, u16)) -> Option<CachedRemoteFrame<T>> {
-        let mismatched = self
-            .current
-            .as_ref()
-            .is_some_and(|frame| (frame.width, frame.height) != viewport);
-        mismatched.then(|| self.current.take().expect("mismatched frame exists"))
-    }
-}
 
 /// Run the event loop until the window is destroyed or the connection fails.
 pub fn event_loop(
@@ -193,7 +154,11 @@ pub fn event_loop(
                         if let Some(frame) = remote_frame_cache.invalidate_mismatched(viewport) {
                             eprintln!(
                                 "frame cache invalidated id={} width={} height={} viewport_width={} viewport_height={}",
-                                frame.frame_id, frame.width, frame.height, viewport.0, viewport.1
+                                frame.frame_id(),
+                                frame.dimensions().0,
+                                frame.dimensions().1,
+                                viewport.0,
+                                viewport.1
                             );
                         }
                         eprintln!(
@@ -326,14 +291,21 @@ fn draw_surface(
     let (Some(adapter), Some(frame)) = (framebuffer_adapter, remote_frame_cache.current()) else {
         return Ok(());
     };
-    match adapter.blit(conn, win, gc, remote_viewport_origin(size), &frame.bitmap) {
+    match adapter.blit(conn, win, gc, remote_viewport_origin(size), frame.payload()) {
         Ok(chunks) => eprintln!(
             "frame redrawn id={} width={} height={} chunks={} cause={} cache=hit",
-            frame.frame_id, frame.width, frame.height, chunks, cause
+            frame.frame_id(),
+            frame.dimensions().0,
+            frame.dimensions().1,
+            chunks,
+            cause
         ),
         Err(error) => eprintln!(
             "frame redraw error id={} width={} height={} cause={}: {error:#}",
-            frame.frame_id, frame.width, frame.height, cause
+            frame.frame_id(),
+            frame.dimensions().0,
+            frame.dimensions().1,
+            cause
         ),
     }
     Ok(())
@@ -412,31 +384,6 @@ mod tests {
             format_pointer_event("ButtonRelease", &event),
             "input type=ButtonRelease detail=3 event_x=-1 event_y=360 root_x=79 root_y=480 time=123456 window=0x2600001 root=0x50d child=0x0 state=0x0101 same_screen=true"
         );
-    }
-
-    #[test]
-    fn remote_frame_cache_replaces_and_invalidates_only_for_new_viewport() {
-        let mut cache = RemoteFrameCache::default();
-        assert!(cache.current().is_none());
-
-        cache.replace(1, 9, 2, "first");
-        cache.replace(2, 17, 4, "second");
-        let current = cache.current().expect("replacement cached");
-        assert_eq!(current.frame_id, 2);
-        assert_eq!((current.width, current.height), (17, 4));
-        assert_eq!(current.bitmap, "second");
-
-        assert!(cache.invalidate_mismatched((17, 4)).is_none());
-        assert_eq!(
-            cache.current().expect("matching cache retained").frame_id,
-            2
-        );
-
-        let invalidated = cache
-            .invalidate_mismatched((17, 5))
-            .expect("mismatched cache invalidated");
-        assert_eq!(invalidated.frame_id, 2);
-        assert!(cache.current().is_none());
     }
 
     #[test]

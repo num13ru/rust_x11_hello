@@ -8,12 +8,13 @@ use anyhow::{Context, Result};
 use std::env;
 use x11rb::rust_connection::RustConnection;
 
-use x11::display;
+use x11::display as x11_display;
 use x11::events::{EventLoopExit, event_loop, remote_viewport_size};
 
 mod app;
 mod config;
 mod discovery;
+mod display;
 mod net;
 mod ui;
 mod x11;
@@ -37,8 +38,8 @@ fn run() -> Result<()> {
     let (conn, screen_num) = RustConnection::connect(None)
         .context("failed to connect to X11 display; check DISPLAY and /tmp/.X11-unix/X0")?;
 
-    display::print_screen_info(&conn, screen_num);
-    let (win, gc, size) = display::setup_window(&conn, screen_num)?;
+    x11_display::print_screen_info(&conn, screen_num);
+    let (win, gc, size) = x11_display::setup_window(&conn, screen_num)?;
 
     eprintln!(
         "window mapped id=0x{win:x} x={} y={} width={} height={}",
@@ -56,7 +57,7 @@ fn run() -> Result<()> {
         Ok(EventLoopExit::WindowDestroyed) => false,
         Err(_) => true,
     };
-    let cleanup_result = display::cleanup(&conn, win, gc, destroy_window);
+    let cleanup_result = x11_display::cleanup(&conn, win, gc, destroy_window);
 
     match (event_result, cleanup_result) {
         (Err(primary), Err(cleanup_error)) => {
