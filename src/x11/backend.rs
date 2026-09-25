@@ -11,7 +11,7 @@ use std::time::Instant;
 use x11rb::protocol::xproto::{Gcontext, Window};
 use x11rb::rust_connection::RustConnection;
 
-pub(super) struct X11DisplayBackend<'a> {
+pub(crate) struct X11DisplayBackend<'a> {
     conn: &'a RustConnection,
     win: Window,
     gc: Gcontext,
@@ -21,7 +21,7 @@ pub(super) struct X11DisplayBackend<'a> {
 }
 
 impl<'a> X11DisplayBackend<'a> {
-    pub(super) fn new(
+    pub(crate) fn new(
         conn: &'a RustConnection,
         win: Window,
         gc: Gcontext,

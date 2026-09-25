@@ -5,6 +5,7 @@
 //! replaced or supplemented later without touching UI logic.
 
 mod backend;
+pub(crate) use backend::X11DisplayBackend;
 pub mod display;
 pub mod events;
 mod framebuffer;

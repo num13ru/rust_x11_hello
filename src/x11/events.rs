@@ -4,8 +4,6 @@
 //! [`crate::ui::button::PointerEvent`]. Rendering is delegated to the sibling
 //! adapter, and the UI layer never sees X11 types.
 
-use super::backend::X11DisplayBackend;
-
 use crate::app::{Activation, AppState, GeometryUpdate, Redraw, RemotePointerEvent};
 use crate::display::{DisplayBackend, RedrawCause, RemoteFrame};
 use crate::net::Paperspoon;
@@ -16,7 +14,7 @@ use paper_protocol::V2PointerPhase;
 use std::time::Duration;
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
-use x11rb::protocol::xproto::{ButtonPressEvent, ConnectionExt, Gcontext, Window};
+use x11rb::protocol::xproto::{ButtonPressEvent, ConnectionExt, Window};
 use x11rb::rust_connection::RustConnection;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -27,14 +25,12 @@ pub enum EventLoopExit {
 const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 /// Run the event loop until the window is destroyed or the connection fails.
-pub fn event_loop(
+pub(crate) fn event_loop(
     conn: &RustConnection,
     win: Window,
-    gc: Gcontext,
-    initial_size: (u16, u16),
+    display: &mut dyn DisplayBackend,
     paperspoon: &mut Paperspoon,
 ) -> Result<EventLoopExit> {
-    let mut display = X11DisplayBackend::new(conn, win, gc, initial_size);
     let mut app = AppState::new(display.dimensions());
 
     loop {
@@ -66,7 +62,7 @@ pub fn event_loop(
 
         match event {
             Event::Expose(event) if event.window == win && event.count == 0 => {
-                draw_surface(&display, app.redraw(), RedrawCause::SurfaceDamage)
+                draw_surface(display, app.redraw(), RedrawCause::SurfaceDamage)
                     .context("failed to redraw final Expose batch")?;
             }
             Event::Expose(_) => {}
@@ -99,7 +95,7 @@ pub fn event_loop(
                             "event type=ConfigureNotify x={} y={} width={width} height={height} window=0x{:x}",
                             event.x, event.y, event.window
                         );
-                        draw_surface(&display, redraw, RedrawCause::GeometryChange)
+                        draw_surface(display, redraw, RedrawCause::GeometryChange)
                             .context("failed to redraw after ConfigureNotify")?;
                     }
                 }

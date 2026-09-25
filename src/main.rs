@@ -8,6 +8,7 @@ use anyhow::{Context, Result};
 use std::env;
 use x11rb::rust_connection::RustConnection;
 
+use x11::X11DisplayBackend;
 use x11::display as x11_display;
 use x11::events::{EventLoopExit, event_loop, remote_viewport_size};
 
@@ -50,8 +51,9 @@ fn run() -> Result<()> {
     );
 
     let mut paperspoon = net::Paperspoon::start(paperpad_config, remote_viewport_size(size));
-
-    let event_result = event_loop(&conn, win, gc, size, &mut paperspoon);
+    let mut display_backend = X11DisplayBackend::new(&conn, win, gc, size);
+    let event_result = event_loop(&conn, win, &mut display_backend, &mut paperspoon);
+    drop(display_backend);
 
     let destroy_window = match &event_result {
         Ok(EventLoopExit::WindowDestroyed) => false,
