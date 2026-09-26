@@ -231,6 +231,12 @@ A pure metadata adapter now validates the observed `hwtcon_v2`, unrotated
 An unconnected opener combines those checks with panel-info query and writable
 mapping; it does not write pixels or submit an update, and the existing probe
 is unchanged.
+An unconnected presentation path now prepares remote rows and a matching
+remote-only update before writing, then submits the HWTCON request. Host tests
+use `/dev/zero` and verify that a rejected ioctl is not reported as success;
+the runtime and read-only probe still do not call this path. If submission fails,
+framebuffer bytes may already have changed, but no successful presentation is
+reported and no panel refresh can be assumed.
 The HWTCON send-update and wait-complete C layouts are staged from the pinned
 PW6 firmware reference and compile-checked, but no update ioctl has been called
 on the Kindle or device-verified. A pure request builder stages a full GC16

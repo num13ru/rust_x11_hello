@@ -24,6 +24,10 @@ mod metadata;
 #[cfg(target_os = "linux")]
 #[allow(dead_code)]
 mod opened;
+// Remote presentation is staged but not yet selected by the runtime.
+#[cfg(target_os = "linux")]
+#[allow(dead_code)]
+mod present;
 #[cfg(target_os = "linux")]
 mod probe;
 #[cfg(any(target_os = "linux", test))]
