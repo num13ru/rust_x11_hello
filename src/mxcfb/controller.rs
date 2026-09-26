@@ -1,4 +1,4 @@
-//! Thin HWTCON update submission. No production caller uses this yet.
+//! Thin HWTCON update submission. Physical Kindle behavior is unverified.
 
 use std::fs::File;
 use std::io;

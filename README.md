@@ -200,9 +200,14 @@ display commands cross the TCP connection.
 
 `PAPERPAD_DISPLAY_BACKEND` selects PaperPad's display backend. It defaults
 to `x11`; setting it explicitly to `x11` selects the same reference path.
-`mxcfb` is reserved for the direct framebuffer backend and currently fails at
-startup with a clear error. PaperPad never silently falls back to X11 after an
-explicit MXCFB request.
+`mxcfb` explicitly selects the experimental direct-framebuffer display path.
+It still requires the X11 window for touch input and lifecycle events. Startup
+fails if `/dev/fb0`, the required HWTCON capabilities, or matching X11/window
+geometry are unavailable; it never silently falls back to X11. Direct pixels,
+panel refreshes, and X11/MXCFB coexistence have not yet been device-verified.
+KUAL's **Run Paperpad MXCFB (90s, experimental)** action sets this variable
+for one run; **Run Paperpad (90s)** remains the X11 reference action. The
+90-second watchdog is the fallback if Exit is not visible or touch fails.
 
 The KUAL **Inspect framebuffer metadata** action runs `--inspect-framebuffer`
 without starting the normal launcher. It collects read-only `/dev/fb0`
@@ -221,42 +226,23 @@ using the normal MTP log command below and look for `mxcfb probe:` lines. If
 opening `/dev/fb0`, a query, or either mapping fails, the log records the
 specific failure. An accepted writable mapping or panel-info query does not
 prove pixel writes, color polarity, e-ink update submission, or panel output.
-A bounded writable-mapping helper is staged but unused by the app; its Linux
-tests write only to `/dev/zero`, not the Kindle framebuffer.
-Remote rows can now be prepared with validated offsets in a temporary buffer,
-and a staged adapter checks matching geometry and every row before writing. Its
-tests use `/dev/zero`; the app still does not copy rows into `/dev/fb0`.
-A pure metadata adapter now validates the observed `hwtcon_v2`, unrotated
-8-bit framebuffer layout and visible bounds, but startup does not use it yet.
-An unconnected opener combines those checks with panel-info query and writable
-mapping; it does not write pixels or submit an update, and the existing probe
-is unchanged.
-An unconnected presentation path now prepares remote rows and a matching
-remote-only update before writing, then submits the HWTCON request. Host tests
-use `/dev/zero` and verify that a rejected ioctl is not reported as success;
-the runtime and read-only probe still do not call this path. If submission fails,
-framebuffer bytes may already have changed, but no successful presentation is
-reported and no panel refresh can be assumed.
-Pure MXCFB Exit-strip rasterization now shares PaperPad's local Exit bounds and
-touch semantics. A staged writer validates the entire local strip against the
-mapping before writing only those rows, and a separate GC16 request builder
-targets only that strip. An unconnected presentation operation now writes the
-strip and submits that request in order; a rejected ioctl is not reported as a
-successful update. The runtime and read-only probe still call neither path.
-A staged MXCFB display-backend implementation now owns its writable mapping,
-one marker sequence, and a copy of the last kernel-accepted remote Mono1 frame.
-It rejects X11 window geometry that differs from `/dev/fb0`, and still is not
-selected at startup; X11 remains the only runnable display backend.
-The HWTCON send-update and wait-complete C layouts are staged from the pinned
-PW6 firmware reference and compile-checked, but no update ioctl has been called
-on the Kindle or device-verified. A pure request builder stages a full GC16
-remote-only update with a required nonzero marker; it does not submit it. The
-staged marker sequence is seeded from the process ID and skips zero. It keeps
-markers distinct within one sequence until wraparound, but separate sequences
-can collide. An unconnected Linux submission wrapper validates markers and
-visible-region bounds before the ioctl; no update ioctl is used by the probe
-or display path. The probe also does not prove that X11 input can coexist with
-direct display.
+The MXCFB backend validates the observed `hwtcon_v2`, unrotated 8-bit
+framebuffer format and visible bounds, opens `/dev/fb0` read-write, queries
+panel info, and maps only the visible span. It prepares Mono1 remote rows before
+bounded framebuffer writes, then submits a remote-only GC16 update. PaperPad
+renders its own Exit strip using the same bounds as touch hit-testing, writes
+only that strip, and submits a separate strip-only update. A single marker
+sequence serves both paths. The last remote Mono1 frame is cached only after
+the kernel accepts its update; redraws submit that cached frame again. A failed
+submission can leave changed framebuffer bytes, but does not replace the cache
+or establish a physical panel refresh.
+
+Host Linux tests use `/dev/zero`, not the Kindle framebuffer. The HWTCON
+send-update and wait-complete C layouts come from the pinned PW6 firmware
+reference and compile on ARM, but neither pixel output nor update submission
+has been verified on the Kindle. The read-only metadata probe still does not
+write pixels or submit updates. Whether X11 touch input and direct framebuffer
+output coexist without interference remains a device-test question.
 
 Runtime overrides now use the `PAPERPAD_` prefix. The KUAL launcher reads
 `PAPERPAD_EXT_DIR`, `PAPERPAD_WATCHDOG_SECONDS`, and
@@ -413,6 +399,17 @@ In KUAL, use **Run Paperpad (90s)**. Perform taps within the visible window,
 then use Paperpad's in-window **Exit** button or allow the watchdog to end the
 run. There is no separate stop menu item because Paperpad covers KUAL while its
 full-screen window is open.
+
+For the first MXCFB trial, verify the deployed binary checksum, start
+PaperSpoon, then choose **Run Paperpad MXCFB (90s, experimental)**. Confirm the
+local Exit strip is visible and usable even if PaperSpoon disconnects. Compare
+the same diagnostic frames through the X11 action and MXCFB: check orientation,
+black/white polarity, the rightmost and bottom remote pixels, and that remote
+content never covers Exit. Check replacement frames, reconnect, touch input,
+and any X11 repaint or sleep/wake interference. If Exit is not visible or touch
+fails, let the watchdog end the run and confirm the window is gone before any
+MTP update. A successful ARM build or update ioctl is not a verified panel
+image; retain the device log and report what was physically visible.
 
 After the process ends, retrieve the log:
 

@@ -1,4 +1,4 @@
-//! MXCFB sibling of the X11 display backend. Startup does not select it yet.
+//! Experimental MXCFB sibling of the X11 display backend.
 
 use std::fs::File;
 

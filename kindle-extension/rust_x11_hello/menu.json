@@ -5,6 +5,10 @@
       "action": "sh bin/run.sh"
     },
     {
+      "name": "Run Paperpad MXCFB (90s, experimental)",
+      "action": "PAPERPAD_DISPLAY_BACKEND=mxcfb sh bin/run.sh"
+    },
+    {
       "name": "Inspect framebuffer metadata",
       "action": "sh bin/probe-fb.sh"
     }

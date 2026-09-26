@@ -12,7 +12,7 @@ check:
 	sh -n kindle-extension/rust_x11_hello/bin/probe-fb.sh
 	bash -n scripts/deploy-kindle-mtp.sh
 	bash scripts/test-deploy-kindle-mtp.sh
-	jq -e '.items == [{"name":"Run Paperpad (90s)","action":"sh bin/run.sh"},{"name":"Inspect framebuffer metadata","action":"sh bin/probe-fb.sh"}]' \
+	jq -e '.items == [{"name":"Run Paperpad (90s)","action":"sh bin/run.sh"},{"name":"Run Paperpad MXCFB (90s, experimental)","action":"PAPERPAD_DISPLAY_BACKEND=mxcfb sh bin/run.sh"},{"name":"Inspect framebuffer metadata","action":"sh bin/probe-fb.sh"}]' \
 		kindle-extension/rust_x11_hello/menu.json >/dev/null
 
 .PHONY: image build verify shell clean clean-gnu clean-target

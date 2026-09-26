@@ -1,12 +1,14 @@
-//! Direct-framebuffer diagnostics and, eventually, the MXCFB display backend.
+//! Direct-framebuffer diagnostics and the experimental MXCFB display backend.
 
 #[cfg(target_os = "linux")]
 mod abi;
-// Complete backend implementation is staged before runtime selection.
+// Selected only when PAPERPAD_DISPLAY_BACKEND=mxcfb on Linux.
 #[cfg(target_os = "linux")]
 #[allow(dead_code)]
 mod backend;
-// Submission is staged but not connected to the display or probe path.
+#[cfg(target_os = "linux")]
+pub(crate) use backend::MxcfbDisplayBackend;
+// Update submission is used by the display backend, never by the probe.
 #[cfg(target_os = "linux")]
 #[allow(dead_code)]
 mod controller;
@@ -14,7 +16,7 @@ mod controller;
 mod hwtcon;
 #[cfg(any(target_os = "linux", test))]
 mod layout;
-// Bounded framebuffer writes are staged, not yet connected to frame display.
+// Bounded framebuffer writes serve remote frames and the local Exit strip.
 #[cfg(target_os = "linux")]
 #[allow(dead_code)]
 mod mapped;
@@ -24,11 +26,11 @@ mod memory;
 #[cfg(target_os = "linux")]
 #[allow(dead_code)]
 mod metadata;
-// Backend opening is staged but not used by startup or the probe.
+// Backend opening is distinct from the read-only metadata probe.
 #[cfg(target_os = "linux")]
 #[allow(dead_code)]
 mod opened;
-// Remote presentation is staged but not yet selected by the runtime.
+// Remote and local presentation are selected through the MXCFB backend.
 #[cfg(target_os = "linux")]
 #[allow(dead_code)]
 mod present;
@@ -42,13 +44,13 @@ mod region;
 mod system_pixels;
 #[cfg(any(target_os = "linux", test))]
 mod update_request;
-// Markers are staged independently of update submission.
+// One process-local marker sequence serves both update regions.
 #[cfg(any(target_os = "linux", test))]
 #[allow(dead_code)]
 mod update_marker;
-// Source-derived update layouts are compiled but not used for device calls yet.
+// Firmware-attributed update layouts are compiled but not device-verified yet.
 mod update_abi;
-// Pure conversion is staged before the framebuffer writer is connected.
+// Pure Mono1 conversion remains independent of framebuffer writes.
 #[allow(dead_code)]
 mod pixels;
 

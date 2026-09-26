@@ -1,5 +1,4 @@
-//! Staged remote and local-system-UI presentation. Startup does not call this
-//! module yet.
+//! Remote and local-system-UI presentation for the MXCFB backend.
 //! A successful return means the kernel accepted an update request, not that
 //! the physical panel completed it.
 

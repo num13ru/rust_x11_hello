@@ -1,4 +1,4 @@
-//! Owned writable framebuffer mapping. No production caller writes through it yet.
+//! Owned writable framebuffer mapping for the MXCFB display backend.
 
 use std::fs::File;
 use std::io;

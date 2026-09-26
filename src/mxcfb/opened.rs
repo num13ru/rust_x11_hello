@@ -1,5 +1,5 @@
-//! Staged MXCFB framebuffer opener. No production path calls this yet.
-//! Opening maps writable memory but neither writes pixels nor refreshes ink.
+//! MXCFB framebuffer opener. Opening alone maps writable memory but neither
+//! writes pixels nor refreshes ink.
 
 use std::fs::{File, OpenOptions};
 
