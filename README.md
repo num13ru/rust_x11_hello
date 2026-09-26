@@ -404,8 +404,10 @@ then use Paperpad's in-window **Exit** button or allow the watchdog to end the
 run. There is no separate stop menu item because Paperpad covers KUAL while its
 full-screen window is open.
 
-For further MXCFB trials, verify the deployed binary checksum, start
-PaperSpoon, then choose **Run Paperpad MXCFB (90s, experimental)**. Confirm the
+For further MXCFB trials, follow the
+[physical-validation sequence](docs/mxcfb-manual-validation.md). Verify the
+deployed binary checksum. With an operator-controlled PaperSpoon session
+already available, choose **Run Paperpad MXCFB (90s, experimental)**. Confirm the
 local Exit strip is visible and usable even if PaperSpoon disconnects. Compare
 the same diagnostic frames through the X11 action and MXCFB: check orientation,
 black/white polarity, the rightmost and bottom remote pixels, and that remote
