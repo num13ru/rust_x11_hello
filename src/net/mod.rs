@@ -14,8 +14,8 @@
 //! endpoint. Neither path blocks or breaks the X11 event loop.
 
 use paper_protocol::{
-    V2_HEADER_LEN, V2DecodeResult, V2Hello, V2MessageType, V2Payload, V2Pointer, V2PointerPhase,
-    V2Viewport, decode_v2_message, decode_v2_payload,
+    V2_HEADER_LEN, V2DecodeResult, V2Hello, V2MessageType, V2Payload, V2PixelFormat, V2Pointer,
+    V2PointerPhase, V2Viewport, decode_v2_message, decode_v2_payload,
 };
 
 mod connection;
@@ -327,6 +327,15 @@ fn read_v2_frame<R: Read>(reader: &mut R) -> io::Result<ReceivedFrame> {
             "PaperSpoon message type and typed payload disagreed",
         ));
     };
+    if frame.pixel_format() != V2PixelFormat::Mono1 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "PaperSpoon sent unadvertised {:?} frame",
+                frame.pixel_format()
+            ),
+        ));
+    }
     Ok(ReceivedFrame {
         frame_id: frame.frame_id(),
         width: frame.width(),
@@ -1207,6 +1216,13 @@ mod tests {
                 .kind(),
             io::ErrorKind::InvalidData
         );
+
+        let gray8 = paper_protocol::Gray8Frame::new(1, 1, vec![0]).expect("valid Gray8");
+        let gray8 = paper_protocol::encode_v2_frame(9, &gray8).expect("encode Gray8 Frame");
+        let error = read_inbound_frame(&mut BufReader::new(Cursor::new(gray8)))
+            .expect_err("unadvertised Gray8 Frame");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("Gray8"));
 
         let hello = paper_protocol::V2Hello::new(8, 1)
             .encode_message()

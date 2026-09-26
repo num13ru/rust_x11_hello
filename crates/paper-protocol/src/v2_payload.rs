@@ -2,7 +2,10 @@
 
 use std::fmt;
 
-use super::framebuffer::{Mono1Frame, Mono1FrameError, PixelFormat, validate_mono1_pixels};
+use super::framebuffer::{
+    Frame, FrameError, Gray8Frame, Gray8FrameError, Mono1Frame, Mono1FrameError, PixelFormat,
+    validate_gray8_pixels, validate_mono1_pixels,
+};
 use super::v2::{
     V2_HEADER_LEN, V2_VERSION, V2EncodeError, V2Header, V2Message, V2MessageType, encode_v2_message,
 };
@@ -14,6 +17,7 @@ pub const V2_FRAME_PREFIX_LEN: usize = 16;
 
 const MONO1_FORMAT_VALUE: u8 = 1;
 const MONO1_FORMAT_MASK: u8 = 1;
+const GRAY8_FORMAT_VALUE: u8 = 2;
 const GRAY8_FORMAT_MASK: u8 = 1 << 1;
 const SUPPORTED_FORMAT_MASK: u8 = MONO1_FORMAT_MASK | GRAY8_FORMAT_MASK;
 
@@ -62,6 +66,13 @@ const fn pixel_format_mask(pixel_format: V2PixelFormat) -> u8 {
     match pixel_format {
         V2PixelFormat::Mono1 => MONO1_FORMAT_MASK,
         V2PixelFormat::Gray8 => GRAY8_FORMAT_MASK,
+    }
+}
+
+const fn pixel_format_value(pixel_format: V2PixelFormat) -> u8 {
+    match pixel_format {
+        V2PixelFormat::Mono1 => MONO1_FORMAT_VALUE,
+        V2PixelFormat::Gray8 => GRAY8_FORMAT_VALUE,
     }
 }
 
@@ -191,11 +202,70 @@ impl V2Pointer {
     }
 }
 
+/// Borrowed validated framebuffer accepted by the protocol-v2 encoder.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum V2FrameRef<'a> {
+    Mono1(&'a Mono1Frame),
+    Gray8(&'a Gray8Frame),
+}
+
+impl<'a> V2FrameRef<'a> {
+    fn width(self) -> u16 {
+        match self {
+            Self::Mono1(frame) => frame.width(),
+            Self::Gray8(frame) => frame.width(),
+        }
+    }
+
+    fn height(self) -> u16 {
+        match self {
+            Self::Mono1(frame) => frame.height(),
+            Self::Gray8(frame) => frame.height(),
+        }
+    }
+
+    fn pixel_format(self) -> V2PixelFormat {
+        match self {
+            Self::Mono1(_) => V2PixelFormat::Mono1,
+            Self::Gray8(_) => V2PixelFormat::Gray8,
+        }
+    }
+
+    fn pixels(self) -> &'a [u8] {
+        match self {
+            Self::Mono1(frame) => frame.pixels(),
+            Self::Gray8(frame) => frame.pixels(),
+        }
+    }
+}
+
+impl<'a> From<&'a Mono1Frame> for V2FrameRef<'a> {
+    fn from(frame: &'a Mono1Frame) -> Self {
+        Self::Mono1(frame)
+    }
+}
+
+impl<'a> From<&'a Gray8Frame> for V2FrameRef<'a> {
+    fn from(frame: &'a Gray8Frame) -> Self {
+        Self::Gray8(frame)
+    }
+}
+
+impl<'a> From<&'a Frame> for V2FrameRef<'a> {
+    fn from(frame: &'a Frame) -> Self {
+        match frame {
+            Frame::Mono1(frame) => Self::Mono1(frame),
+            Frame::Gray8(frame) => Self::Gray8(frame),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct V2FramePayload<'a> {
     frame_id: u64,
     width: u16,
     height: u16,
+    pixel_format: V2PixelFormat,
     stride: usize,
     pixels: &'a [u8],
 }
@@ -218,15 +288,20 @@ impl<'a> V2FramePayload<'a> {
     }
 
     pub fn pixel_format(self) -> V2PixelFormat {
-        V2PixelFormat::Mono1
+        self.pixel_format
     }
 
     pub fn pixels(self) -> &'a [u8] {
         self.pixels
     }
 
-    pub fn to_owned_frame(self) -> Result<Mono1Frame, Mono1FrameError> {
-        Mono1Frame::new(self.width, self.height, self.pixels.to_vec())
+    pub fn to_owned_frame(self) -> Result<Frame, FrameError> {
+        Frame::new(
+            self.width,
+            self.height,
+            self.pixel_format,
+            self.pixels.to_vec(),
+        )
     }
 }
 
@@ -257,6 +332,7 @@ pub enum V2PayloadError {
         value: u32,
     },
     Mono1(Mono1FrameError),
+    Gray8(Gray8FrameError),
 }
 
 impl fmt::Display for V2PayloadError {
@@ -297,6 +373,7 @@ impl fmt::Display for V2PayloadError {
                 "{message_type:?} reserved payload bytes must be zero, got 0x{value:x}"
             ),
             Self::Mono1(error) => write!(formatter, "invalid Mono1 frame payload: {error}"),
+            Self::Gray8(error) => write!(formatter, "invalid Gray8 frame payload: {error}"),
         }
     }
 }
@@ -305,6 +382,7 @@ impl std::error::Error for V2PayloadError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Mono1(error) => Some(error),
+            Self::Gray8(error) => Some(error),
             Self::InvalidLength { .. }
             | Self::TruncatedFrameMetadata { .. }
             | Self::HelloVersion(_)
@@ -321,8 +399,18 @@ impl From<Mono1FrameError> for V2PayloadError {
     }
 }
 
-/// Encode a validated Mono1 framebuffer as one complete v2 Frame message.
-pub fn encode_v2_frame(frame_id: u64, frame: &Mono1Frame) -> Result<Vec<u8>, V2EncodeError> {
+impl From<Gray8FrameError> for V2PayloadError {
+    fn from(error: Gray8FrameError) -> Self {
+        Self::Gray8(error)
+    }
+}
+
+/// Encode a validated Mono1 or Gray8 framebuffer as one complete v2 Frame message.
+pub fn encode_v2_frame<'a>(
+    frame_id: u64,
+    frame: impl Into<V2FrameRef<'a>>,
+) -> Result<Vec<u8>, V2EncodeError> {
+    let frame = frame.into();
     let payload_len = V2_FRAME_PREFIX_LEN + frame.pixels().len();
     let header = V2Header::new(V2MessageType::Frame, payload_len)?;
     let mut encoded = Vec::with_capacity(V2_HEADER_LEN + payload_len);
@@ -330,7 +418,7 @@ pub fn encode_v2_frame(frame_id: u64, frame: &Mono1Frame) -> Result<Vec<u8>, V2E
     encoded.extend_from_slice(&frame_id.to_be_bytes());
     encoded.extend_from_slice(&frame.width().to_be_bytes());
     encoded.extend_from_slice(&frame.height().to_be_bytes());
-    encoded.push(MONO1_FORMAT_VALUE);
+    encoded.push(pixel_format_value(frame.pixel_format()));
     encoded.extend_from_slice(&[0; 3]);
     encoded.extend_from_slice(frame.pixels());
     Ok(encoded)
@@ -407,9 +495,11 @@ fn decode_frame(payload: &[u8]) -> Result<V2FramePayload<'_>, V2PayloadError> {
     let frame_id = u64::from_be_bytes(payload[0..8].try_into().expect("eight-byte payload slice"));
     let width = u16::from_be_bytes(payload[8..10].try_into().expect("two-byte payload slice"));
     let height = u16::from_be_bytes(payload[10..12].try_into().expect("two-byte payload slice"));
-    if payload[12] != MONO1_FORMAT_VALUE {
-        return Err(V2PayloadError::UnsupportedPixelFormat(payload[12]));
-    }
+    let pixel_format = match payload[12] {
+        MONO1_FORMAT_VALUE => V2PixelFormat::Mono1,
+        GRAY8_FORMAT_VALUE => V2PixelFormat::Gray8,
+        unsupported => return Err(V2PayloadError::UnsupportedPixelFormat(unsupported)),
+    };
     let reserved =
         u32::from(payload[13]) << 16 | u32::from(payload[14]) << 8 | u32::from(payload[15]);
     if reserved != 0 {
@@ -419,12 +509,20 @@ fn decode_frame(payload: &[u8]) -> Result<V2FramePayload<'_>, V2PayloadError> {
         });
     }
     let pixels = &payload[V2_FRAME_PREFIX_LEN..];
-    let stride = validate_mono1_pixels(width, height, pixels)?;
+    let stride = match pixel_format {
+        V2PixelFormat::Mono1 => {
+            validate_mono1_pixels(width, height, pixels).map_err(V2PayloadError::Mono1)?
+        }
+        V2PixelFormat::Gray8 => {
+            validate_gray8_pixels(width, height, pixels).map_err(V2PayloadError::Gray8)?
+        }
+    };
 
     Ok(V2FramePayload {
         frame_id,
         width,
         height,
+        pixel_format,
         stride,
         pixels,
     })
@@ -550,7 +648,27 @@ mod tests {
         assert_eq!(decoded.stride(), 2);
         assert_eq!(decoded.pixel_format(), V2PixelFormat::Mono1);
         assert_eq!(decoded.pixels(), frame.pixels());
-        assert_eq!(decoded.to_owned_frame(), Ok(frame));
+        assert_eq!(decoded.to_owned_frame(), Ok(Frame::Mono1(frame)));
+    }
+
+    #[test]
+    fn gray8_frame_roundtrip_borrows_validated_pixels() {
+        let frame = Gray8Frame::new(3, 2, vec![0, 64, 128, 192, 224, 255]).expect("Gray8 frame");
+        let encoded = encode_v2_frame(0x1112_1314_1516_1718, &frame).expect("encode Frame");
+        assert_eq!(
+            &encoded[V2_HEADER_LEN..V2_HEADER_LEN + V2_FRAME_PREFIX_LEN],
+            &[17, 18, 19, 20, 21, 22, 23, 24, 0, 3, 0, 2, 2, 0, 0, 0]
+        );
+
+        let Ok(V2Payload::Frame(decoded)) = typed_payload(&encoded) else {
+            panic!("decoded Frame expected");
+        };
+        assert_eq!(decoded.frame_id(), 0x1112_1314_1516_1718);
+        assert_eq!((decoded.width(), decoded.height()), (3, 2));
+        assert_eq!(decoded.stride(), 3);
+        assert_eq!(decoded.pixel_format(), V2PixelFormat::Gray8);
+        assert_eq!(decoded.pixels(), frame.pixels());
+        assert_eq!(decoded.to_owned_frame(), Ok(Frame::Gray8(frame)));
     }
 
     #[test]
@@ -632,11 +750,11 @@ mod tests {
         payload[10..12].copy_from_slice(&1_u16.to_be_bytes());
         payload[12] = MONO1_FORMAT_VALUE;
 
-        payload[12] = 2;
+        payload[12] = 3;
         let encoded = encode_v2_message(V2MessageType::Frame, &payload).expect("encode");
         assert_eq!(
             typed_payload(&encoded),
-            Err(V2PayloadError::UnsupportedPixelFormat(2))
+            Err(V2PayloadError::UnsupportedPixelFormat(3))
         );
 
         payload[12] = MONO1_FORMAT_VALUE;
@@ -671,5 +789,58 @@ mod tests {
                 byte: 1,
             }))
         );
+    }
+
+    #[test]
+    fn gray8_frame_rejects_zero_dimensions_and_inexact_payload_lengths() {
+        for (width, height, pixel_count, expected) in [
+            (
+                0_u16,
+                1_u16,
+                0,
+                Gray8FrameError::ZeroDimension {
+                    width: 0,
+                    height: 1,
+                },
+            ),
+            (
+                1_u16,
+                0_u16,
+                0,
+                Gray8FrameError::ZeroDimension {
+                    width: 1,
+                    height: 0,
+                },
+            ),
+            (
+                2_u16,
+                2_u16,
+                3,
+                Gray8FrameError::PayloadLength {
+                    expected: 4,
+                    actual: 3,
+                },
+            ),
+            (
+                2_u16,
+                2_u16,
+                5,
+                Gray8FrameError::PayloadLength {
+                    expected: 4,
+                    actual: 5,
+                },
+            ),
+        ] {
+            let mut payload = vec![0; V2_FRAME_PREFIX_LEN + pixel_count];
+            payload[8..10].copy_from_slice(&width.to_be_bytes());
+            payload[10..12].copy_from_slice(&height.to_be_bytes());
+            payload[12] = GRAY8_FORMAT_VALUE;
+
+            let encoded = encode_v2_message(V2MessageType::Frame, &payload).expect("encode");
+            assert_eq!(
+                typed_payload(&encoded),
+                Err(V2PayloadError::Gray8(expected))
+            );
+        }
     }
 }

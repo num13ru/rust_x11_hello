@@ -176,7 +176,7 @@ fn corner_marker(x: u16, y: u16, width: u16, height: u16) -> bool {
 mod tests {
     use super::*;
     use paper_protocol::{
-        Mono1Pixel, V2DecodeResult, V2Payload, decode_v2_message, decode_v2_payload,
+        Frame, Mono1Pixel, V2DecodeResult, V2Payload, decode_v2_message, decode_v2_payload,
     };
 
     fn decoded_frame(spec: DiagnosticFrame) -> (u64, Mono1Frame) {
@@ -190,10 +190,11 @@ mod tests {
         let V2Payload::Frame(frame) = decode_v2_payload(message).expect("decode payload") else {
             panic!("Frame expected");
         };
-        (
-            frame.frame_id(),
-            frame.to_owned_frame().expect("owned frame"),
-        )
+        let frame_id = frame.frame_id();
+        let Frame::Mono1(frame) = frame.to_owned_frame().expect("owned frame") else {
+            panic!("Mono1 frame expected");
+        };
+        (frame_id, frame)
     }
 
     #[test]
