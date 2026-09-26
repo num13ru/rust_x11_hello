@@ -237,6 +237,8 @@ use `/dev/zero` and verify that a rejected ioctl is not reported as success;
 the runtime and read-only probe still do not call this path. If submission fails,
 framebuffer bytes may already have changed, but no successful presentation is
 reported and no panel refresh can be assumed.
+Pure MXCFB Exit-strip rasterization now shares PaperPad's local Exit bounds and
+touch semantics, but remains unconnected to framebuffer writes and refreshes.
 The HWTCON send-update and wait-complete C layouts are staged from the pinned
 PW6 firmware reference and compile-checked, but no update ioctl has been called
 on the Kindle or device-verified. A pure request builder stages a full GC16

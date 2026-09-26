@@ -32,6 +32,10 @@ mod present;
 mod probe;
 #[cfg(any(target_os = "linux", test))]
 mod region;
+// Local Exit pixels are prepared without touching /dev/fb0.
+#[cfg(any(target_os = "linux", test))]
+#[allow(dead_code)]
+mod system_pixels;
 #[cfg(any(target_os = "linux", test))]
 mod update_request;
 // Markers are staged independently of update submission.
