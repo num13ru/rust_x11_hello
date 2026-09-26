@@ -12,7 +12,7 @@ steps an agent should follow, especially around physical-device work.
 - KUAL action: **Run Paperpad (90s)**. Stop from the in-window **Exit** button
   or let the watchdog end the run; the full-screen window covers KUAL.
 - Physical device: Kindle Paperwhite 6 (Sangria / Bellatrix4), FW 5.17.1.0.4.
-  USBNetwork is NOT available on this device; transport is Wi-Fi via `RUST_X11_HELLO_COMPANION`.
+  USBNetwork is NOT available on this device; transport is Wi-Fi via `PAPERPAD_COMPANION`.
 
 ## Architecture ownership
 

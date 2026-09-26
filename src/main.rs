@@ -4,7 +4,7 @@
 //! Display/event handling lives in [`x11`]; logical UI concepts (geometry,
 //! hit testing, contact state) live in [`ui`].
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use std::env;
 use x11rb::rust_connection::RustConnection;
 
@@ -34,6 +34,10 @@ fn print_environment() {
 }
 
 fn run() -> Result<()> {
+    let display_backend = config::DisplayBackendKind::from_env()?;
+    if display_backend == config::DisplayBackendKind::Mxcfb {
+        bail!("display backend=mxcfb requested but MXCFB support is not implemented in this build");
+    }
     let paperpad_config = config::PaperpadConfig::from_env()?;
 
     let (conn, screen_num) = RustConnection::connect(None)

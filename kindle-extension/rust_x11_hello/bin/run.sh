@@ -1,6 +1,6 @@
 #!/bin/sh
 
-EXT_DIR="${RUST_X11_HELLO_EXT_DIR:-/mnt/us/extensions/rust_x11_hello}"
+EXT_DIR="${PAPERPAD_EXT_DIR:-/mnt/us/extensions/rust_x11_hello}"
 BIN="$EXT_DIR/bin/rust_x11_hello"
 LOG="$EXT_DIR/rust_x11_hello.log"
 PID_FILE="$EXT_DIR/rust_x11_hello.pid"
@@ -8,11 +8,11 @@ STATUS_FILE="$EXT_DIR/rust_x11_hello.status"
 WATCHDOG_MARKER="$EXT_DIR/rust_x11_hello.watchdog"
 LOCK_DIR="$EXT_DIR/rust_x11_hello.lock"
 LOCK_OWNER_FILE="$LOCK_DIR/launcher.pid"
-WATCHDOG_SECONDS="${RUST_X11_HELLO_WATCHDOG_SECONDS:-90}"
-WATCHDOG_TERM_GRACE_SECONDS="${RUST_X11_HELLO_WATCHDOG_TERM_GRACE_SECONDS:-5}"
+WATCHDOG_SECONDS="${PAPERPAD_WATCHDOG_SECONDS:-90}"
+WATCHDOG_TERM_GRACE_SECONDS="${PAPERPAD_WATCHDOG_TERM_GRACE_SECONDS:-5}"
 # The normal KUAL action leaves this unset for UDP discovery. An explicit host
 # remains available as a manual diagnostic override.
-COMPANION_HOST="${RUST_X11_HELLO_COMPANION:-}"
+COMPANION_HOST="${PAPERPAD_COMPANION:-}"
 
 CHILD_PID=""
 WATCHDOG_PID=""
@@ -239,7 +239,7 @@ if ! chmod +x "$BIN" 2>> "$LOG"; then
 fi
 if [ -n "$COMPANION_HOST" ]; then
     echo "PaperSpoon host: $COMPANION_HOST" >> "$LOG"
-    RUST_X11_HELLO_COMPANION="$COMPANION_HOST" "$BIN" >> "$LOG" 2>&1 &
+    PAPERPAD_COMPANION="$COMPANION_HOST" "$BIN" >> "$LOG" 2>&1 &
 else
     echo "PaperSpoon host: (unset, discovery)" >> "$LOG"
     "$BIN" >> "$LOG" 2>&1 &

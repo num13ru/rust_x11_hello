@@ -166,16 +166,16 @@ the bounded run and never flushes unrelated firewall tables.
 
 ### Explicit host override
 
-Setting `RUST_X11_HELLO_COMPANION` (e.g. to a Wi-Fi run where the Mac is at
+Setting `PAPERPAD_COMPANION` (e.g. to a Wi-Fi run where the Mac is at
 `192.168.0.12`) bypasses discovery and connects directly:
 
 ```sh
-RUST_X11_HELLO_COMPANION=192.168.0.12
+PAPERPAD_COMPANION=192.168.0.12
 ```
 
 The host value is trimmed. An absent or blank host selects discovery, which
 uses the TCP port advertised by PaperSpoon. With an explicit host,
-`RUST_X11_HELLO_COMPANION_PORT` optionally overrides the default TCP port
+`PAPERPAD_COMPANION_PORT` optionally overrides the default TCP port
 5581 and must be a decimal value in `1..=65535`. Empty, zero, malformed, or
 out-of-range ports—and a port override without an explicit host—are startup
 configuration errors reported before Paperpad creates its X11 window.
@@ -195,6 +195,19 @@ PaperPad retries in the background. Pointer messages attempted while
 disconnected fail immediately and are not queued or replayed after connection.
 The Kindle opens no listening TCP socket. No application action IDs or text
 display commands cross the TCP connection.
+
+### Display backend selection
+
+`PAPERPAD_DISPLAY_BACKEND` selects PaperPad's display backend. It defaults
+to `x11`; setting it explicitly to `x11` selects the same reference path.
+`mxcfb` is reserved for the direct framebuffer backend and currently fails at
+startup with a clear error. PaperPad never silently falls back to X11 after an
+explicit MXCFB request.
+
+Runtime overrides now use the `PAPERPAD_` prefix. The KUAL launcher reads
+`PAPERPAD_EXT_DIR`, `PAPERPAD_WATCHDOG_SECONDS`, and
+`PAPERPAD_WATCHDOG_TERM_GRACE_SECONDS`. Update existing overrides; legacy
+environment names are no longer read.
 
 ### Running PaperSpoon
 
@@ -257,7 +270,7 @@ frame to confirm it remains device-local and responsive.
 For a Wi-Fi run, the listener binds `0.0.0.0` on TCP 5581 **and** starts the
 UDP discovery responder on `0.0.0.0:5580` (you should see both the TCP
 banner and `discovery listening address=0.0.0.0:5580`). With no
-`RUST_X11_HELLO_COMPANION`, the Kindle discovers PaperSpoon automatically
+`PAPERPAD_COMPANION`, the Kindle discovers PaperSpoon automatically
 over the LAN. Wi-Fi and MTP can coexist over the USB link. USBNetwork is not
 available on this Paperwhite 6 — no maintained USBNetwork package accepts
 the device — so the USBNetwork
