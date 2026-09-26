@@ -2,6 +2,10 @@
 
 #[cfg(target_os = "linux")]
 mod abi;
+#[cfg(any(target_os = "linux", test))]
+mod layout;
+#[cfg(target_os = "linux")]
+mod memory;
 #[cfg(target_os = "linux")]
 mod probe;
 // Pure conversion is staged before the framebuffer writer is connected.

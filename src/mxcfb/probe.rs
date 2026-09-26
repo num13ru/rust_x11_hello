@@ -4,7 +4,7 @@
 use anyhow::{Context, Result};
 use std::fs::{self, File};
 
-use super::abi;
+use super::{abi, layout, memory};
 
 pub(crate) fn inspect_framebuffer() -> Result<()> {
     eprintln!("mxcfb probe: read-only /dev/fb0 inspection");
@@ -42,6 +42,22 @@ pub(crate) fn inspect_framebuffer() -> Result<()> {
         "mxcfb probe: red={:?} green={:?} blue={:?} alpha={:?}",
         variable.red, variable.green, variable.blue, variable.transp
     );
+
+    let mapping_length = layout::visible_mapping_len(layout::FramebufferGeometry {
+        xres: variable.xres,
+        yres: variable.yres,
+        xres_virtual: variable.xres_virtual,
+        yres_virtual: variable.yres_virtual,
+        xoffset: variable.xoffset,
+        yoffset: variable.yoffset,
+        bits_per_pixel: variable.bits_per_pixel,
+        line_length: fixed.line_length,
+        smem_len: fixed.smem_len,
+    })
+    .context("mxcfb probe: visible framebuffer mapping bounds")?;
+    memory::check_read_only_mapping(&file, mapping_length)
+        .context("mxcfb probe: read-only framebuffer mapping")?;
+    eprintln!("mxcfb probe: read-only mmap accepted length={mapping_length}");
     Ok(())
 }
 

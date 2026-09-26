@@ -9,5 +9,6 @@ resolver = "3"
 
 [dependencies]
 anyhow = "1"
+libc = "0.2"
 paper-protocol = { path = "crates/paper-protocol" }
 x11rb = "0.13"

@@ -1,5 +1,17 @@
 # Paperwhite 6 framebuffer evidence
 
+## Read-only mapping check (2026-09-26)
+
+The deployed probe binary was read back over MTP and matched the host artifact
+at SHA-256 `d74b5b0118e23e68494939073eb658abeecff6a2f9fb68c691c58e168f96e947`.
+The latest **Inspect framebuffer metadata** log block reported the geometry
+below, `read-only mmap accepted length=2157312`, and probe exit status 0. The
+KUAL status file reported `STOPPED status=0 reason=process_exit`. The probe
+mapped the validated visible span with `PROT_READ`, then unmapped it without
+reading pixel bytes. This verifies that this mapping operation was accepted
+on this device; pixel access, byte polarity, framebuffer writes, and e-ink
+update submission remain unverified.
+
 Read-only `--inspect-framebuffer` probe run on the project's Paperwhite 6
 (Sangria / Bellatrix4, FW 5.17.1.0.4) on 2026-09-26. The deployed binary was
 read back over MTP and matched the host artifact's SHA-256:
