@@ -4,6 +4,9 @@
 mod abi;
 #[cfg(target_os = "linux")]
 mod probe;
+// Pure conversion is staged before the framebuffer writer is connected.
+#[allow(dead_code)]
+mod pixels;
 
 #[cfg(target_os = "linux")]
 pub(crate) use probe::inspect_framebuffer;
