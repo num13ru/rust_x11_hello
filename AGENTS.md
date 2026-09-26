@@ -12,8 +12,10 @@ steps an agent should follow, especially around physical-device work.
 - KUAL actions: **Run Paperpad (90s)** uses the X11 default; **Run Paperpad
   MXCFB (90s, experimental)** selects direct framebuffer output while retaining
   the X11 window for input. Stop from the in-window **Exit** button or let the
-  watchdog end the run; the full-screen window covers KUAL. MXCFB display and
-  X11 coexistence are not yet physically verified.
+  watchdog end the run; the full-screen window covers KUAL. A first MXCFB
+  trial on the Paperwhite 6 exercised direct display, X11 touch, and local Exit;
+  remaining visual and lifecycle checks are recorded in
+  `docs/mxcfb-device-evidence.md`.
 - **Inspect framebuffer metadata** is a read-only KUAL diagnostic. It logs
   `/dev/fb0` metadata without using the normal launcher or drawing.
 - Physical device: Kindle Paperwhite 6 (Sangria / Bellatrix4), FW 5.17.1.0.4.

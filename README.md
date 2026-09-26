@@ -203,8 +203,10 @@ to `x11`; setting it explicitly to `x11` selects the same reference path.
 `mxcfb` explicitly selects the experimental direct-framebuffer display path.
 It still requires the X11 window for touch input and lifecycle events. Startup
 fails if `/dev/fb0`, the required HWTCON capabilities, or matching X11/window
-geometry are unavailable; it never silently falls back to X11. Direct pixels,
-panel refreshes, and X11/MXCFB coexistence have not yet been device-verified.
+geometry are unavailable; it never silently falls back to X11. A first
+Paperwhite 6 trial exercised direct display alongside X11 touch and local Exit;
+see [device evidence](docs/mxcfb-device-evidence.md) for the exact observations
+and still-unverified cases.
 KUAL's **Run Paperpad MXCFB (90s, experimental)** action sets this variable
 for one run; **Run Paperpad (90s)** remains the X11 reference action. The
 90-second watchdog is the fallback if Exit is not visible or touch fails.
@@ -239,10 +241,12 @@ or establish a physical panel refresh.
 
 Host Linux tests use `/dev/zero`, not the Kindle framebuffer. The HWTCON
 send-update and wait-complete C layouts come from the pinned PW6 firmware
-reference and compile on ARM, but neither pixel output nor update submission
-has been verified on the Kindle. The read-only metadata probe still does not
-write pixels or submit updates. Whether X11 touch input and direct framebuffer
-output coexist without interference remains a device-test question.
+reference and compile on ARM. The first Kindle runtime trial submitted updates
+and the operator reported a working MXCFB display; update-completion timing
+and exact pixel fidelity remain unverified. The read-only metadata probe still
+does not write pixels or submit updates. X11 touch worked alongside direct
+framebuffer output in that trial, but X11 repaint and sleep/wake interference
+still need targeted testing.
 
 Runtime overrides now use the `PAPERPAD_` prefix. The KUAL launcher reads
 `PAPERPAD_EXT_DIR`, `PAPERPAD_WATCHDOG_SECONDS`, and
@@ -400,7 +404,7 @@ then use Paperpad's in-window **Exit** button or allow the watchdog to end the
 run. There is no separate stop menu item because Paperpad covers KUAL while its
 full-screen window is open.
 
-For the first MXCFB trial, verify the deployed binary checksum, start
+For further MXCFB trials, verify the deployed binary checksum, start
 PaperSpoon, then choose **Run Paperpad MXCFB (90s, experimental)**. Confirm the
 local Exit strip is visible and usable even if PaperSpoon disconnects. Compare
 the same diagnostic frames through the X11 action and MXCFB: check orientation,

@@ -82,3 +82,32 @@ update structures must not be assumed. [FBInk's MediaTek Kindle header](https://
 states that it was updated from the PW6 kernel for FW 5.17.1.0.4; it is a
 promising ABI reference, not a substitute for testing each operation on this
 device.
+
+## Experimental MXCFB runtime trial (2026-09-26)
+
+The operator reported this regression sequence on the Paperwhite 6: launched
+PaperPad MXCFB, saw the grid, tapped grid buttons, confirmed the resulting
+actions were received in PaperSpoon, and exited with the in-window Exit button.
+The deployed binary was read back over MTP and matched the host
+ARM artifact at SHA-256
+`0b8df0d7d1faaca41984b483f1610cd3e8617319bdbe367b68d0290a6651b20c`.
+The retrieved log contains two MXCFB runs. In the latest run, the 1272 × 1696
+X11 input window matched the 8-bit `hwtcon_v2` framebuffer (1272-byte stride).
+The kernel accepted an Exit-strip update for `(0,1624 1272x72)` and one remote
+frame update for `(0,0 1272x1624)`. PaperSpoon discovery and connection
+succeeded; X11 delivered button press/release events and PaperPad queued
+viewport-relative pointer events. A tap at `(719,1667)` activated the local
+Exit action. The X11 window was unmapped and destroyed, the binary exited with
+status 0, and the KUAL status file reported `STOPPED status=0
+reason=process_exit`. The first MXCFB run also submitted Exit and remote
+updates and exited normally after a local Exit tap; discovery initially retried
+before connecting.
+
+The operator report establishes the visible grid, grid-to-PaperSpoon action
+flow, and usable local Exit for this run. The Kindle log independently confirms
+update submission and X11 pointer queuing; PaperSpoon action receipt is based
+on the operator's observation, not a retrieved PaperSpoon log. Neither source
+measures exact panel pixels or update-completion timing. No captured evidence
+yet isolates black/white
+polarity, the rightmost and bottom remote pixels, replacement frames within
+one run, reconnection, X11 repaint interference, or sleep/wake behavior.

@@ -1,11 +1,12 @@
-//! Staged HWTCON update ABI layout; no ioctl is called from this module yet.
+//! HWTCON update ABI layouts used by the MXCFB display backend.
 //!
 //! `mxcfb_update_data_mtk` and `MXCFB_SEND_UPDATE_MTK` come from FBInk's
 //! `eink/mtk-kindle.h` at commit 886f25f13368859ad8a899b88d04c26e19cda32e,
 //! which states it was updated from the PW6 FW 5.17.1.0.4 kernel header.
 //! `mxcfb_rect`, `mxcfb_alt_buffer_data`, and the completion marker come from
 //! that commit's included `eink/mxcfb-kindle.h`. These are source-derived
-//! layouts, not yet verified by an update submission on this device.
+//! layouts. A PW6 accepted send-update requests using them, but acceptance
+//! does not independently validate every field or prove panel completion.
 
 use std::mem::{offset_of, size_of};
 

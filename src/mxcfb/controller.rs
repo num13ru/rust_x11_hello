@@ -1,4 +1,5 @@
-//! Thin HWTCON update submission. Physical Kindle behavior is unverified.
+//! Thin HWTCON update submission. A PW6 run accepted requests and displayed
+//! PaperPad; exact panel-update completion behavior remains unverified.
 
 use std::fs::File;
 use std::io;

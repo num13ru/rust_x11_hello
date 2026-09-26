@@ -48,7 +48,8 @@ mod update_request;
 #[cfg(any(target_os = "linux", test))]
 #[allow(dead_code)]
 mod update_marker;
-// Firmware-attributed update layouts are compiled but not device-verified yet.
+// Firmware-attributed layouts compile and update submission was accepted on a
+// PW6; complete field semantics remain unverified.
 mod update_abi;
 // Pure Mono1 conversion remains independent of framebuffer writes.
 #[allow(dead_code)]
