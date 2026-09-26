@@ -2,9 +2,33 @@
 
 use anyhow::{Context, Result, bail};
 
-const COMPANION_HOST_ENV: &str = "RUST_X11_HELLO_COMPANION";
-const COMPANION_PORT_ENV: &str = "RUST_X11_HELLO_COMPANION_PORT";
+const COMPANION_HOST_ENV: &str = "PAPERPAD_COMPANION";
+const COMPANION_PORT_ENV: &str = "PAPERPAD_COMPANION_PORT";
+const DISPLAY_BACKEND_ENV: &str = "PAPERPAD_DISPLAY_BACKEND";
 const DEFAULT_COMPANION_PORT: u16 = paper_protocol::DEFAULT_TCP_PORT;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum DisplayBackendKind {
+    X11,
+    Mxcfb,
+}
+
+impl DisplayBackendKind {
+    pub(crate) fn from_env() -> Result<Self> {
+        let value = read_optional_env(DISPLAY_BACKEND_ENV)?;
+        Self::from_value(value.as_deref())
+    }
+
+    fn from_value(value: Option<&str>) -> Result<Self> {
+        match value.map(str::trim) {
+            None | Some("x11") => Ok(Self::X11),
+            Some("mxcfb") => Ok(Self::Mxcfb),
+            Some(value) => {
+                bail!("{DISPLAY_BACKEND_ENV} must be either \"x11\" or \"mxcfb\", got {value:?}")
+            }
+        }
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct PaperpadConfig {
@@ -66,6 +90,30 @@ fn read_optional_env(name: &str) -> Result<Option<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn display_backend_defaults_to_x11_and_accepts_explicit_choices() {
+        assert_eq!(
+            DisplayBackendKind::from_value(None).unwrap(),
+            DisplayBackendKind::X11
+        );
+        assert_eq!(
+            DisplayBackendKind::from_value(Some(" x11 ")).unwrap(),
+            DisplayBackendKind::X11
+        );
+        assert_eq!(
+            DisplayBackendKind::from_value(Some("mxcfb")).unwrap(),
+            DisplayBackendKind::Mxcfb
+        );
+    }
+
+    #[test]
+    fn display_backend_rejects_blank_unknown_and_wrong_case_values() {
+        for value in ["", " ", "X11", "framebuffer"] {
+            let error = DisplayBackendKind::from_value(Some(value)).unwrap_err();
+            assert!(error.to_string().contains(DISPLAY_BACKEND_ENV));
+        }
+    }
 
     #[test]
     fn discovery_uses_protocol_default_as_inactive_port() {

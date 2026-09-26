@@ -9,10 +9,17 @@ steps an agent should follow, especially around physical-device work.
 - Rust binary (`src/`) builds for ARMv7 musl via Docker (`make build`, `make verify`).
 - Host artifact: `kindle-extension/rust_x11_hello/bin/rust_x11_hello` (untracked, rebuilt by `make build`).
 - Device extension root: `/extensions/rust_x11_hello` (MTP) = `/mnt/us/extensions/rust_x11_hello` (runtime).
-- KUAL action: **Run Paperpad (90s)**. Stop from the in-window **Exit** button
-  or let the watchdog end the run; the full-screen window covers KUAL.
+- KUAL actions: **Run Paperpad (90s)** uses the X11 default; **Run Paperpad
+  MXCFB (90s, experimental)** selects direct framebuffer output while retaining
+  the X11 window for input. Stop from the in-window **Exit** button or let the
+  watchdog end the run; the full-screen window covers KUAL. A first MXCFB
+  trial on the Paperwhite 6 exercised direct display, X11 touch, and local Exit;
+  remaining visual and lifecycle checks are recorded in
+  `docs/mxcfb-device-evidence.md`.
+- **Inspect framebuffer metadata** is a read-only KUAL diagnostic. It logs
+  `/dev/fb0` metadata without using the normal launcher or drawing.
 - Physical device: Kindle Paperwhite 6 (Sangria / Bellatrix4), FW 5.17.1.0.4.
-  USBNetwork is NOT available on this device; transport is Wi-Fi via `RUST_X11_HELLO_COMPANION`.
+  USBNetwork is NOT available on this device; transport is Wi-Fi via `PAPERPAD_COMPANION`.
 
 ## Architecture ownership
 
@@ -27,10 +34,11 @@ lifecycle controls must work even when PaperSpoon is disconnected.
 
 The dependency direction is PaperSpoon application layout/rendering/input →
 transport-independent `paper-protocol` PPFB v2 frames → PaperPad framebuffer
-receiver and X11 display adapter. Viewport-relative pointer messages travel
-in the opposite direction. Keep framebuffer primitives independent of the
-transport and display backend; X11-specific bitmap conversion belongs in
-PaperPad's X11 adapter, not in `paper-protocol`.
+receiver → sibling X11 or MXCFB display backend. Viewport-relative pointer
+messages travel in the opposite direction through the X11 input window for
+both display modes. Keep framebuffer primitives independent of transport and
+display backend; X11-specific bitmap conversion belongs in PaperPad's X11
+adapter, not in `paper-protocol` or MXCFB.
 
 ## Device deployment (MTP)
 
@@ -63,7 +71,8 @@ Rules the deploy script enforces:
   exposes a partially transferred extension.
 
 After a successful deploy, `mtp-rs ls /extensions/rust_x11_hello --recursive` shows:
-`rust_x11_hello.log`, `rust_x11_hello.status`, `bin/{rust_x11_hello, run.sh}`,
+`rust_x11_hello.log`, `rust_x11_hello.status`,
+`bin/{rust_x11_hello, run.sh, probe-fb.sh}`,
 `config.xml`, `menu.json`, plus `bin/rust_x11_hello.previous` retained from the update.
 
 ## Log handling

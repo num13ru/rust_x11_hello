@@ -166,16 +166,16 @@ the bounded run and never flushes unrelated firewall tables.
 
 ### Explicit host override
 
-Setting `RUST_X11_HELLO_COMPANION` (e.g. to a Wi-Fi run where the Mac is at
+Setting `PAPERPAD_COMPANION` (e.g. to a Wi-Fi run where the Mac is at
 `192.168.0.12`) bypasses discovery and connects directly:
 
 ```sh
-RUST_X11_HELLO_COMPANION=192.168.0.12
+PAPERPAD_COMPANION=192.168.0.12
 ```
 
 The host value is trimmed. An absent or blank host selects discovery, which
 uses the TCP port advertised by PaperSpoon. With an explicit host,
-`RUST_X11_HELLO_COMPANION_PORT` optionally overrides the default TCP port
+`PAPERPAD_COMPANION_PORT` optionally overrides the default TCP port
 5581 and must be a decimal value in `1..=65535`. Empty, zero, malformed, or
 out-of-range ports—and a port override without an explicit host—are startup
 configuration errors reported before Paperpad creates its X11 window.
@@ -195,6 +195,63 @@ PaperPad retries in the background. Pointer messages attempted while
 disconnected fail immediately and are not queued or replayed after connection.
 The Kindle opens no listening TCP socket. No application action IDs or text
 display commands cross the TCP connection.
+
+### Display backend selection
+
+`PAPERPAD_DISPLAY_BACKEND` selects PaperPad's display backend. It defaults
+to `x11`; setting it explicitly to `x11` selects the same reference path.
+`mxcfb` explicitly selects the experimental direct-framebuffer display path.
+It still requires the X11 window for touch input and lifecycle events. Startup
+fails if `/dev/fb0`, the required HWTCON capabilities, or matching X11/window
+geometry are unavailable; it never silently falls back to X11. A first
+Paperwhite 6 trial exercised direct display alongside X11 touch and local Exit;
+see [device evidence](docs/mxcfb-device-evidence.md) for the exact observations
+and still-unverified cases.
+KUAL's **Run Paperpad MXCFB (90s, experimental)** action sets this variable
+for one run; **Run Paperpad (90s)** remains the X11 reference action. The
+90-second watchdog is the fallback if Exit is not visible or touch fails.
+
+The KUAL **Inspect framebuffer metadata** action runs `--inspect-framebuffer`
+without starting the normal launcher. It collects read-only `/dev/fb0`
+information and logs the standard Linux
+`FBIOGET_FSCREENINFO` and `FBIOGET_VSCREENINFO` results to
+`rust_x11_hello.log`. It also attempts a shared, read-only mapping of the
+validated visible framebuffer span, reads its first and last bytes without
+logging or interpreting their values, and immediately unmaps it. It then opens
+`/dev/fb0` read-write and attempts a shared writable mapping of the same span,
+again unmapping immediately without accessing pixel bytes through that mapping.
+It then tries the firmware-matched, read-only HWTCON `GET_PANEL_INFO_MTK`
+query and discards its returned data. It does not write pixels, map a window,
+touch the normal launcher, or submit an e-ink refresh. No PaperSpoon listener
+is needed. Retrieve the log
+using the normal MTP log command below and look for `mxcfb probe:` lines. If
+opening `/dev/fb0`, a query, or either mapping fails, the log records the
+specific failure. An accepted writable mapping or panel-info query does not
+prove pixel writes, color polarity, e-ink update submission, or panel output.
+The MXCFB backend validates the observed `hwtcon_v2`, unrotated 8-bit
+framebuffer format and visible bounds, opens `/dev/fb0` read-write, queries
+panel info, and maps only the visible span. It prepares Mono1 remote rows before
+bounded framebuffer writes, then submits a remote-only GC16 update. PaperPad
+renders its own Exit strip using the same bounds as touch hit-testing, writes
+only that strip, and submits a separate strip-only update. A single marker
+sequence serves both paths. The last remote Mono1 frame is cached only after
+the kernel accepts its update; redraws submit that cached frame again. A failed
+submission can leave changed framebuffer bytes, but does not replace the cache
+or establish a physical panel refresh.
+
+Host Linux tests use `/dev/zero`, not the Kindle framebuffer. The HWTCON
+send-update and wait-complete C layouts come from the pinned PW6 firmware
+reference and compile on ARM. The first Kindle runtime trial submitted updates
+and the operator reported a working MXCFB display; update-completion timing
+and exact pixel fidelity remain unverified. The read-only metadata probe still
+does not write pixels or submit updates. X11 touch worked alongside direct
+framebuffer output in that trial, but X11 repaint and sleep/wake interference
+still need targeted testing.
+
+Runtime overrides now use the `PAPERPAD_` prefix. The KUAL launcher reads
+`PAPERPAD_EXT_DIR`, `PAPERPAD_WATCHDOG_SECONDS`, and
+`PAPERPAD_WATCHDOG_TERM_GRACE_SECONDS`. Update existing overrides; legacy
+environment names are no longer read.
 
 ### Running PaperSpoon
 
@@ -257,7 +314,7 @@ frame to confirm it remains device-local and responsive.
 For a Wi-Fi run, the listener binds `0.0.0.0` on TCP 5581 **and** starts the
 UDP discovery responder on `0.0.0.0:5580` (you should see both the TCP
 banner and `discovery listening address=0.0.0.0:5580`). With no
-`RUST_X11_HELLO_COMPANION`, the Kindle discovers PaperSpoon automatically
+`PAPERPAD_COMPANION`, the Kindle discovers PaperSpoon automatically
 over the LAN. Wi-Fi and MTP can coexist over the USB link. USBNetwork is not
 available on this Paperwhite 6 — no maintained USBNetwork package accepts
 the device — so the USBNetwork
@@ -346,6 +403,19 @@ In KUAL, use **Run Paperpad (90s)**. Perform taps within the visible window,
 then use Paperpad's in-window **Exit** button or allow the watchdog to end the
 run. There is no separate stop menu item because Paperpad covers KUAL while its
 full-screen window is open.
+
+For further MXCFB trials, follow the
+[physical-validation sequence](docs/mxcfb-manual-validation.md). Verify the
+deployed binary checksum. With an operator-controlled PaperSpoon session
+already available, choose **Run Paperpad MXCFB (90s, experimental)**. Confirm the
+local Exit strip is visible and usable even if PaperSpoon disconnects. Compare
+the same diagnostic frames through the X11 action and MXCFB: check orientation,
+black/white polarity, the rightmost and bottom remote pixels, and that remote
+content never covers Exit. Check replacement frames, reconnect, touch input,
+and any X11 repaint or sleep/wake interference. If Exit is not visible or touch
+fails, let the watchdog end the run and confirm the window is gone before any
+MTP update. A successful ARM build or update ioctl is not a verified panel
+image; retain the device log and report what was physically visible.
 
 After the process ends, retrieve the log:
 

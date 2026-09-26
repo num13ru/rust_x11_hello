@@ -343,7 +343,7 @@ fn invalid_v2_data(error: impl std::fmt::Display) -> io::Error {
 
 /// Resolve the PaperSpoon address.
 ///
-/// - If `RUST_X11_HELLO_COMPANION` is set, resolve it directly (explicit
+/// - If `PAPERPAD_COMPANION` is set, resolve it directly (explicit
 ///   host control path).
 /// - Otherwise run zero-config UDP discovery; do not fall back to a
 ///   hard-coded IP when discovery fails (that would hide the experiment's

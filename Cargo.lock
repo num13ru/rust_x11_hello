@@ -62,6 +62,7 @@ name = "rust_x11_hello"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "libc",
  "paper-protocol",
  "x11rb",
 ]
