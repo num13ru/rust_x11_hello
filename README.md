@@ -223,8 +223,9 @@ specific failure. An accepted writable mapping or panel-info query does not
 prove pixel writes, color polarity, e-ink update submission, or panel output.
 The HWTCON send-update and wait-complete C layouts are staged from the pinned
 PW6 firmware reference and compile-checked, but no update ioctl has been called
-or device-verified. This probe also does not prove that X11 input can coexist
-with direct display.
+or device-verified. A pure request builder now stages a full GC16 remote-only
+update with a required nonzero marker; it does not submit that request. The
+probe also does not prove that X11 input can coexist with direct display.
 
 Runtime overrides now use the `PAPERPAD_` prefix. The KUAL launcher reads
 `PAPERPAD_EXT_DIR`, `PAPERPAD_WATCHDOG_SECONDS`, and

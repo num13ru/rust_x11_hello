@@ -10,7 +10,7 @@
 use std::mem::{offset_of, size_of};
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[allow(dead_code)]
 pub(super) struct UpdateRegion {
     pub top: u32,
@@ -20,6 +20,7 @@ pub(super) struct UpdateRegion {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[allow(dead_code)]
 pub(super) struct AltBufferData {
     pub phys_addr: u32,
@@ -29,6 +30,7 @@ pub(super) struct AltBufferData {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[allow(dead_code)]
 pub(super) struct SwipeData {
     pub direction: u32,
@@ -36,6 +38,7 @@ pub(super) struct SwipeData {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[allow(dead_code)]
 pub(super) struct UpdateDataMtk {
     pub update_region: UpdateRegion,
