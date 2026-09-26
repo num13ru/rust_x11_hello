@@ -6,7 +6,6 @@ use crate::ui::screen::{SYSTEM_UI_HEIGHT, ScreenLayout};
 
 use super::update_abi::UpdateRegion;
 
-#[allow(dead_code)]
 pub(super) fn checked_visible_region(
     left: u32,
     top: u32,
@@ -40,7 +39,6 @@ pub(super) fn checked_visible_region(
 
 /// The first MXCFB policy refreshes the entire remote viewport, never the
 /// PaperPad-owned Exit strip. `visible_*` must come from framebuffer metadata.
-#[allow(dead_code)]
 pub(super) fn remote_update_region(
     screen: ScreenLayout,
     visible_width: u32,
@@ -71,7 +69,6 @@ pub(super) fn remote_update_region(
 }
 
 /// Refresh exactly the PaperPad-owned bottom strip, never remote content.
-#[allow(dead_code)]
 pub(super) fn system_ui_update_region(
     screen: ScreenLayout,
     visible_width: u32,

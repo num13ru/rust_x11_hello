@@ -4,13 +4,11 @@
 mod abi;
 // Selected only when PAPERPAD_DISPLAY_BACKEND=mxcfb on Linux.
 #[cfg(target_os = "linux")]
-#[allow(dead_code)]
 mod backend;
 #[cfg(target_os = "linux")]
 pub(crate) use backend::MxcfbDisplayBackend;
 // Update submission is used by the display backend, never by the probe.
 #[cfg(target_os = "linux")]
-#[allow(dead_code)]
 mod controller;
 #[cfg(target_os = "linux")]
 mod hwtcon;
@@ -18,21 +16,17 @@ mod hwtcon;
 mod layout;
 // Bounded framebuffer writes serve remote frames and the local Exit strip.
 #[cfg(target_os = "linux")]
-#[allow(dead_code)]
 mod mapped;
 #[cfg(any(target_os = "linux", test))]
 mod memory;
 // Pure interpretation of kernel-reported framebuffer metadata.
 #[cfg(target_os = "linux")]
-#[allow(dead_code)]
 mod metadata;
 // Backend opening is distinct from the read-only metadata probe.
 #[cfg(target_os = "linux")]
-#[allow(dead_code)]
 mod opened;
 // Remote and local presentation are selected through the MXCFB backend.
 #[cfg(target_os = "linux")]
-#[allow(dead_code)]
 mod present;
 #[cfg(target_os = "linux")]
 mod probe;
@@ -40,19 +34,18 @@ mod probe;
 mod region;
 // Local Exit pixels are prepared without touching /dev/fb0.
 #[cfg(any(target_os = "linux", test))]
-#[allow(dead_code)]
 mod system_pixels;
 #[cfg(any(target_os = "linux", test))]
 mod update_request;
 // One process-local marker sequence serves both update regions.
 #[cfg(any(target_os = "linux", test))]
-#[allow(dead_code)]
 mod update_marker;
 // Firmware-attributed layouts compile and update submission was accepted on a
 // PW6; complete field semantics remain unverified.
 mod update_abi;
 // Pure Mono1 conversion remains independent of framebuffer writes.
-#[allow(dead_code)]
+// On non-Linux hosts only its unit tests use these Linux presentation helpers.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 mod pixels;
 
 #[cfg(target_os = "linux")]

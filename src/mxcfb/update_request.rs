@@ -1,7 +1,9 @@
 //! Pure construction of the first conservative HWTCON remote update request.
 //! No framebuffer memory or ioctl is accessed here.
 
-use anyhow::{Result, ensure};
+use anyhow::Result;
+#[cfg(test)]
+use anyhow::ensure;
 
 use crate::ui::screen::ScreenLayout;
 
@@ -12,13 +14,14 @@ use super::update_marker::UpdateMarkerSequence;
 // PW6-matched values from FBInk `eink/mtk-kindle.h` and its included
 // `eink/mxcfb-kindle.h` at 886f25f13368859ad8a899b88d04c26e19cda32e.
 // FBInk's `refresh_kindle_mtk` initializes the remaining fields to zero for
-// this GC16 path. Physical behavior still needs a Kindle update test.
+// this GC16 path. Kernel acceptance was observed on a PW6; panel completion
+// timing and exact pixel behavior remain unverified.
 const WAVEFORM_GC16: u32 = 2;
 const WAVEFORM_DU: u32 = 1;
 const UPDATE_MODE_FULL: u32 = 1;
 const TEMP_USE_AMBIENT: i32 = 0x1000;
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(super) fn full_gc16_remote_request(
     screen: ScreenLayout,
     visible_width: u32,
@@ -32,7 +35,6 @@ pub(super) fn full_gc16_remote_request(
 
 /// Validate before consuming a process-local marker. A failed request does
 /// not advance the sequence; no update is submitted here.
-#[allow(dead_code)]
 pub(super) fn next_full_gc16_remote_request(
     screen: ScreenLayout,
     visible_width: u32,
@@ -48,7 +50,6 @@ pub(super) fn next_full_gc16_remote_request(
 
 /// Same conservative GC16 policy, restricted to PaperPad's local Exit strip.
 /// Validation happens before the process-local marker is consumed.
-#[allow(dead_code)]
 pub(super) fn next_full_gc16_system_ui_request(
     screen: ScreenLayout,
     visible_width: u32,

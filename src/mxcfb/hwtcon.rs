@@ -9,8 +9,8 @@
 //! by PaperPad; no FBInk rendering or device-handling implementation is used.
 //!
 //! The original Kindle kernel header has not yet been independently verified.
-//! The read-only panel-info query was accepted on the project device; no
-//! update ioctl has been tested.
+//! The read-only panel-info query and send-update requests were accepted on
+//! the project device; that does not establish panel completion timing.
 
 use std::fs::File;
 use std::io;

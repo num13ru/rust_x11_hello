@@ -9,6 +9,7 @@ use anyhow::{Context, Result, ensure};
 use crate::display::RemoteFrame;
 use crate::ui::screen::ScreenRect;
 
+#[cfg(test)]
 use super::controller;
 use super::opened::OpenedFramebuffer;
 use super::pixels::prepare_remote;
@@ -22,6 +23,7 @@ pub(super) struct SubmittedUpdate {
     pub region: ScreenRect,
 }
 
+#[cfg(test)]
 pub(super) fn present_remote(
     opened: &mut OpenedFramebuffer,
     markers: &mut UpdateMarkerSequence,
@@ -66,6 +68,7 @@ pub(super) fn present_remote_with(
     Ok(SubmittedUpdate { marker, region })
 }
 
+#[cfg(test)]
 pub(super) fn present_system_ui(
     opened: &mut OpenedFramebuffer,
     markers: &mut UpdateMarkerSequence,

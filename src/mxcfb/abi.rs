@@ -26,7 +26,6 @@ pub(super) struct FbBitfield {
 
 #[repr(C)]
 #[derive(Default)]
-#[allow(dead_code)]
 pub(super) struct FbFixScreeninfo {
     pub(super) id: [u8; 16],
     pub(super) smem_start: c_ulong,
@@ -47,7 +46,6 @@ pub(super) struct FbFixScreeninfo {
 
 #[repr(C)]
 #[derive(Default)]
-#[allow(dead_code)]
 pub(super) struct FbVarScreeninfo {
     pub(super) xres: u32,
     pub(super) yres: u32,
