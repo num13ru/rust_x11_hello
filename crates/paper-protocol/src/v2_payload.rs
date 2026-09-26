@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use super::framebuffer::{Mono1Frame, Mono1FrameError, validate_mono1_pixels};
+use super::framebuffer::{Mono1Frame, Mono1FrameError, PixelFormat, validate_mono1_pixels};
 use super::v2::{
     V2_HEADER_LEN, V2_VERSION, V2EncodeError, V2Header, V2Message, V2MessageType, encode_v2_message,
 };
@@ -14,24 +14,80 @@ pub const V2_FRAME_PREFIX_LEN: usize = 16;
 
 const MONO1_FORMAT_VALUE: u8 = 1;
 const MONO1_FORMAT_MASK: u8 = 1;
+const GRAY8_FORMAT_MASK: u8 = 1 << 1;
+const SUPPORTED_FORMAT_MASK: u8 = MONO1_FORMAT_MASK | GRAY8_FORMAT_MASK;
 
+/// Protocol-v2 name for the transport-independent pixel format.
+pub type V2PixelFormat = PixelFormat;
+
+/// Non-empty set of pixel formats advertised by a protocol-v2 peer.
+///
+/// The private mask keeps unsupported and empty capability sets from being
+/// constructed outside protocol decoding.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[repr(u8)]
-pub enum V2PixelFormat {
-    Mono1 = MONO1_FORMAT_VALUE,
+pub struct V2PixelFormats {
+    mask: u8,
+}
+
+impl V2PixelFormats {
+    pub const MONO1: Self = Self::new(V2PixelFormat::Mono1);
+    pub const GRAY8: Self = Self::new(V2PixelFormat::Gray8);
+
+    pub const fn new(pixel_format: V2PixelFormat) -> Self {
+        Self {
+            mask: pixel_format_mask(pixel_format),
+        }
+    }
+
+    pub const fn with(self, pixel_format: V2PixelFormat) -> Self {
+        Self {
+            mask: self.mask | pixel_format_mask(pixel_format),
+        }
+    }
+
+    pub const fn supports(self, pixel_format: V2PixelFormat) -> bool {
+        self.mask & pixel_format_mask(pixel_format) != 0
+    }
+
+    const fn from_mask(mask: u8) -> Option<Self> {
+        if mask != 0 && mask & !SUPPORTED_FORMAT_MASK == 0 {
+            Some(Self { mask })
+        } else {
+            None
+        }
+    }
+}
+
+const fn pixel_format_mask(pixel_format: V2PixelFormat) -> u8 {
+    match pixel_format {
+        V2PixelFormat::Mono1 => MONO1_FORMAT_MASK,
+        V2PixelFormat::Gray8 => GRAY8_FORMAT_MASK,
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct V2Hello {
     viewport_width: u16,
     viewport_height: u16,
+    pixel_formats: V2PixelFormats,
 }
 
 impl V2Hello {
+    /// Construct the existing Mono1-only capability advertisement.
     pub fn new(viewport_width: u16, viewport_height: u16) -> Self {
+        Self::with_pixel_formats(viewport_width, viewport_height, V2PixelFormats::MONO1)
+    }
+
+    /// Construct a Hello with an explicit non-empty pixel-format set.
+    pub fn with_pixel_formats(
+        viewport_width: u16,
+        viewport_height: u16,
+        pixel_formats: V2PixelFormats,
+    ) -> Self {
         Self {
             viewport_width,
             viewport_height,
+            pixel_formats,
         }
     }
 
@@ -48,13 +104,13 @@ impl V2Hello {
     }
 
     pub fn supports(self, pixel_format: V2PixelFormat) -> bool {
-        matches!(pixel_format, V2PixelFormat::Mono1)
+        self.pixel_formats.supports(pixel_format)
     }
 
     pub fn encode_message(self) -> Result<Vec<u8>, V2EncodeError> {
         let mut payload = [0; V2_HELLO_PAYLOAD_LEN];
         payload[0] = V2_VERSION;
-        payload[1] = MONO1_FORMAT_MASK;
+        payload[1] = self.pixel_formats.mask;
         payload[4..6].copy_from_slice(&self.viewport_width.to_be_bytes());
         payload[6..8].copy_from_slice(&self.viewport_height.to_be_bytes());
         encode_v2_message(V2MessageType::Hello, &payload)
@@ -302,9 +358,8 @@ fn decode_hello(payload: &[u8]) -> Result<V2Hello, V2PayloadError> {
     if payload[0] != V2_VERSION {
         return Err(V2PayloadError::HelloVersion(payload[0]));
     }
-    if payload[1] != MONO1_FORMAT_MASK {
-        return Err(V2PayloadError::UnsupportedPixelFormatMask(payload[1]));
-    }
+    let pixel_formats = V2PixelFormats::from_mask(payload[1])
+        .ok_or(V2PayloadError::UnsupportedPixelFormatMask(payload[1]))?;
     let reserved = u16::from_be_bytes(payload[2..4].try_into().expect("two-byte payload slice"));
     if reserved != 0 {
         return Err(V2PayloadError::NonZeroReserved {
@@ -313,9 +368,10 @@ fn decode_hello(payload: &[u8]) -> Result<V2Hello, V2PayloadError> {
         });
     }
 
-    Ok(V2Hello::new(
+    Ok(V2Hello::with_pixel_formats(
         u16::from_be_bytes(payload[4..6].try_into().expect("two-byte payload slice")),
         u16::from_be_bytes(payload[6..8].try_into().expect("two-byte payload slice")),
+        pixel_formats,
     ))
 }
 
@@ -416,6 +472,31 @@ mod tests {
         assert_eq!(typed_payload(&encoded), Ok(V2Payload::Hello(hello)));
         assert_eq!(hello.protocol_version(), 2);
         assert!(hello.supports(V2PixelFormat::Mono1));
+        assert!(!hello.supports(V2PixelFormat::Gray8));
+    }
+
+    #[test]
+    fn hello_roundtrips_gray8_only_and_combined_capabilities() {
+        let gray8 = V2Hello::with_pixel_formats(600, 800, V2PixelFormats::GRAY8);
+        let encoded = gray8.encode_message().expect("encode Gray8 Hello");
+        assert_eq!(
+            &encoded[V2_HEADER_LEN..],
+            &[2, 2, 0, 0, 0x02, 0x58, 0x03, 0x20]
+        );
+        assert_eq!(typed_payload(&encoded), Ok(V2Payload::Hello(gray8)));
+        assert!(!gray8.supports(V2PixelFormat::Mono1));
+        assert!(gray8.supports(V2PixelFormat::Gray8));
+
+        let both = V2Hello::with_pixel_formats(
+            1272,
+            1624,
+            V2PixelFormats::MONO1.with(V2PixelFormat::Gray8),
+        );
+        let encoded = both.encode_message().expect("encode combined Hello");
+        assert_eq!(encoded[V2_HEADER_LEN + 1], 3);
+        assert_eq!(typed_payload(&encoded), Ok(V2Payload::Hello(both)));
+        assert!(both.supports(V2PixelFormat::Mono1));
+        assert!(both.supports(V2PixelFormat::Gray8));
     }
 
     #[test]
@@ -509,12 +590,22 @@ mod tests {
         for (index, value, expected) in [
             (0, 3, V2PayloadError::HelloVersion(3)),
             (1, 0, V2PayloadError::UnsupportedPixelFormatMask(0)),
+            (1, 4, V2PayloadError::UnsupportedPixelFormatMask(4)),
+            (1, 5, V2PayloadError::UnsupportedPixelFormatMask(5)),
             (
                 2,
                 1,
                 V2PayloadError::NonZeroReserved {
                     message_type: V2MessageType::Hello,
                     value: 0x0100,
+                },
+            ),
+            (
+                3,
+                1,
+                V2PayloadError::NonZeroReserved {
+                    message_type: V2MessageType::Hello,
+                    value: 1,
                 },
             ),
         ] {
