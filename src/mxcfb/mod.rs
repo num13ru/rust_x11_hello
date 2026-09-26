@@ -2,6 +2,10 @@
 
 #[cfg(target_os = "linux")]
 mod abi;
+// Complete backend implementation is staged before runtime selection.
+#[cfg(target_os = "linux")]
+#[allow(dead_code)]
+mod backend;
 // Submission is staged but not connected to the display or probe path.
 #[cfg(target_os = "linux")]
 #[allow(dead_code)]

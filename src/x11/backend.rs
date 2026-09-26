@@ -55,12 +55,13 @@ impl DisplayBackend for X11DisplayBackend<'_> {
         self.dimensions
     }
 
-    fn set_dimensions(&mut self, dimensions: (u16, u16)) -> Option<CachedFrameMetadata> {
+    fn set_dimensions(&mut self, dimensions: (u16, u16)) -> Result<Option<CachedFrameMetadata>> {
         self.dimensions = dimensions;
         let viewport = remote_viewport_size(dimensions);
-        self.remote_frame_cache
+        Ok(self
+            .remote_frame_cache
             .invalidate_mismatched(viewport)
-            .map(|frame| CachedFrameMetadata::new(frame.frame_id(), frame.dimensions()))
+            .map(|frame| CachedFrameMetadata::new(frame.frame_id(), frame.dimensions())))
     }
 
     fn display_remote_frame(&mut self, frame: RemoteFrame<'_>) {
@@ -130,7 +131,7 @@ impl DisplayBackend for X11DisplayBackend<'_> {
         }
     }
 
-    fn redraw_cached_frame(&self, cause: RedrawCause) {
+    fn redraw_cached_frame(&mut self, cause: RedrawCause) {
         let (Some(adapter), Some(frame)) = (
             self.framebuffer_adapter.as_ref(),
             self.remote_frame_cache.current(),
@@ -166,7 +167,7 @@ impl DisplayBackend for X11DisplayBackend<'_> {
         }
     }
 
-    fn draw_system_ui(&self) -> Result<()> {
+    fn draw_system_ui(&mut self) -> Result<()> {
         draw(
             self.conn,
             self.win,

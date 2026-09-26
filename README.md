@@ -243,6 +243,10 @@ mapping before writing only those rows, and a separate GC16 request builder
 targets only that strip. An unconnected presentation operation now writes the
 strip and submits that request in order; a rejected ioctl is not reported as a
 successful update. The runtime and read-only probe still call neither path.
+A staged MXCFB display-backend implementation now owns its writable mapping,
+one marker sequence, and a copy of the last kernel-accepted remote Mono1 frame.
+It rejects X11 window geometry that differs from `/dev/fb0`, and still is not
+selected at startup; X11 remains the only runnable display backend.
 The HWTCON send-update and wait-complete C layouts are staged from the pinned
 PW6 firmware reference and compile-checked, but no update ioctl has been called
 on the Kindle or device-verified. A pure request builder stages a full GC16

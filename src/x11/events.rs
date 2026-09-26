@@ -81,7 +81,7 @@ pub(crate) fn event_loop(
                         if let Err(error) = paperspoon.send_viewport_changed(viewport) {
                             eprintln!("transport error sending viewport change: {error:#}");
                         }
-                        if let Some(frame) = display.set_dimensions((width, height)) {
+                        if let Some(frame) = display.set_dimensions((width, height))? {
                             eprintln!(
                                 "frame cache invalidated id={} width={} height={} viewport_width={} viewport_height={}",
                                 frame.frame_id(),
@@ -182,7 +182,11 @@ pub(crate) fn remote_viewport_size(physical_size: (u16, u16)) -> (u16, u16) {
         .unwrap_or((0, 0))
 }
 
-fn draw_surface(display: &dyn DisplayBackend, redraw: Redraw, cause: RedrawCause) -> Result<()> {
+fn draw_surface(
+    display: &mut dyn DisplayBackend,
+    redraw: Redraw,
+    cause: RedrawCause,
+) -> Result<()> {
     debug_assert_eq!(display.dimensions(), redraw.size());
     display.draw_system_ui()?;
     display.redraw_cached_frame(cause);

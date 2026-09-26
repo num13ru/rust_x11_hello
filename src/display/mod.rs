@@ -104,13 +104,13 @@ pub(crate) enum RedrawCause {
 pub(crate) trait DisplayBackend {
     fn dimensions(&self) -> (u16, u16);
 
-    fn set_dimensions(&mut self, dimensions: (u16, u16)) -> Option<CachedFrameMetadata>;
+    fn set_dimensions(&mut self, dimensions: (u16, u16)) -> Result<Option<CachedFrameMetadata>>;
 
     fn display_remote_frame(&mut self, frame: RemoteFrame<'_>);
 
-    fn redraw_cached_frame(&self, cause: RedrawCause);
+    fn redraw_cached_frame(&mut self, cause: RedrawCause);
 
-    fn draw_system_ui(&self) -> Result<()>;
+    fn draw_system_ui(&mut self) -> Result<()>;
 }
 
 #[cfg(test)]

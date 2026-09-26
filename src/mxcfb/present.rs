@@ -31,7 +31,7 @@ pub(super) fn present_remote(
     present_remote_with(opened, markers, frame, controller::submit_update)
 }
 
-fn present_remote_with(
+pub(super) fn present_remote_with(
     opened: &mut OpenedFramebuffer,
     markers: &mut UpdateMarkerSequence,
     frame: RemoteFrame<'_>,
@@ -74,7 +74,7 @@ pub(super) fn present_system_ui(
     present_system_ui_with(opened, markers, controller::submit_update)
 }
 
-fn present_system_ui_with(
+pub(super) fn present_system_ui_with(
     opened: &mut OpenedFramebuffer,
     markers: &mut UpdateMarkerSequence,
     mut submit: impl FnMut(&File, &mut UpdateDataMtk, u32, u32) -> Result<()>,
