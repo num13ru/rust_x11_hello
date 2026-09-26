@@ -20,6 +20,10 @@ mod memory;
 #[cfg(target_os = "linux")]
 #[allow(dead_code)]
 mod metadata;
+// Backend opening is staged but not used by startup or the probe.
+#[cfg(target_os = "linux")]
+#[allow(dead_code)]
+mod opened;
 #[cfg(target_os = "linux")]
 mod probe;
 #[cfg(any(target_os = "linux", test))]

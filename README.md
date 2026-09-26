@@ -228,6 +228,9 @@ and a staged adapter checks matching geometry and every row before writing. Its
 tests use `/dev/zero`; the app still does not copy rows into `/dev/fb0`.
 A pure metadata adapter now validates the observed `hwtcon_v2`, unrotated
 8-bit framebuffer layout and visible bounds, but startup does not use it yet.
+An unconnected opener combines those checks with panel-info query and writable
+mapping; it does not write pixels or submit an update, and the existing probe
+is unchanged.
 The HWTCON send-update and wait-complete C layouts are staged from the pinned
 PW6 firmware reference and compile-checked, but no update ioctl has been called
 on the Kindle or device-verified. A pure request builder stages a full GC16
