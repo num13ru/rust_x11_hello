@@ -28,6 +28,25 @@ pub(super) struct FramebufferSpec {
     pub nonstd: u32,
 }
 
+impl FramebufferSpec {
+    pub(super) fn validate_format(self) -> Result<()> {
+        ensure!(
+            self.kind == FB_TYPE_PACKED_PIXELS
+                && self.visual == FB_VISUAL_MONO10
+                && self.bits_per_pixel == 8
+                && self.grayscale == 1
+                && self.nonstd == 0,
+            "unsupported framebuffer format: type={} visual={} bpp={} grayscale={} nonstd={}",
+            self.kind,
+            self.visual,
+            self.bits_per_pixel,
+            self.grayscale,
+            self.nonstd
+        );
+        Ok(())
+    }
+}
+
 /// Convert one validated remote frame into a memory buffer representing
 /// `/dev/fb0`. All layout and range checks complete before any byte changes.
 /// The returned rectangle is in visible-screen coordinates for a later update
@@ -38,19 +57,7 @@ pub(super) fn blit_remote(
     spec: FramebufferSpec,
     memory: &mut [u8],
 ) -> Result<ScreenRect> {
-    ensure!(
-        spec.kind == FB_TYPE_PACKED_PIXELS
-            && spec.visual == FB_VISUAL_MONO10
-            && spec.bits_per_pixel == 8
-            && spec.grayscale == 1
-            && spec.nonstd == 0,
-        "unsupported framebuffer format: type={} visual={} bpp={} grayscale={} nonstd={}",
-        spec.kind,
-        spec.visual,
-        spec.bits_per_pixel,
-        spec.grayscale,
-        spec.nonstd
-    );
+    spec.validate_format()?;
 
     let (screen_width, screen_height) = screen.physical_size();
     ensure!(

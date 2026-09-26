@@ -16,6 +16,10 @@ mod layout;
 mod mapped;
 #[cfg(any(target_os = "linux", test))]
 mod memory;
+// Pure interpretation of kernel-reported framebuffer metadata.
+#[cfg(target_os = "linux")]
+#[allow(dead_code)]
+mod metadata;
 #[cfg(target_os = "linux")]
 mod probe;
 #[cfg(any(target_os = "linux", test))]
