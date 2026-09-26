@@ -107,7 +107,42 @@ The operator report establishes the visible grid, grid-to-PaperSpoon action
 flow, and usable local Exit for this run. The Kindle log independently confirms
 update submission and X11 pointer queuing; PaperSpoon action receipt is based
 on the operator's observation, not a retrieved PaperSpoon log. Neither source
-measures exact panel pixels or update-completion timing. No captured evidence
-yet isolates black/white
+measures exact panel pixels or update-completion timing. At that point, no
+captured evidence isolated black/white
 polarity, the rightmost and bottom remote pixels, replacement frames within
 one run, reconnection, X11 repaint interference, or sleep/wake behavior.
+
+## Manual diagnostic-frame validation (2026-09-26)
+
+The operator reported manual validation on the same Paperwhite 6 and ran
+PaperSpoon with `./target/release/paperspoon 5581 /tmp/paperspoon-mxcfb.log`.
+The deployed binary was read back over MTP and again matched the host artifact
+at SHA-256
+`0b8df0d7d1faaca41984b483f1610cd3e8617319bdbe367b68d0290a6651b20c`.
+The first 24 lines of the PaperSpoon log have SHA-256
+`254cdb615f6234bb54565e2d8dffcb831b5ba8ca28bb85bc9a9d6caac7c2e765`;
+the retrieved Kindle log has SHA-256
+`0099260e7e8faa88bd57beef9721e8af7bb4ec6d2b07d171d8678bb4a3414eea`.
+
+PaperSpoon logged three `Hello` sessions, with diagnostic frames sent in this
+order: `corners`, `border`, `border`, `checkerboard`, `horizontal`, `black`,
+`black`, `white`. All used the 1272 × 1624 viewport. The Kindle log records
+three MXCFB runs with matching remote frame IDs 1–9 accepted for the
+`(0,0 1272x1624)` region, and a separate local Exit-strip submission in each
+run. The first two runs ended at the 90-second watchdog (`status=143`); the
+last run logged a local Exit activation and ended with `status=0`, matching
+the KUAL status file's `STOPPED status=0 reason=process_exit`.
+
+This is evidence of repeated frame delivery, update submission, and the final
+Exit path. The operator reports that the frame sequence and grid behavior
+looked the same as their X11 experience. They also clarified that the
+reconnects were new PaperPad sessions after watchdog endings, not an
+in-process reconnect.
+The subsequently appended PaperSpoon log records six grid-button semantic
+actions (button IDs 4–9) with `dispatch=forwarded`. MTP was unavailable when
+checked after those additional runs, so no newer Kindle log or status was
+retrieved for the grid-action sequence.
+
+The report and logs establish the tested frame sequence and grid interaction,
+but do not isolate exact edge pixels or polarity. Mismatched-frame rejection,
+in-process reconnect, and sleep/wake or X11 repaint behavior remain unverified.
