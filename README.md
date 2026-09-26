@@ -223,6 +223,8 @@ specific failure. An accepted writable mapping or panel-info query does not
 prove pixel writes, color polarity, e-ink update submission, or panel output.
 A bounded writable-mapping helper is staged but unused by the app; its Linux
 tests write only to `/dev/zero`, not the Kindle framebuffer.
+Remote rows can now be prepared with validated offsets in a temporary buffer,
+but are not copied into `/dev/fb0` by the app.
 The HWTCON send-update and wait-complete C layouts are staged from the pinned
 PW6 firmware reference and compile-checked, but no update ioctl has been called
 on the Kindle or device-verified. A pure request builder stages a full GC16

@@ -140,6 +140,94 @@ pub(super) fn blit_remote(
     Ok(region)
 }
 
+/// Fully prepared native rows. Only `rows()` exposes byte ranges for the
+/// remote viewport; bytes representing PaperPad's local UI stay private.
+pub(super) struct PreparedRemote {
+    region: ScreenRect,
+    buffer: Vec<u8>,
+    first_offset: usize,
+    line_length: usize,
+    width: usize,
+    height: usize,
+}
+
+impl PreparedRemote {
+    pub(super) fn region(&self) -> ScreenRect {
+        self.region
+    }
+
+    pub(super) fn rows(&self) -> impl Iterator<Item = (usize, &[u8])> {
+        (0..self.height).map(move |row| {
+            let offset = self.first_offset + row * self.line_length;
+            (offset, &self.buffer[offset..offset + self.width])
+        })
+    }
+}
+
+/// Prepare every remote byte before a later framebuffer write. The temporary
+/// buffer spans only the mapped visible page; reservation errors return before
+/// any device write.
+pub(super) fn prepare_remote(
+    frame: RemoteFrame<'_>,
+    screen: ScreenLayout,
+    spec: FramebufferSpec,
+    mapped_len: usize,
+) -> Result<PreparedRemote> {
+    ensure!(mapped_len > 0, "empty framebuffer mapping");
+    let visible_bottom = spec
+        .yoffset
+        .checked_add(spec.visible_height)
+        .context("framebuffer vertical bounds overflow")?;
+    let expected_len = usize::try_from(visible_bottom)?
+        .checked_mul(spec.line_length)
+        .context("framebuffer visible byte length overflow")?;
+    ensure!(
+        mapped_len == expected_len,
+        "framebuffer mapping length {mapped_len} does not match visible span {expected_len}"
+    );
+    ensure!(
+        mapped_len <= spec.memory_len && mapped_len <= isize::MAX as usize,
+        "invalid framebuffer mapping length"
+    );
+    let mut buffer = Vec::new();
+    buffer
+        .try_reserve_exact(mapped_len)
+        .context("allocate native framebuffer staging buffer")?;
+    buffer.resize(mapped_len, 0);
+    let region = blit_remote(frame, screen, spec, &mut buffer)?;
+
+    let first_x = usize::try_from(spec.xoffset)?
+        .checked_add(usize::from(region.x))
+        .context("remote framebuffer column overflow")?;
+    let first_y = usize::try_from(spec.yoffset)?
+        .checked_add(usize::from(region.y))
+        .context("remote framebuffer row overflow")?;
+    let first_offset = first_y
+        .checked_mul(spec.line_length)
+        .and_then(|offset| offset.checked_add(first_x))
+        .context("remote framebuffer byte offset overflow")?;
+    let width = usize::from(region.width);
+    let height = usize::from(region.height);
+    let last_end = (height - 1)
+        .checked_mul(spec.line_length)
+        .and_then(|offset| offset.checked_add(first_offset))
+        .and_then(|offset| offset.checked_add(width))
+        .context("remote framebuffer byte offset overflow")?;
+    ensure!(
+        last_end <= mapped_len,
+        "remote rows exceed framebuffer mapping"
+    );
+
+    Ok(PreparedRemote {
+        region,
+        buffer,
+        first_offset,
+        line_length: spec.line_length,
+        width,
+        height,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -276,6 +364,74 @@ mod tests {
                 .iter()
                 .all(|&byte| byte == 0x5a)
         );
+    }
+
+    #[test]
+    fn prepared_rows_match_direct_blit_with_offsets_and_padding() {
+        let screen = screen(9, 2);
+        let mut spec = spec(screen, 0);
+        spec.xoffset = 2;
+        spec.yoffset = 1;
+        spec.virtual_width = 11;
+        spec.virtual_height += 1;
+        spec.line_length = 16;
+        spec.memory_len = spec.line_length * usize::try_from(spec.virtual_height).unwrap();
+        let pixels = mono(9, 2, &[(0, 0), (8, 1)]);
+        let frame = RemoteFrame::new(7, 9, 2, 2, &pixels, 0).unwrap();
+
+        let prepared = prepare_remote(frame, screen, spec, spec.memory_len).unwrap();
+        let mut actual = vec![0x5a; spec.memory_len];
+        let rows: Vec<_> = prepared.rows().collect();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].0, spec.line_length + 2);
+        assert_eq!(rows[1].0, spec.line_length * 2 + 2);
+        for (offset, bytes) in rows {
+            actual[offset..offset + bytes.len()].copy_from_slice(bytes);
+        }
+
+        let mut expected = vec![0x5a; spec.memory_len];
+        assert_eq!(
+            prepared.region(),
+            blit_remote(frame, screen, spec, &mut expected).unwrap()
+        );
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn prepared_rows_reject_short_mapping_and_unsupported_format() {
+        let screen = screen(9, 1);
+        let spec = spec(screen, 3);
+        let pixels = mono(9, 1, &[]);
+        let frame = RemoteFrame::new(8, 9, 1, 2, &pixels, 0).unwrap();
+        assert!(prepare_remote(frame, screen, spec, 8).is_err());
+        assert!(prepare_remote(frame, screen, spec, spec.memory_len + 1).is_err());
+        assert!(
+            prepare_remote(
+                frame,
+                screen,
+                FramebufferSpec { visual: 0, ..spec },
+                spec.memory_len
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn prepared_paperwhite_rows_stop_at_exit_strip() {
+        let screen = ScreenLayout::new(1272, 1696).unwrap();
+        let mut spec = spec(screen, 0);
+        spec.virtual_height = 3392;
+        spec.memory_len = 4_314_624;
+        let mapped_len = 1272 * 1696;
+        let pixels = mono(1272, 1624, &[(1271, 1623)]);
+        let frame = RemoteFrame::new(9, 1272, 1624, 159, &pixels, 0).unwrap();
+        let prepared = prepare_remote(frame, screen, spec, mapped_len).unwrap();
+
+        assert_eq!(prepared.region(), screen.remote_viewport);
+        assert_eq!(prepared.rows().count(), 1624);
+        let (last_offset, last_row) = prepared.rows().last().unwrap();
+        assert_eq!(last_offset + last_row.len(), 1272 * 1624);
+        assert!(last_offset + last_row.len() < mapped_len);
     }
 
     #[test]
