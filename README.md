@@ -238,7 +238,9 @@ the runtime and read-only probe still do not call this path. If submission fails
 framebuffer bytes may already have changed, but no successful presentation is
 reported and no panel refresh can be assumed.
 Pure MXCFB Exit-strip rasterization now shares PaperPad's local Exit bounds and
-touch semantics, but remains unconnected to framebuffer writes and refreshes.
+touch semantics. A staged writer validates the entire local strip against the
+mapping before writing only those rows, and a separate GC16 request builder
+targets only that strip. Neither is called by the runtime or probe yet.
 The HWTCON send-update and wait-complete C layouts are staged from the pinned
 PW6 firmware reference and compile-checked, but no update ioctl has been called
 on the Kindle or device-verified. A pure request builder stages a full GC16

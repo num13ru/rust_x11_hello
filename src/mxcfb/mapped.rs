@@ -9,7 +9,8 @@ use anyhow::{Context, Result, bail, ensure};
 
 use super::layout::{FramebufferGeometry, visible_mapping_len};
 use super::pixels::{FramebufferSpec, PreparedRemote};
-use crate::ui::screen::ScreenRect;
+use super::system_pixels::SystemUiPixels;
+use crate::ui::screen::{SYSTEM_UI_HEIGHT, ScreenLayout, ScreenRect};
 
 pub(super) struct WritableFramebuffer {
     address: NonNull<u8>,
@@ -91,6 +92,64 @@ impl WritableFramebuffer {
         Ok(prepared.region())
     }
 
+    /// Write only the local system strip. Geometry, payload length, and every
+    /// mapped row are checked before the first framebuffer store. This does
+    /// not request a physical panel refresh.
+    pub(super) fn write_system_ui(
+        &mut self,
+        pixels: &SystemUiPixels,
+        spec: FramebufferSpec,
+    ) -> Result<ScreenRect> {
+        spec.validate_format()?;
+        ensure!(
+            self.matches_spec(spec),
+            "system UI and writable mapping geometry differ"
+        );
+        let screen = ScreenLayout::new(
+            u16::try_from(spec.visible_width)?,
+            u16::try_from(spec.visible_height)?,
+        )
+        .context("empty system UI screen")?;
+        ensure!(
+            pixels.region == screen.system_ui_region && pixels.region.height == SYSTEM_UI_HEIGHT,
+            "system UI pixels do not cover exactly the local strip"
+        );
+        let width = usize::from(pixels.region.width);
+        let height = usize::from(pixels.region.height);
+        ensure!(pixels.stride == width, "system UI pixel stride mismatch");
+        ensure!(
+            pixels.bytes.len()
+                == width
+                    .checked_mul(height)
+                    .context("system UI byte length overflow")?,
+            "system UI pixel length mismatch"
+        );
+
+        let first_x = usize::try_from(spec.xoffset)?
+            .checked_add(usize::from(pixels.region.x))
+            .context("system UI horizontal offset overflow")?;
+        let first_y = usize::try_from(spec.yoffset)?
+            .checked_add(usize::from(pixels.region.y))
+            .context("system UI vertical offset overflow")?;
+        let mut offsets = Vec::new();
+        offsets
+            .try_reserve_exact(height)
+            .context("allocate system UI row offsets")?;
+        for row in 0..height {
+            let offset = first_y
+                .checked_add(row)
+                .and_then(|y| y.checked_mul(spec.line_length))
+                .and_then(|start| start.checked_add(first_x))
+                .context("system UI row offset overflow")?;
+            self.check_range(offset, width)?;
+            offsets.push(offset);
+        }
+        for (row, offset) in offsets.into_iter().enumerate() {
+            self.write_at(offset, &pixels.bytes[row * width..(row + 1) * width])?;
+        }
+        Ok(pixels.region)
+    }
+
     fn check_range(&self, offset: usize, length: usize) -> Result<()> {
         let end = offset
             .checked_add(length)
@@ -131,6 +190,7 @@ mod tests {
     use std::fs::OpenOptions;
 
     use super::super::pixels::prepare_remote;
+    use super::super::system_pixels::rasterize_system_ui;
     use super::*;
     use crate::display::RemoteFrame;
     use crate::ui::screen::ScreenLayout;
@@ -183,6 +243,38 @@ mod tests {
         let pixels = [0x80, 0x80];
         let frame = RemoteFrame::new(1, 9, 1, 2, &pixels, 0).unwrap();
         prepare_remote(frame, screen, spec, 12 * 73).unwrap()
+    }
+
+    fn system_geometry() -> FramebufferGeometry {
+        FramebufferGeometry {
+            xres: 64,
+            yres: 73,
+            xres_virtual: 64,
+            yres_virtual: 73,
+            xoffset: 0,
+            yoffset: 0,
+            bits_per_pixel: 8,
+            line_length: 68,
+            smem_len: 68 * 73,
+        }
+    }
+
+    fn system_spec() -> FramebufferSpec {
+        FramebufferSpec {
+            visible_width: 64,
+            visible_height: 73,
+            virtual_width: 64,
+            virtual_height: 73,
+            xoffset: 0,
+            yoffset: 0,
+            line_length: 68,
+            memory_len: 68 * 73,
+            kind: 0,
+            visual: 1,
+            bits_per_pixel: 8,
+            grayscale: 1,
+            nonstd: 0,
+        }
     }
 
     #[test]
@@ -295,6 +387,106 @@ mod tests {
         assert!(error.to_string().contains("geometry"));
         // SAFETY: these offsets cover exactly the live 876-byte mapping.
         for offset in 0..12 * 73 {
+            assert_eq!(
+                unsafe { std::ptr::read_volatile(mapping.address.as_ptr().add(offset)) },
+                0x5a
+            );
+        }
+    }
+
+    #[test]
+    fn system_ui_write_preserves_remote_row_and_padding() {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/zero")
+            .unwrap();
+        // SAFETY: /dev/zero supports this validated 4,964-byte mapping.
+        let mut mapping =
+            unsafe { WritableFramebuffer::map_visible(&file, system_geometry()) }.unwrap();
+        mapping.write_at(0, &vec![0x5a; 68 * 73]).unwrap();
+        let ui = rasterize_system_ui(ScreenLayout::new(64, 73).unwrap()).unwrap();
+        assert_eq!(
+            mapping.write_system_ui(&ui, system_spec()).unwrap(),
+            ui.region
+        );
+
+        // SAFETY: all offsets below lie within the live 4,964-byte mapping.
+        let byte =
+            |offset| unsafe { std::ptr::read_volatile(mapping.address.as_ptr().add(offset)) };
+        assert!((0..68).all(|offset| byte(offset) == 0x5a));
+        assert_eq!(byte(68), 0xff);
+        assert_eq!(byte(68 + 20), 0x00);
+        assert_eq!(byte(68 + 43), 0x00);
+        assert_eq!(byte(68 + 44), 0xff);
+        assert!((64..68).all(|x| byte(68 + x) == 0x5a));
+        assert_eq!(byte(68 * 72 + 20), 0x00);
+    }
+
+    #[test]
+    fn system_ui_write_honors_virtual_page_offsets() {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/zero")
+            .unwrap();
+        let geometry = FramebufferGeometry {
+            xres_virtual: 65,
+            yres_virtual: 75,
+            xoffset: 1,
+            yoffset: 2,
+            smem_len: 68 * 75,
+            ..system_geometry()
+        };
+        let spec = FramebufferSpec {
+            virtual_width: 65,
+            virtual_height: 75,
+            xoffset: 1,
+            yoffset: 2,
+            memory_len: 68 * 75,
+            ..system_spec()
+        };
+        // SAFETY: /dev/zero supports this validated 5,100-byte mapping.
+        let mut mapping = unsafe { WritableFramebuffer::map_visible(&file, geometry) }.unwrap();
+        mapping.write_at(0, &vec![0x5a; 68 * 75]).unwrap();
+        let ui = rasterize_system_ui(ScreenLayout::new(64, 73).unwrap()).unwrap();
+        mapping.write_system_ui(&ui, spec).unwrap();
+
+        // SAFETY: each offset below lies within the live 5,100-byte mapping.
+        let byte =
+            |offset| unsafe { std::ptr::read_volatile(mapping.address.as_ptr().add(offset)) };
+        assert_eq!(byte(0), 0x5a);
+        assert_eq!(byte(2 * 68 + 1 + 20), 0x5a); // remote row
+        assert_eq!(byte(3 * 68), 0x5a); // horizontal virtual offset
+        assert_eq!(byte(3 * 68 + 1), 0xff);
+        assert_eq!(byte(3 * 68 + 1 + 20), 0x00);
+        assert_eq!(byte(3 * 68 + 65), 0x5a); // row padding
+        assert_eq!(byte(74 * 68 + 1 + 20), 0x00);
+    }
+
+    #[test]
+    fn invalid_system_ui_geometry_and_payload_write_nothing() {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/zero")
+            .unwrap();
+        // SAFETY: /dev/zero supports this validated 4,964-byte mapping.
+        let mut mapping =
+            unsafe { WritableFramebuffer::map_visible(&file, system_geometry()) }.unwrap();
+        mapping.write_at(0, &vec![0x5a; 68 * 73]).unwrap();
+        let mut ui = rasterize_system_ui(ScreenLayout::new(64, 73).unwrap()).unwrap();
+        let mut spec = system_spec();
+        spec.visual = 0;
+        assert!(mapping.write_system_ui(&ui, spec).is_err());
+        spec = system_spec();
+        ui.region.y = 0;
+        assert!(mapping.write_system_ui(&ui, spec).is_err());
+        ui.region.y = 1;
+        ui.bytes.pop();
+        assert!(mapping.write_system_ui(&ui, spec).is_err());
+        // SAFETY: all offsets lie within the live 4,964-byte mapping.
+        for offset in 0..68 * 73 {
             assert_eq!(
                 unsafe { std::ptr::read_volatile(mapping.address.as_ptr().add(offset)) },
                 0x5a

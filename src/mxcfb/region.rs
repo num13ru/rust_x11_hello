@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result, ensure};
 
-use crate::ui::screen::ScreenLayout;
+use crate::ui::screen::{SYSTEM_UI_HEIGHT, ScreenLayout};
 
 use super::update_abi::UpdateRegion;
 
@@ -70,9 +70,55 @@ pub(super) fn remote_update_region(
     )
 }
 
+/// Refresh exactly the PaperPad-owned bottom strip, never remote content.
+#[allow(dead_code)]
+pub(super) fn system_ui_update_region(
+    screen: ScreenLayout,
+    visible_width: u32,
+    visible_height: u32,
+) -> Result<UpdateRegion> {
+    let (screen_width, screen_height) = screen.physical_size();
+    ensure!(
+        (u32::from(screen_width), u32::from(screen_height)) == (visible_width, visible_height),
+        "framebuffer visible dimensions do not match PaperPad screen"
+    );
+    let local = screen.system_ui_region;
+    ensure!(
+        local.height == SYSTEM_UI_HEIGHT,
+        "incomplete system UI update strip"
+    );
+    let remote_bottom = u32::from(screen.remote_viewport.y)
+        .checked_add(u32::from(screen.remote_viewport.height))
+        .context("remote viewport bottom overflow")?;
+    ensure!(
+        remote_bottom <= u32::from(local.y),
+        "system UI update overlaps remote viewport"
+    );
+    checked_visible_region(
+        u32::from(local.x),
+        u32::from(local.y),
+        u32::from(local.width),
+        u32::from(local.height),
+        visible_width,
+        visible_height,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn system_ui_update_is_exactly_the_bottom_strip() {
+        let screen = ScreenLayout::new(1272, 1696).unwrap();
+        let region = system_ui_update_region(screen, 1272, 1696).unwrap();
+        assert_eq!((region.left, region.top), (0, 1624));
+        assert_eq!((region.width, region.height), (1272, 72));
+        assert!(system_ui_update_region(screen, 1271, 1696).is_err());
+        assert!(system_ui_update_region(screen, 1272, 1695).is_err());
+        let short = ScreenLayout::new(100, 71).unwrap();
+        assert!(system_ui_update_region(short, 100, 71).is_err());
+    }
 
     #[test]
     fn pw6_remote_update_stops_before_exit_strip() {

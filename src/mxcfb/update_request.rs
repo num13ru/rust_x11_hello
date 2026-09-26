@@ -5,7 +5,7 @@ use anyhow::{Result, ensure};
 
 use crate::ui::screen::ScreenLayout;
 
-use super::region::remote_update_region;
+use super::region::{remote_update_region, system_ui_update_region};
 use super::update_abi::{UpdateDataMtk, UpdateRegion};
 use super::update_marker::UpdateMarkerSequence;
 
@@ -46,6 +46,22 @@ pub(super) fn next_full_gc16_remote_request(
     ))
 }
 
+/// Same conservative GC16 policy, restricted to PaperPad's local Exit strip.
+/// Validation happens before the process-local marker is consumed.
+#[allow(dead_code)]
+pub(super) fn next_full_gc16_system_ui_request(
+    screen: ScreenLayout,
+    visible_width: u32,
+    visible_height: u32,
+    markers: &mut UpdateMarkerSequence,
+) -> Result<UpdateDataMtk> {
+    let update_region = system_ui_update_region(screen, visible_width, visible_height)?;
+    Ok(full_gc16_request_for_region(
+        update_region,
+        markers.next_marker(),
+    ))
+}
+
 fn full_gc16_request_for_region(update_region: UpdateRegion, marker: u32) -> UpdateDataMtk {
     UpdateDataMtk {
         update_region,
@@ -62,6 +78,30 @@ fn full_gc16_request_for_region(update_region: UpdateRegion, marker: u32) -> Upd
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn system_ui_request_uses_shared_policy_and_marker_sequence() {
+        let screen = ScreenLayout::new(1272, 1696).unwrap();
+        let mut markers = UpdateMarkerSequence::for_process();
+        assert!(next_full_gc16_system_ui_request(screen, 1271, 1696, &mut markers).is_err());
+        let local = next_full_gc16_system_ui_request(screen, 1272, 1696, &mut markers).unwrap();
+        let remote = next_full_gc16_remote_request(screen, 1272, 1696, &mut markers).unwrap();
+        assert_eq!(local.update_marker, std::process::id().max(1));
+        assert_eq!(
+            remote.update_marker,
+            local.update_marker.wrapping_add(1).max(1)
+        );
+        assert_eq!(
+            (local.update_region.top, local.update_region.height),
+            (1624, 72)
+        );
+        assert_eq!(
+            (remote.update_region.top, remote.update_region.height),
+            (0, 1624)
+        );
+        assert_eq!(local.waveform_mode, remote.waveform_mode);
+        assert_eq!(local.update_mode, remote.update_mode);
+    }
 
     #[test]
     fn pw6_request_is_full_gc16_for_remote_viewport_only() {
