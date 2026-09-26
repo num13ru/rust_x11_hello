@@ -55,9 +55,11 @@ pub(crate) fn inspect_framebuffer() -> Result<()> {
         smem_len: fixed.smem_len,
     })
     .context("mxcfb probe: visible framebuffer mapping bounds")?;
-    memory::check_read_only_mapping(&file, mapping_length)
-        .context("mxcfb probe: read-only framebuffer mapping")?;
-    eprintln!("mxcfb probe: read-only mmap accepted length={mapping_length}");
+    memory::check_read_only_access(&file, mapping_length)
+        .context("mxcfb probe: read-only framebuffer access")?;
+    eprintln!(
+        "mxcfb probe: read-only mmap and boundary-byte reads accepted length={mapping_length}"
+    );
     Ok(())
 }
 

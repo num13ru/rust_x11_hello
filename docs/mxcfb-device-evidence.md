@@ -12,6 +12,17 @@ reading pixel bytes. This verifies that this mapping operation was accepted
 on this device; pixel access, byte polarity, framebuffer writes, and e-ink
 update submission remain unverified.
 
+## Read-only boundary-byte check (2026-09-26)
+
+The deployed binary again matched the host artifact, this time at SHA-256
+`e8a57d826c4ab0d2063d4ed0211363fef0281113866787a2450ed522a798698c`.
+The latest probe log reported
+`read-only mmap and boundary-byte reads accepted length=2157312` and exit
+status 0. The KUAL status file reported `STOPPED status=0 reason=process_exit`.
+This verifies that the first and last bytes of the mapped visible span were
+readable on this device. Their values were neither logged nor interpreted;
+pixel polarity, writes, and panel refresh remain unverified.
+
 Read-only `--inspect-framebuffer` probe run on the project's Paperwhite 6
 (Sangria / Bellatrix4, FW 5.17.1.0.4) on 2026-09-26. The deployed binary was
 read back over MTP and matched the host artifact's SHA-256:

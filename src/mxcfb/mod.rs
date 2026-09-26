@@ -4,7 +4,7 @@
 mod abi;
 #[cfg(any(target_os = "linux", test))]
 mod layout;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", test))]
 mod memory;
 #[cfg(target_os = "linux")]
 mod probe;
