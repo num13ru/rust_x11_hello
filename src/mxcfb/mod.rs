@@ -2,6 +2,10 @@
 
 #[cfg(target_os = "linux")]
 mod abi;
+// Submission is staged but not connected to the display or probe path.
+#[cfg(target_os = "linux")]
+#[allow(dead_code)]
+mod controller;
 #[cfg(target_os = "linux")]
 mod hwtcon;
 #[cfg(any(target_os = "linux", test))]
