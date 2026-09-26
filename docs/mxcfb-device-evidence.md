@@ -146,3 +146,19 @@ retrieved for the grid-action sequence.
 The report and logs establish the tested frame sequence and grid interaction,
 but do not isolate exact edge pixels or polarity. Mismatched-frame rejection,
 in-process reconnect, and sleep/wake or X11 repaint behavior remain unverified.
+
+## Final host and artifact audit (2026-09-26)
+
+`make check`, `make build verify`, and `git diff --check origin/master...HEAD`
+passed on the branch. Two consecutive ARM builds produced the same static ELF
+at SHA-256 `cd4c95b83c49b159f917f7d8162bd270a70d4a6d7adba8377a783fec9b207429`.
+This full-file hash differs from the device-tested binary's hash recorded
+above. The only Rust-source changes since that run were comments; no
+executable Rust code changed between that revision and this audit.
+
+For a stronger artifact comparison, temporary copies of both binaries were
+fully stripped with `arm-linux-gnueabihf-strip --strip-all`; both then hashed
+to `157247dbbe862d1b6aee0b196749fee6bb662b5e7e2e1535d7ad4f1b4387613e`.
+Their `.text` and `.rodata` sections also matched independently. The current
+unstripped artifact was not redeployed or physically rerun; its full-file hash
+must not be substituted for the hash recorded for the actual Kindle trial.
