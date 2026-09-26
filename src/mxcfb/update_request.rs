@@ -6,7 +6,8 @@ use anyhow::{Result, ensure};
 use crate::ui::screen::ScreenLayout;
 
 use super::region::remote_update_region;
-use super::update_abi::UpdateDataMtk;
+use super::update_abi::{UpdateDataMtk, UpdateRegion};
+use super::update_marker::UpdateMarkerSequence;
 
 // PW6-matched values from FBInk `eink/mtk-kindle.h` and its included
 // `eink/mxcfb-kindle.h` at 886f25f13368859ad8a899b88d04c26e19cda32e.
@@ -26,7 +27,27 @@ pub(super) fn full_gc16_remote_request(
 ) -> Result<UpdateDataMtk> {
     ensure!(marker != 0, "HWTCON update marker must be nonzero");
     let update_region = remote_update_region(screen, visible_width, visible_height)?;
-    Ok(UpdateDataMtk {
+    Ok(full_gc16_request_for_region(update_region, marker))
+}
+
+/// Validate before consuming a process-local marker. A failed request does
+/// not advance the sequence; no update is submitted here.
+#[allow(dead_code)]
+pub(super) fn next_full_gc16_remote_request(
+    screen: ScreenLayout,
+    visible_width: u32,
+    visible_height: u32,
+    markers: &mut UpdateMarkerSequence,
+) -> Result<UpdateDataMtk> {
+    let update_region = remote_update_region(screen, visible_width, visible_height)?;
+    Ok(full_gc16_request_for_region(
+        update_region,
+        markers.next_marker(),
+    ))
+}
+
+fn full_gc16_request_for_region(update_region: UpdateRegion, marker: u32) -> UpdateDataMtk {
+    UpdateDataMtk {
         update_region,
         waveform_mode: WAVEFORM_GC16,
         update_mode: UPDATE_MODE_FULL,
@@ -35,7 +56,7 @@ pub(super) fn full_gc16_remote_request(
         hist_bw_waveform_mode: WAVEFORM_DU,
         hist_gray_waveform_mode: WAVEFORM_GC16,
         ..UpdateDataMtk::default()
-    })
+    }
 }
 
 #[cfg(test)]
@@ -74,5 +95,20 @@ mod tests {
 
         let local_only = ScreenLayout::new(100, 40).unwrap();
         assert!(full_gc16_remote_request(local_only, 100, 40, 1).is_err());
+    }
+
+    #[test]
+    fn sequenced_requests_advance_only_after_validation() {
+        let screen = ScreenLayout::new(1272, 1696).unwrap();
+        let mut markers = UpdateMarkerSequence::for_process();
+        let first_marker = std::process::id().max(1);
+
+        assert!(next_full_gc16_remote_request(screen, 1271, 1696, &mut markers).is_err());
+        let first = next_full_gc16_remote_request(screen, 1272, 1696, &mut markers).unwrap();
+        let second = next_full_gc16_remote_request(screen, 1272, 1696, &mut markers).unwrap();
+
+        assert_eq!(first.update_marker, first_marker);
+        assert_eq!(second.update_marker, first_marker.wrapping_add(1).max(1));
+        assert_eq!(first.update_region, second.update_region);
     }
 }
