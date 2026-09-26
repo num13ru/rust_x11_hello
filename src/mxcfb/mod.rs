@@ -14,6 +14,10 @@ mod probe;
 mod region;
 #[cfg(any(target_os = "linux", test))]
 mod update_request;
+// Markers are staged independently of update submission.
+#[cfg(any(target_os = "linux", test))]
+#[allow(dead_code)]
+mod update_marker;
 // Source-derived update layouts are compiled but not used for device calls yet.
 mod update_abi;
 // Pure conversion is staged before the framebuffer writer is connected.
