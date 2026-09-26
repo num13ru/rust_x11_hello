@@ -221,8 +221,10 @@ using the normal MTP log command below and look for `mxcfb probe:` lines. If
 opening `/dev/fb0`, a query, or either mapping fails, the log records the
 specific failure. An accepted writable mapping or panel-info query does not
 prove pixel writes, color polarity, e-ink update submission, or panel output.
-The probe does not establish Kindle-specific update ioctl definitions or prove
-that X11 input can coexist with direct display.
+The HWTCON send-update and wait-complete C layouts are staged from the pinned
+PW6 firmware reference and compile-checked, but no update ioctl has been called
+or device-verified. This probe also does not prove that X11 input can coexist
+with direct display.
 
 Runtime overrides now use the `PAPERPAD_` prefix. The KUAL launcher reads
 `PAPERPAD_EXT_DIR`, `PAPERPAD_WATCHDOG_SECONDS`, and
