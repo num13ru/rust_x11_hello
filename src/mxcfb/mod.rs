@@ -2,6 +2,8 @@
 
 #[cfg(target_os = "linux")]
 mod abi;
+#[cfg(target_os = "linux")]
+mod hwtcon;
 #[cfg(any(target_os = "linux", test))]
 mod layout;
 #[cfg(any(target_os = "linux", test))]

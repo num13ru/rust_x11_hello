@@ -4,7 +4,7 @@
 use anyhow::{Context, Result};
 use std::fs::{self, File, OpenOptions};
 
-use super::{abi, layout, memory};
+use super::{abi, hwtcon, layout, memory};
 
 pub(crate) fn inspect_framebuffer() -> Result<()> {
     eprintln!("mxcfb probe: read-only /dev/fb0 inspection");
@@ -69,6 +69,9 @@ pub(crate) fn inspect_framebuffer() -> Result<()> {
     memory::check_writable_mapping(&writable_file, mapping_length)
         .context("mxcfb probe: writable framebuffer mapping")?;
     eprintln!("mxcfb probe: writable mmap accepted without pixel writes length={mapping_length}");
+
+    hwtcon::query_panel_info(&file).context("mxcfb probe: GET_PANEL_INFO_MTK")?;
+    eprintln!("mxcfb probe: read-only GET_PANEL_INFO_MTK accepted");
     Ok(())
 }
 

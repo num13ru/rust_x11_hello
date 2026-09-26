@@ -213,14 +213,16 @@ validated visible framebuffer span, reads its first and last bytes without
 logging or interpreting their values, and immediately unmaps it. It then opens
 `/dev/fb0` read-write and attempts a shared writable mapping of the same span,
 again unmapping immediately without accessing pixel bytes through that mapping.
-It does not write pixels, map a window, touch the normal launcher, or submit an
-e-ink refresh. No PaperSpoon listener is needed. Retrieve the log
+It then tries the firmware-matched, read-only HWTCON `GET_PANEL_INFO_MTK`
+query and discards its returned data. It does not write pixels, map a window,
+touch the normal launcher, or submit an e-ink refresh. No PaperSpoon listener
+is needed. Retrieve the log
 using the normal MTP log command below and look for `mxcfb probe:` lines. If
 opening `/dev/fb0`, a query, or either mapping fails, the log records the
-specific failure. An accepted writable mapping does not prove pixel writes,
-color polarity, or panel output. The probe does not establish
-Kindle-specific MXCFB ioctl definitions or prove that X11 input can coexist
-with direct display.
+specific failure. An accepted writable mapping or panel-info query does not
+prove pixel writes, color polarity, e-ink update submission, or panel output.
+The probe does not establish Kindle-specific update ioctl definitions or prove
+that X11 input can coexist with direct display.
 
 Runtime overrides now use the `PAPERPAD_` prefix. The KUAL launcher reads
 `PAPERPAD_EXT_DIR`, `PAPERPAD_WATCHDOG_SECONDS`, and

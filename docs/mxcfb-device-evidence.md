@@ -35,6 +35,18 @@ The probe opened `/dev/fb0` read-write, mapped the validated visible span with
 pixel bytes through that mapping. This verifies mapping permission, not a
 framebuffer write, color polarity, or e-ink update submission.
 
+## Read-only HWTCON panel-info query (2026-09-26)
+
+The deployed probe binary matched the host artifact at SHA-256
+`a0681232b6e682bb768bdc98ce75a332a75ac6ceb82498aedac45aceb4d90be5`.
+The latest probe log reported `read-only GET_PANEL_INFO_MTK accepted` and exit
+status 0. The KUAL status file reported `STOPPED status=0 reason=process_exit`.
+The ioctl request and 112-byte C layout came from the pinned FBInk
+`hwtcon_ioctl_cmd.h` transcription attributed to PW6 FW 5.17.1.0.4. The
+returned bytes were discarded. This verifies acceptance of this read-only
+query on this device, not the HWTCON update-data layout, update submission,
+or physical panel output.
+
 Read-only `--inspect-framebuffer` probe run on the project's Paperwhite 6
 (Sangria / Bellatrix4, FW 5.17.1.0.4) on 2026-09-26. The deployed binary was
 read back over MTP and matched the host artifact's SHA-256:
