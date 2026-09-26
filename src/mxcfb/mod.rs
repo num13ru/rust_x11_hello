@@ -10,6 +10,10 @@ mod controller;
 mod hwtcon;
 #[cfg(any(target_os = "linux", test))]
 mod layout;
+// Bounded framebuffer writes are staged, not yet connected to frame display.
+#[cfg(target_os = "linux")]
+#[allow(dead_code)]
+mod mapped;
 #[cfg(any(target_os = "linux", test))]
 mod memory;
 #[cfg(target_os = "linux")]

@@ -221,6 +221,8 @@ using the normal MTP log command below and look for `mxcfb probe:` lines. If
 opening `/dev/fb0`, a query, or either mapping fails, the log records the
 specific failure. An accepted writable mapping or panel-info query does not
 prove pixel writes, color polarity, e-ink update submission, or panel output.
+A bounded writable-mapping helper is staged but unused by the app; its Linux
+tests write only to `/dev/zero`, not the Kindle framebuffer.
 The HWTCON send-update and wait-complete C layouts are staged from the pinned
 PW6 firmware reference and compile-checked, but no update ioctl has been called
 on the Kindle or device-verified. A pure request builder stages a full GC16
