@@ -144,6 +144,7 @@ pub(super) fn blit_remote(
 /// remote viewport; bytes representing PaperPad's local UI stay private.
 pub(super) struct PreparedRemote {
     region: ScreenRect,
+    spec: FramebufferSpec,
     buffer: Vec<u8>,
     first_offset: usize,
     line_length: usize,
@@ -154,6 +155,14 @@ pub(super) struct PreparedRemote {
 impl PreparedRemote {
     pub(super) fn region(&self) -> ScreenRect {
         self.region
+    }
+
+    pub(super) fn mapped_len(&self) -> usize {
+        self.buffer.len()
+    }
+
+    pub(super) fn spec(&self) -> FramebufferSpec {
+        self.spec
     }
 
     pub(super) fn rows(&self) -> impl Iterator<Item = (usize, &[u8])> {
@@ -220,6 +229,7 @@ pub(super) fn prepare_remote(
 
     Ok(PreparedRemote {
         region,
+        spec,
         buffer,
         first_offset,
         line_length: spec.line_length,

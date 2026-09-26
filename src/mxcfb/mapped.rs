@@ -8,10 +8,13 @@ use std::ptr::NonNull;
 use anyhow::{Context, Result, bail, ensure};
 
 use super::layout::{FramebufferGeometry, visible_mapping_len};
+use super::pixels::{FramebufferSpec, PreparedRemote};
+use crate::ui::screen::ScreenRect;
 
 pub(super) struct WritableFramebuffer {
     address: NonNull<u8>,
     len: usize,
+    geometry: FramebufferGeometry,
 }
 
 impl WritableFramebuffer {
@@ -48,15 +51,16 @@ impl WritableFramebuffer {
             }
             bail!("mmap returned a null framebuffer address");
         };
-        Ok(Self { address, len })
+        Ok(Self {
+            address,
+            len,
+            geometry,
+        })
     }
 
     /// Write a fully in-bounds byte run. A bad range changes no bytes.
     pub(super) fn write_at(&mut self, offset: usize, bytes: &[u8]) -> Result<()> {
-        let end = offset
-            .checked_add(bytes.len())
-            .context("framebuffer write offset overflow")?;
-        ensure!(end <= self.len, "framebuffer write exceeds mapping");
+        self.check_range(offset, bytes.len())?;
 
         for (index, &byte) in bytes.iter().enumerate() {
             // SAFETY: the checked end is within the live mapping, and `&mut
@@ -65,6 +69,47 @@ impl WritableFramebuffer {
             unsafe { std::ptr::write_volatile(self.address.as_ptr().add(offset + index), byte) };
         }
         Ok(())
+    }
+
+    /// Write only the remote rows of a fully prepared frame. All ranges are
+    /// checked before the first store. A successful write is not a panel update.
+    pub(super) fn write_prepared(&mut self, prepared: &PreparedRemote) -> Result<ScreenRect> {
+        ensure!(
+            self.matches_spec(prepared.spec()),
+            "prepared frame and writable mapping geometry differ"
+        );
+        ensure!(
+            prepared.mapped_len() == self.len,
+            "prepared frame and writable mapping lengths differ"
+        );
+        for (offset, row) in prepared.rows() {
+            self.check_range(offset, row.len())?;
+        }
+        for (offset, row) in prepared.rows() {
+            self.write_at(offset, row)?;
+        }
+        Ok(prepared.region())
+    }
+
+    fn check_range(&self, offset: usize, length: usize) -> Result<()> {
+        let end = offset
+            .checked_add(length)
+            .context("framebuffer write offset overflow")?;
+        ensure!(end <= self.len, "framebuffer write exceeds mapping");
+        Ok(())
+    }
+
+    fn matches_spec(&self, spec: FramebufferSpec) -> bool {
+        let geometry = self.geometry;
+        spec.visible_width == geometry.xres
+            && spec.visible_height == geometry.yres
+            && spec.virtual_width == geometry.xres_virtual
+            && spec.virtual_height == geometry.yres_virtual
+            && spec.xoffset == geometry.xoffset
+            && spec.yoffset == geometry.yoffset
+            && spec.bits_per_pixel == geometry.bits_per_pixel
+            && usize::try_from(geometry.line_length).ok() == Some(spec.line_length)
+            && usize::try_from(geometry.smem_len).ok() == Some(spec.memory_len)
     }
 }
 
@@ -85,7 +130,10 @@ impl Drop for WritableFramebuffer {
 mod tests {
     use std::fs::OpenOptions;
 
+    use super::super::pixels::prepare_remote;
     use super::*;
+    use crate::display::RemoteFrame;
+    use crate::ui::screen::ScreenLayout;
 
     fn geometry() -> FramebufferGeometry {
         FramebufferGeometry {
@@ -99,6 +147,42 @@ mod tests {
             line_length: 4,
             smem_len: 8,
         }
+    }
+
+    fn remote_geometry(height: u32) -> FramebufferGeometry {
+        FramebufferGeometry {
+            xres: 9,
+            yres: height,
+            xres_virtual: 9,
+            yres_virtual: height,
+            xoffset: 0,
+            yoffset: 0,
+            bits_per_pixel: 8,
+            line_length: 12,
+            smem_len: 12 * height,
+        }
+    }
+
+    fn prepared_remote() -> PreparedRemote {
+        let screen = ScreenLayout::new(9, 73).unwrap();
+        let spec = FramebufferSpec {
+            visible_width: 9,
+            visible_height: 73,
+            virtual_width: 9,
+            virtual_height: 73,
+            xoffset: 0,
+            yoffset: 0,
+            line_length: 12,
+            memory_len: 12 * 73,
+            kind: 0,
+            visual: 1,
+            bits_per_pixel: 8,
+            grayscale: 1,
+            nonstd: 0,
+        };
+        let pixels = [0x80, 0x80];
+        let frame = RemoteFrame::new(1, 9, 1, 2, &pixels, 0).unwrap();
+        prepare_remote(frame, screen, spec, 12 * 73).unwrap()
     }
 
     #[test]
@@ -145,5 +229,76 @@ mod tests {
         // otherwise supports the requested eight-byte mapping.
         assert!(unsafe { WritableFramebuffer::map_visible(&file, invalid) }.is_err());
         assert!(unsafe { WritableFramebuffer::map_visible(&file, geometry()) }.is_err());
+    }
+
+    #[test]
+    fn prepared_write_preserves_padding_and_local_exit_rows() {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/zero")
+            .unwrap();
+        // SAFETY: /dev/zero supports this 876-byte shared mapping.
+        let mut mapping =
+            unsafe { WritableFramebuffer::map_visible(&file, remote_geometry(73)) }.unwrap();
+        mapping.write_at(0, &vec![0x5a; 12 * 73]).unwrap();
+        let prepared = prepared_remote();
+        assert_eq!(
+            mapping.write_prepared(&prepared).unwrap(),
+            prepared.region()
+        );
+
+        // SAFETY: every offset read is within the live 876-byte mapping.
+        let actual: Vec<u8> = (0..12 * 73)
+            .map(|offset| unsafe { std::ptr::read_volatile(mapping.address.as_ptr().add(offset)) })
+            .collect();
+        assert_eq!(actual[0], 0x00);
+        assert!(actual[1..8].iter().all(|&byte| byte == 0xff));
+        assert_eq!(actual[8], 0x00);
+        assert!(actual[9..].iter().all(|&byte| byte == 0x5a));
+    }
+
+    #[test]
+    fn mismatched_mapping_rejects_prepared_frame_without_writing() {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/zero")
+            .unwrap();
+        // SAFETY: /dev/zero supports this 12-byte shared mapping.
+        let mut mapping =
+            unsafe { WritableFramebuffer::map_visible(&file, remote_geometry(1)) }.unwrap();
+        mapping.write_at(0, &[0x5a; 12]).unwrap();
+        assert!(mapping.write_prepared(&prepared_remote()).is_err());
+        // SAFETY: these offsets cover exactly the live 12-byte mapping.
+        for offset in 0..12 {
+            assert_eq!(
+                unsafe { std::ptr::read_volatile(mapping.address.as_ptr().add(offset)) },
+                0x5a
+            );
+        }
+    }
+
+    #[test]
+    fn same_length_but_different_geometry_is_rejected() {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/zero")
+            .unwrap();
+        let mut geometry = remote_geometry(73);
+        geometry.xres = 8;
+        // SAFETY: /dev/zero supports this 876-byte shared mapping.
+        let mut mapping = unsafe { WritableFramebuffer::map_visible(&file, geometry) }.unwrap();
+        mapping.write_at(0, &vec![0x5a; 12 * 73]).unwrap();
+        let error = mapping.write_prepared(&prepared_remote()).unwrap_err();
+        assert!(error.to_string().contains("geometry"));
+        // SAFETY: these offsets cover exactly the live 876-byte mapping.
+        for offset in 0..12 * 73 {
+            assert_eq!(
+                unsafe { std::ptr::read_volatile(mapping.address.as_ptr().add(offset)) },
+                0x5a
+            );
+        }
     }
 }
