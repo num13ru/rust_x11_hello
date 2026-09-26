@@ -10,6 +10,7 @@
 use std::mem::{offset_of, size_of};
 
 #[repr(C)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(dead_code)]
 pub(super) struct UpdateRegion {
     pub top: u32,

@@ -10,6 +10,8 @@ mod layout;
 mod memory;
 #[cfg(target_os = "linux")]
 mod probe;
+#[cfg(any(target_os = "linux", test))]
+mod region;
 // Source-derived update layouts are compiled but not used for device calls yet.
 mod update_abi;
 // Pure conversion is staged before the framebuffer writer is connected.
