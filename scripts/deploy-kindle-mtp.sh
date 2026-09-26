@@ -56,12 +56,15 @@ cleanup_local_temp() {
 
 trap cleanup_local_temp EXIT
 
-upload_package_files() {
+upload_support_files() {
     mtp put "${LOCAL_EXT}/bin/run.sh" "${REMOTE_BIN_DIR}/run.sh" --replace --verify
+    mtp put "${LOCAL_EXT}/bin/probe-fb.sh" "${REMOTE_BIN_DIR}/probe-fb.sh" --replace --verify
     mtp put "${LOCAL_EXT}/config.xml" "${REMOTE_EXT}/config.xml" --replace --verify
+}
 
-    # Upload menu.json last so KUAL does not expose a partially installed package.
-    mtp put "${LOCAL_EXT}/menu.json" "${REMOTE_EXT}/menu.json" --replace --verify
+publish_menu() {
+    # Publish only after the canonical binary and support files are verified.
+    mtp put "${LOCAL_EXT}/menu.json" "${REMOTE_EXT}/menu.json" --replace --verify || return
 
     # Retire support files only after the new menu no longer references them.
     if remote_name_exists "${REMOTE_BIN_DIR}" stop.sh; then
@@ -99,6 +102,7 @@ esac
 for required_file in \
     "$LOCAL_BIN" \
     "${LOCAL_EXT}/bin/run.sh" \
+    "${LOCAL_EXT}/bin/probe-fb.sh" \
     "${LOCAL_EXT}/config.xml" \
     "${LOCAL_EXT}/menu.json"
 do
@@ -121,7 +125,8 @@ case "$MODE" in
         mtp mkdir "$REMOTE_EXT"
         mtp mkdir "$REMOTE_BIN_DIR"
         mtp put "$LOCAL_BIN" "$REMOTE_BIN" --verify
-        upload_package_files
+        upload_support_files
+        publish_menu
         ;;
     update)
         mtp ls "$REMOTE_BIN_DIR" >/dev/null
@@ -142,7 +147,7 @@ case "$MODE" in
         mtp get "$REMOTE_BIN" "$PREVIOUS_LOCAL_BIN"
         mtp put "$PREVIOUS_LOCAL_BIN" "$REMOTE_PREVIOUS_BIN" --verify
 
-        upload_package_files
+        upload_support_files
 
         if ! mtp put "$LOCAL_BIN" "$REMOTE_BIN" --replace --verify; then
             printf 'ERROR: activating staged binary failed; attempting verified rollback\n' >&2
@@ -157,6 +162,7 @@ case "$MODE" in
         if ! mtp rm "$REMOTE_STAGED_BIN" --yes; then
             printf 'WARNING: activated binary verified, but staged .new cleanup failed.\n' >&2
         fi
+        publish_menu
         ;;
 esac
 

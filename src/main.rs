@@ -16,6 +16,7 @@ mod app;
 mod config;
 mod discovery;
 mod display;
+mod mxcfb;
 mod net;
 mod ui;
 mod x11;
@@ -34,6 +35,16 @@ fn print_environment() {
 }
 
 fn run() -> Result<()> {
+    let mut args = env::args_os();
+    let _program = args.next();
+    match (args.next(), args.next()) {
+        (None, None) => {}
+        (Some(arg), None) if arg == "--inspect-framebuffer" => {
+            return mxcfb::inspect_framebuffer();
+        }
+        _ => bail!("usage: rust_x11_hello [--inspect-framebuffer]"),
+    }
+
     let display_backend = config::DisplayBackendKind::from_env()?;
     if display_backend == config::DisplayBackendKind::Mxcfb {
         bail!("display backend=mxcfb requested but MXCFB support is not implemented in this build");

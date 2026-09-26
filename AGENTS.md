@@ -11,6 +11,8 @@ steps an agent should follow, especially around physical-device work.
 - Device extension root: `/extensions/rust_x11_hello` (MTP) = `/mnt/us/extensions/rust_x11_hello` (runtime).
 - KUAL action: **Run Paperpad (90s)**. Stop from the in-window **Exit** button
   or let the watchdog end the run; the full-screen window covers KUAL.
+- **Inspect framebuffer metadata** is a read-only KUAL diagnostic. It logs
+  `/dev/fb0` metadata without using the normal launcher or drawing.
 - Physical device: Kindle Paperwhite 6 (Sangria / Bellatrix4), FW 5.17.1.0.4.
   USBNetwork is NOT available on this device; transport is Wi-Fi via `PAPERPAD_COMPANION`.
 
@@ -63,7 +65,8 @@ Rules the deploy script enforces:
   exposes a partially transferred extension.
 
 After a successful deploy, `mtp-rs ls /extensions/rust_x11_hello --recursive` shows:
-`rust_x11_hello.log`, `rust_x11_hello.status`, `bin/{rust_x11_hello, run.sh}`,
+`rust_x11_hello.log`, `rust_x11_hello.status`,
+`bin/{rust_x11_hello, run.sh, probe-fb.sh}`,
 `config.xml`, `menu.json`, plus `bin/rust_x11_hello.previous` retained from the update.
 
 ## Log handling

@@ -204,6 +204,17 @@ to `x11`; setting it explicitly to `x11` selects the same reference path.
 startup with a clear error. PaperPad never silently falls back to X11 after an
 explicit MXCFB request.
 
+The KUAL **Inspect framebuffer metadata** action runs `--inspect-framebuffer`
+without starting the normal launcher. It collects read-only `/dev/fb0`
+information and logs the standard Linux
+`FBIOGET_FSCREENINFO` and `FBIOGET_VSCREENINFO` results to
+`rust_x11_hello.log`, then exits without mapping a window, touching the normal
+launcher, writing pixels, or submitting an e-ink refresh. No PaperSpoon listener
+is needed. Retrieve the log using the normal MTP log command below and look for
+`mxcfb probe:` lines. If opening `/dev/fb0` or either query fails, the log
+records the specific failure. The probe does not establish Kindle-specific
+MXCFB ioctl definitions or prove that X11 input can coexist with direct display.
+
 Runtime overrides now use the `PAPERPAD_` prefix. The KUAL launcher reads
 `PAPERPAD_EXT_DIR`, `PAPERPAD_WATCHDOG_SECONDS`, and
 `PAPERPAD_WATCHDOG_TERM_GRACE_SECONDS`. Update existing overrides; legacy

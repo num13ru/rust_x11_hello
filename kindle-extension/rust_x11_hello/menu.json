@@ -3,6 +3,10 @@
     {
       "name": "Run Paperpad (90s)",
       "action": "sh bin/run.sh"
+    },
+    {
+      "name": "Inspect framebuffer metadata",
+      "action": "sh bin/probe-fb.sh"
     }
   ]
 }
