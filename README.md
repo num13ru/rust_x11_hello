@@ -240,7 +240,9 @@ reported and no panel refresh can be assumed.
 Pure MXCFB Exit-strip rasterization now shares PaperPad's local Exit bounds and
 touch semantics. A staged writer validates the entire local strip against the
 mapping before writing only those rows, and a separate GC16 request builder
-targets only that strip. Neither is called by the runtime or probe yet.
+targets only that strip. An unconnected presentation operation now writes the
+strip and submits that request in order; a rejected ioctl is not reported as a
+successful update. The runtime and read-only probe still call neither path.
 The HWTCON send-update and wait-complete C layouts are staged from the pinned
 PW6 firmware reference and compile-checked, but no update ioctl has been called
 on the Kindle or device-verified. A pure request builder stages a full GC16
