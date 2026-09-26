@@ -2,7 +2,7 @@
 //! Kindle-specific MXCFB update ABI is selected.
 
 use anyhow::{Context, Result};
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 
 use super::{abi, layout, memory};
 
@@ -60,6 +60,15 @@ pub(crate) fn inspect_framebuffer() -> Result<()> {
     eprintln!(
         "mxcfb probe: read-only mmap and boundary-byte reads accepted length={mapping_length}"
     );
+
+    let writable_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/fb0")
+        .context("mxcfb probe: open /dev/fb0 for writing")?;
+    memory::check_writable_mapping(&writable_file, mapping_length)
+        .context("mxcfb probe: writable framebuffer mapping")?;
+    eprintln!("mxcfb probe: writable mmap accepted without pixel writes length={mapping_length}");
     Ok(())
 }
 

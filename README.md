@@ -210,13 +210,15 @@ information and logs the standard Linux
 `FBIOGET_FSCREENINFO` and `FBIOGET_VSCREENINFO` results to
 `rust_x11_hello.log`. It also attempts a shared, read-only mapping of the
 validated visible framebuffer span, reads its first and last bytes without
-logging or interpreting their values, and immediately unmaps it. It does not
-write pixel bytes, map a window, touch the normal launcher, or submit an e-ink
-refresh. No PaperSpoon listener is needed. Retrieve the log
+logging or interpreting their values, and immediately unmaps it. It then opens
+`/dev/fb0` read-write and attempts a shared writable mapping of the same span,
+again unmapping immediately without accessing pixel bytes through that mapping.
+It does not write pixels, map a window, touch the normal launcher, or submit an
+e-ink refresh. No PaperSpoon listener is needed. Retrieve the log
 using the normal MTP log command below and look for `mxcfb probe:` lines. If
-opening `/dev/fb0`, a query, or the mapping fails, the log records the specific
-failure. Successful boundary-byte reads do not prove pixel format, color
-polarity, framebuffer writes, or panel output. The probe does not establish
+opening `/dev/fb0`, a query, or either mapping fails, the log records the
+specific failure. An accepted writable mapping does not prove pixel writes,
+color polarity, or panel output. The probe does not establish
 Kindle-specific MXCFB ioctl definitions or prove that X11 input can coexist
 with direct display.
 

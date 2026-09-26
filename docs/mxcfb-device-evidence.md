@@ -23,6 +23,18 @@ This verifies that the first and last bytes of the mapped visible span were
 readable on this device. Their values were neither logged nor interpreted;
 pixel polarity, writes, and panel refresh remain unverified.
 
+## Writable mapping check without writes (2026-09-26)
+
+The deployed probe binary matched the host artifact at SHA-256
+`ab597e85e93190c837c353102cc1eda1a70d0e18cc0699fd068941505b5532c6`.
+The latest probe log reported
+`writable mmap accepted without pixel writes length=2157312` and exit
+status 0. The KUAL status file reported `STOPPED status=0 reason=process_exit`.
+The probe opened `/dev/fb0` read-write, mapped the validated visible span with
+`PROT_READ | PROT_WRITE` and `MAP_SHARED`, then unmapped it without accessing
+pixel bytes through that mapping. This verifies mapping permission, not a
+framebuffer write, color polarity, or e-ink update submission.
+
 Read-only `--inspect-framebuffer` probe run on the project's Paperwhite 6
 (Sangria / Bellatrix4, FW 5.17.1.0.4) on 2026-09-26. The deployed binary was
 read back over MTP and matched the host artifact's SHA-256:

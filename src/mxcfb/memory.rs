@@ -6,11 +6,7 @@ use std::io;
 use std::os::fd::AsRawFd;
 
 pub(super) fn check_read_only_access(file: &File, length: usize) -> Result<()> {
-    ensure!(length > 0, "cannot map an empty framebuffer region");
-    ensure!(
-        length <= isize::MAX as usize,
-        "framebuffer mapping exceeds pointer offset range"
-    );
+    validate_mapping_length(length)?;
     // SAFETY: `file` remains open, the length was checked against kernel-reported
     // framebuffer memory, and this mapping grants no write access. The returned
     // pointer is accessed only within the mapped span below.
@@ -47,6 +43,43 @@ pub(super) fn check_read_only_access(file: &File, length: usize) -> Result<()> {
     Ok(())
 }
 
+pub(super) fn check_writable_mapping(file: &File, length: usize) -> Result<()> {
+    validate_mapping_length(length)?;
+    // SAFETY: `file` remains open, the length was checked against kernel-reported
+    // framebuffer memory, and the pointer is never dereferenced. Mapping with
+    // write permission does not itself write pixel bytes.
+    let address = unsafe {
+        libc::mmap(
+            std::ptr::null_mut(),
+            length,
+            libc::PROT_READ | libc::PROT_WRITE,
+            libc::MAP_SHARED,
+            file.as_raw_fd(),
+            0,
+        )
+    };
+    if address == libc::MAP_FAILED {
+        return Err(io::Error::last_os_error()).context("mmap /dev/fb0 writable");
+    }
+
+    // SAFETY: `address` came from a successful `mmap` with exactly `length`
+    // bytes. No pointer derived from it is used after this call.
+    let result = unsafe { libc::munmap(address, length) };
+    if result != 0 {
+        return Err(io::Error::last_os_error()).context("munmap /dev/fb0 writable");
+    }
+    Ok(())
+}
+
+fn validate_mapping_length(length: usize) -> Result<()> {
+    ensure!(length > 0, "cannot map an empty framebuffer region");
+    ensure!(
+        length <= isize::MAX as usize,
+        "framebuffer mapping exceeds pointer offset range"
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -64,5 +97,13 @@ mod tests {
         let file = File::open(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")).unwrap();
         assert!(check_read_only_access(&file, 0).is_err());
         assert!(check_read_only_access(&file, isize::MAX as usize + 1).is_err());
+        assert!(check_writable_mapping(&file, 0).is_err());
+        assert!(check_writable_mapping(&file, isize::MAX as usize + 1).is_err());
+    }
+
+    #[test]
+    fn writable_mapping_rejects_read_only_file() {
+        let file = File::open(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml")).unwrap();
+        assert!(check_writable_mapping(&file, 1).is_err());
     }
 }
