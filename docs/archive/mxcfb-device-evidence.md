@@ -162,3 +162,36 @@ to `157247dbbe862d1b6aee0b196749fee6bb662b5e7e2e1535d7ad4f1b4387613e`.
 Their `.text` and `.rodata` sections also matched independently. The current
 unstripped artifact was not redeployed or physically rerun; its full-file hash
 must not be substituted for the hash recorded for the actual Kindle trial.
+
+## Gray8 generated-frame validation (2026-09-27)
+
+The operator reported the generated Gray8 checkpoint verified on the same
+Paperwhite 6 through the experimental MXCFB backend. The deployed PaperPad
+binary matched the host artifact at SHA-256
+`1f4c28415d15e5267e9ddb05b0c26fb149aedab1a8d82507428c88f3227be3d9`.
+This establishes that a generated Gray8 frame was visibly presented through
+the negotiated Gray8 path; it does not establish that all 256 values are
+individually distinguishable on the panel.
+
+One host send reported `Broken pipe` immediately after PaperPad disconnected.
+The corresponding device run had reached the 90-second watchdog and ended with
+status 143. The error did not reproduce: later Gray8 sends succeeded, and a
+subsequent run ended through the local Exit control with status 0. The available
+evidence therefore does not identify a Gray8 encoding or presentation fault,
+but it also does not rule out unrelated transport disconnects.
+
+## Arbitrary-path JPEG validation (2026-09-28)
+
+After PaperSpoon gained `frame jpeg <path>`, the operator reported the
+checkpoint verified on the physical device. JPEG decoding, grayscale
+conversion, resizing, and letterboxing occur in PaperSpoon; only the resulting
+PPFB Gray8 pixels cross the network. The PaperPad binary remained unchanged at
+the SHA-256 recorded above.
+
+The report establishes successful operator acceptance of one arbitrary-path
+JPEG flow on the device. The exact source path and separate observations for
+EXIF orientation, aspect ratio, centering, polarity, midtone detail, cached
+reconnect, and Exit-strip isolation were not reported, so those details are not
+claimed as independently evidenced by this entry. Host tests cover contain
+scaling, white letterboxing, malformed and missing files, retained-pixel
+reconnects, and connection/viewport races.

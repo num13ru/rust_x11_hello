@@ -211,7 +211,7 @@ It still requires the X11 window for touch input and lifecycle events. Startup
 fails if `/dev/fb0`, the required HWTCON capabilities, or matching X11/window
 geometry are unavailable; it never silently falls back to X11. A first
 Paperwhite 6 trial exercised direct display alongside X11 touch and local Exit;
-see [device evidence](docs/mxcfb-device-evidence.md) for the exact observations
+see [device evidence](docs/archive/mxcfb-device-evidence.md) for the exact observations
 and still-unverified cases.
 KUAL's **Run Paperpad MXCFB (90s, experimental)** action sets this variable
 for one run; **Run Paperpad (90s)** remains the X11 reference action. The
@@ -236,14 +236,22 @@ specific failure. An accepted writable mapping or panel-info query does not
 prove pixel writes, color polarity, e-ink update submission, or panel output.
 The MXCFB backend validates the observed `hwtcon_v2`, unrotated 8-bit
 framebuffer format and visible bounds, opens `/dev/fb0` read-write, queries
-panel info, and maps only the visible span. It prepares Mono1 remote rows before
-bounded framebuffer writes, then submits a remote-only GC16 update. PaperPad
-renders its own Exit strip using the same bounds as touch hit-testing, writes
-only that strip, and submits a separate strip-only update. A single marker
-sequence serves both paths. The last remote Mono1 frame is cached only after
-the kernel accepts its update; redraws submit that cached frame again. A failed
-submission can leave changed framebuffer bytes, but does not replace the cache
-or establish a physical panel refresh.
+panel info, and maps only the visible span. It expands Mono1 pixels or copies
+Gray8 values into bounded remote rows, then submits a remote-only GC16 update.
+PaperPad renders its own Exit strip using the same bounds as touch hit-testing,
+writes only that strip, and submits a separate strip-only update. A single
+marker sequence serves both paths. The last remote frame retains its pixel
+format and is cached only after the kernel accepts its update; redraws submit
+that cached frame again. A failed submission can leave changed framebuffer
+bytes, but does not replace the cache or establish a physical panel refresh.
+
+| Backend | Mono1 | Gray8 / host-decoded JPEG |
+| --- | --- | --- |
+| X11 | Supported | Rejected; not advertised in `Hello` |
+| MXCFB (experimental) | Supported | Supported and advertised |
+
+Both MXCFB formats currently use the existing GC16 update path. There is no
+content-adaptive waveform selection, animation policy, or ghosting management.
 
 Host Linux tests use `/dev/zero`, not the Kindle framebuffer. The HWTCON
 send-update and wait-complete C layouts come from the pinned PW6 firmware
@@ -437,7 +445,7 @@ run. There is no separate stop menu item because Paperpad covers KUAL while its
 full-screen window is open.
 
 For further MXCFB trials, follow the
-[physical-validation sequence](docs/mxcfb-manual-validation.md). Verify the
+[physical-validation sequence](docs/archive/mxcfb-manual-validation.md). Verify the
 deployed binary checksum. With an operator-controlled PaperSpoon session
 already available, choose **Run Paperpad MXCFB (90s, experimental)**. Confirm the
 local Exit strip is visible and usable even if PaperSpoon disconnects. Compare
