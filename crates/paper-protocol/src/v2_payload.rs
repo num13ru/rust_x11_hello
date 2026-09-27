@@ -114,6 +114,10 @@ impl V2Hello {
         self.viewport_height
     }
 
+    pub fn pixel_formats(self) -> V2PixelFormats {
+        self.pixel_formats
+    }
+
     pub fn supports(self, pixel_format: V2PixelFormat) -> bool {
         self.pixel_formats.supports(pixel_format)
     }

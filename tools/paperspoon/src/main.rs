@@ -28,7 +28,9 @@ use std::net::{SocketAddr, TcpListener};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use paper_protocol::{DISCOVERY_PORT, Mono1Frame, V2PointerPhase, encode_v2_frame};
+use paper_protocol::{
+    DISCOVERY_PORT, Mono1Frame, PixelFormat, V2PixelFormats, V2PointerPhase, encode_v2_frame,
+};
 use paperspoon::{
     application_input::ApplicationInput, application_renderer::render_application_bounded,
     application_ui::ApplicationUi,
@@ -41,7 +43,7 @@ mod server;
 
 use diagnostic::{DiagnosticFrame, StdinCommand, parse_stdin_command};
 use inbound::{SessionMessage, read_session_hello, read_session_message};
-use server::CurrentConnection;
+use server::{CurrentConnection, FrameForward};
 
 /// Default TCP port. Must match `rust_x11_hello`'s `COMPANION_PORT`.
 const DEFAULT_PORT: u16 = paper_protocol::DEFAULT_TCP_PORT;
@@ -168,6 +170,13 @@ impl AuthoritativeFrame {
             Self::Diagnostic(_) => None,
         }
     }
+
+    fn pixel_format(self) -> PixelFormat {
+        match self {
+            Self::Application { .. } => PixelFormat::Mono1,
+            Self::Diagnostic(frame) => frame.pixel_format(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -211,12 +220,13 @@ impl FrameSender {
         encode: impl FnOnce(u64) -> Result<Vec<u8>, String>,
     ) -> Result<Option<SentFrame>, String> {
         let mut state = self.state.lock().expect("frame sender lock");
-        self.send_locked(&mut state, encode, None)
+        self.send_locked(&mut state, PixelFormat::Mono1, encode, None)
     }
 
     fn send_locked(
         &self,
         state: &mut FrameSenderState,
+        pixel_format: PixelFormat,
         encode: impl FnOnce(u64) -> Result<Vec<u8>, String>,
         authoritative: Option<AuthoritativeFrame>,
     ) -> Result<Option<SentFrame>, String> {
@@ -230,13 +240,19 @@ impl FrameSender {
         let encoded_len = encoded.len();
         // write_all measures local socket acceptance, not remote receipt or display.
         let socket_write_started = Instant::now();
-        let sent = self
+        let forwarded = self
             .current
-            .forward_bytes(&encoded)
+            .forward_frame(&encoded, pixel_format)
             .map_err(|error| format!("failed write frame: {error}"))?;
         let socket_write_elapsed = socket_write_started.elapsed();
-        if !sent {
-            return Ok(None);
+        match forwarded {
+            FrameForward::Sent => {}
+            FrameForward::NoConnection => return Ok(None),
+            FrameForward::UnsupportedPixelFormat => {
+                return Err(format!(
+                    "connected PaperPad does not support {pixel_format:?} frames"
+                ));
+            }
         }
         state.next_frame_id = next_frame_id;
         if let Some(frame) = authoritative {
@@ -258,6 +274,7 @@ impl FrameSender {
         let mut state = self.state.lock().expect("frame sender lock");
         self.send_locked(
             &mut state,
+            frame.pixel_format(),
             |frame_id| frame.encode(frame_id),
             Some(AuthoritativeFrame::Diagnostic(frame)),
         )
@@ -291,6 +308,7 @@ impl FrameSender {
         }
         let sent = self.send_locked(
             state,
+            PixelFormat::Mono1,
             |frame_id| {
                 encode_v2_frame(frame_id, &candidate)
                     .map_err(|error| format!("failed to encode application frame: {error}"))
@@ -326,11 +344,12 @@ impl FrameSender {
         &self,
         ui: &ApplicationUi,
         viewport: (u16, u16),
+        pixel_formats: V2PixelFormats,
     ) -> Result<Option<HelloFrame>, String> {
         let mut state = self.state.lock().expect("frame sender lock");
-        let retained = state
-            .authoritative
-            .filter(|frame| frame.dimensions() == viewport);
+        let retained = state.authoritative.filter(|frame| {
+            frame.dimensions() == viewport && pixel_formats.supports(frame.pixel_format())
+        });
         let frame = retained.unwrap_or(AuthoritativeFrame::Application { viewport });
         let sent = match frame {
             AuthoritativeFrame::Application { viewport } => {
@@ -344,6 +363,7 @@ impl FrameSender {
             }
             AuthoritativeFrame::Diagnostic(diagnostic) => self.send_locked(
                 &mut state,
+                diagnostic.pixel_format(),
                 |frame_id| diagnostic.encode(frame_id),
                 Some(frame),
             )?,
@@ -379,10 +399,11 @@ fn replace_hello_frame(
     input: &mut ApplicationInput,
     rendered_viewport: &mut Option<(u16, u16)>,
     viewport: (u16, u16),
+    pixel_formats: V2PixelFormats,
 ) -> Result<Option<HelloFrame>, String> {
     *rendered_viewport = None;
     input.set_viewport(None);
-    let sent = frame_sender.send_for_hello(ui, viewport)?;
+    let sent = frame_sender.send_for_hello(ui, viewport, pixel_formats)?;
     if let Some(hello_frame) = sent {
         *rendered_viewport = hello_frame.sent.application_viewport;
         input.set_viewport(hello_frame.sent.application_viewport);
@@ -559,13 +580,14 @@ fn main() -> io::Result<()> {
         }
 
         // A valid Hello makes this the active Kindle connection for frames.
-        let connection_token = match current.install(reader.get_ref()) {
-            Ok(token) => token,
-            Err(e) => {
-                eprintln!("clone error for {peer}: {e}");
-                continue;
-            }
-        };
+        let connection_token =
+            match current.install_with_pixel_formats(reader.get_ref(), hello.pixel_formats()) {
+                Ok(token) => token,
+                Err(e) => {
+                    eprintln!("clone error for {peer}: {e}");
+                    continue;
+                }
+            };
         let application_ui = ApplicationUi::default();
         let mut reported_viewport = (hello.viewport_width(), hello.viewport_height());
         let mut application_input = ApplicationInput::default();
@@ -576,6 +598,7 @@ fn main() -> io::Result<()> {
             &mut application_input,
             &mut rendered_application_viewport,
             reported_viewport,
+            hello.pixel_formats(),
         ) {
             Ok(Some(hello_frame)) => {
                 let sent = hello_frame.sent;
@@ -782,6 +805,49 @@ mod tests {
     }
 
     #[test]
+    fn gray8_diagnostic_requires_capability_without_consuming_frame_state() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind listener");
+        let client = TcpStream::connect(listener.local_addr().expect("listener address"))
+            .expect("connect client");
+        let (mut peer, _) = listener.accept().expect("accept client");
+        let current = CurrentConnection::default();
+        current.install(&client).expect("install Mono1 connection");
+        let frame_sender = FrameSender::new(current.clone());
+        let gray8 = diagnostic("frame gray 128 4x2");
+
+        let error = frame_sender
+            .send_diagnostic(gray8)
+            .expect_err("Mono1-only peer rejects Gray8");
+        assert!(error.contains("does not support Gray8"));
+        let state = frame_sender.state.lock().expect("frame sender lock");
+        assert_eq!(state.next_frame_id, 1);
+        assert_eq!(state.authoritative, None);
+        drop(state);
+
+        current
+            .install_with_pixel_formats(&client, V2PixelFormats::MONO1.with(PixelFormat::Gray8))
+            .expect("install Gray8-capable connection");
+        let sent = frame_sender
+            .send_diagnostic(gray8)
+            .expect("send Gray8")
+            .expect("active connection");
+        let mut encoded = vec![0; sent.encoded_len];
+        peer.read_exact(&mut encoded).expect("read Gray8 frame");
+        let V2DecodeResult::Complete { message, consumed } =
+            decode_v2_message(&encoded).expect("decode Gray8 frame")
+        else {
+            panic!("complete Gray8 frame expected");
+        };
+        assert_eq!(consumed, encoded.len());
+        let V2Payload::Frame(frame) = decode_v2_payload(message).expect("typed Gray8 frame") else {
+            panic!("Gray8 frame payload expected");
+        };
+        assert_eq!(frame.frame_id(), 1);
+        assert_eq!(frame.pixel_format(), PixelFormat::Gray8);
+        assert_eq!(frame.pixels(), &[128; 8]);
+    }
+
+    #[test]
     fn matching_hello_resends_retained_diagnostic_with_fresh_id() {
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind listener");
         let current = CurrentConnection::default();
@@ -833,6 +899,7 @@ mod tests {
             &mut input,
             &mut rendered_viewport,
             (9, 9),
+            V2PixelFormats::MONO1,
         )
         .expect("resend retained frame")
         .expect("active replacement connection");
@@ -873,6 +940,7 @@ mod tests {
             &mut input,
             &mut rendered_viewport,
             (128, 128),
+            V2PixelFormats::MONO1,
         )
         .expect("resend retained application")
         .expect("active replacement connection");
@@ -911,6 +979,7 @@ mod tests {
             &mut input,
             &mut rendered_viewport,
             (128, 128),
+            V2PixelFormats::MONO1,
         )
         .expect("render fallback application")
         .expect("active replacement connection");
@@ -1120,6 +1189,7 @@ mod tests {
             &mut input,
             &mut rendered_viewport,
             (128, 128),
+            V2PixelFormats::MONO1,
         )
         .expect("Hello replacement")
         .expect("active connection");

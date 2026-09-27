@@ -4,6 +4,8 @@ use std::io::{self, Write};
 use std::net::{Shutdown, TcpStream};
 use std::sync::{Arc, Mutex};
 
+use paper_protocol::{V2PixelFormat, V2PixelFormats};
+
 #[derive(Clone, Default)]
 pub(crate) struct CurrentConnection {
     inner: Arc<Mutex<Option<ActiveConnection>>>,
@@ -12,9 +14,17 @@ pub(crate) struct CurrentConnection {
 struct ActiveConnection {
     token: Arc<()>,
     stream: TcpStream,
+    pixel_formats: V2PixelFormats,
 }
 
 pub(crate) struct ConnectionToken(Arc<()>);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum FrameForward {
+    Sent,
+    NoConnection,
+    UnsupportedPixelFormat,
+}
 
 impl CurrentConnection {
     pub(crate) fn is_active(&self) -> bool {
@@ -24,14 +34,45 @@ impl CurrentConnection {
             .is_some()
     }
 
+    #[cfg(test)]
     pub(crate) fn install(&self, stream: &TcpStream) -> io::Result<ConnectionToken> {
+        self.install_with_pixel_formats(stream, V2PixelFormats::MONO1)
+    }
+
+    pub(crate) fn install_with_pixel_formats(
+        &self,
+        stream: &TcpStream,
+        pixel_formats: V2PixelFormats,
+    ) -> io::Result<ConnectionToken> {
         let token = Arc::new(());
         let active = ActiveConnection {
             token: Arc::clone(&token),
             stream: stream.try_clone()?,
+            pixel_formats,
         };
         *self.inner.lock().expect("current connection lock") = Some(active);
         Ok(ConnectionToken(token))
+    }
+
+    /// Write a framebuffer only when the active peer advertised its format.
+    pub(crate) fn forward_frame(
+        &self,
+        bytes: &[u8],
+        pixel_format: V2PixelFormat,
+    ) -> io::Result<FrameForward> {
+        let mut guard = self.inner.lock().expect("current connection lock");
+        let Some(active) = guard.as_mut() else {
+            return Ok(FrameForward::NoConnection);
+        };
+        if !active.pixel_formats.supports(pixel_format) {
+            return Ok(FrameForward::UnsupportedPixelFormat);
+        }
+        if let Err(error) = active.stream.write_all(bytes) {
+            let _ = active.stream.shutdown(Shutdown::Both);
+            guard.take();
+            return Err(error);
+        }
+        Ok(FrameForward::Sent)
     }
 
     pub(crate) fn clear_if_current(&self, candidate: &ConnectionToken) -> bool {
@@ -52,6 +93,7 @@ impl CurrentConnection {
     /// closes and clears the connection generation used for the write.
     /// Holding the connection lock across `write_all` prevents concurrent
     /// frame producers from interleaving protocol bytes on cloned sockets.
+    #[cfg(test)]
     pub(crate) fn forward_bytes(&self, bytes: &[u8]) -> io::Result<bool> {
         let mut guard = self.inner.lock().expect("current connection lock");
         let Some(active) = guard.as_mut() else {
@@ -114,6 +156,31 @@ mod tests {
 
         assert!(current.clear_if_current(&second_token));
         assert!(!current.forward_bytes(b"nobody").expect("cleared target"));
+    }
+
+    #[test]
+    fn frame_forwarding_enforces_active_hello_capabilities() {
+        let current = CurrentConnection::default();
+        let (stream, mut peer) = tcp_pair();
+        current
+            .install_with_pixel_formats(&stream, V2PixelFormats::GRAY8)
+            .expect("install Gray8 connection");
+
+        assert_eq!(
+            current
+                .forward_frame(b"mono", V2PixelFormat::Mono1)
+                .expect("reject unsupported format"),
+            FrameForward::UnsupportedPixelFormat
+        );
+        assert_eq!(
+            current
+                .forward_frame(b"gray", V2PixelFormat::Gray8)
+                .expect("forward Gray8"),
+            FrameForward::Sent
+        );
+        let mut received = [0; 4];
+        peer.read_exact(&mut received).expect("read Gray8 bytes");
+        assert_eq!(&received, b"gray");
     }
 
     #[test]
