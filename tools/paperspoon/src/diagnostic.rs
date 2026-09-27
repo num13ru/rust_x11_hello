@@ -1,5 +1,7 @@
 //! Explicit stdin commands for host-generated framebuffers.
 
+use std::path::PathBuf;
+
 use paper_protocol::{
     Gray8Frame, Mono1Frame, PixelFormat, V2_FRAME_PREFIX_LEN, V2_MAX_PAYLOAD_LEN, encode_v2_frame,
     gray8_payload_len, mono1_payload_len, mono1_stride,
@@ -166,10 +168,14 @@ impl DiagnosticFrame {
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) enum StdinCommand {
     Frame(DiagnosticFrame),
+    Jpeg(PathBuf),
     ApplicationFrame { width: u16, height: u16 },
 }
 
 pub(crate) fn parse_stdin_command(line: &str) -> Result<StdinCommand, String> {
+    if let Some(path) = parse_jpeg_path(line)? {
+        return Ok(StdinCommand::Jpeg(path));
+    }
     let mut parts = line.split_whitespace();
     match parts.next() {
         Some("ui") => {
@@ -203,7 +209,7 @@ pub(crate) fn parse_stdin_command(line: &str) -> Result<StdinCommand, String> {
         let usage = "usage: frame <pattern> <width>x<height>";
         let pattern = DiagnosticPattern::parse(pattern_name).ok_or_else(|| {
             format!(
-                "unknown frame pattern '{pattern_name}'; expected white, black, horizontal, checkerboard, border, corners, gray-gradient, gray-bars, or gray"
+                "unknown frame pattern '{pattern_name}'; expected white, black, horizontal, checkerboard, border, corners, gray-gradient, gray-bars, gray, or jpeg <path>"
             )
         })?;
         let dimensions = parts.next().ok_or_else(|| usage.to_string())?;
@@ -219,6 +225,31 @@ pub(crate) fn parse_stdin_command(line: &str) -> Result<StdinCommand, String> {
         width,
         height,
     }))
+}
+
+fn parse_jpeg_path(line: &str) -> Result<Option<PathBuf>, String> {
+    let line = line.trim();
+    let Some(frame_separator) = line.find(char::is_whitespace) else {
+        return Ok(None);
+    };
+    if &line[..frame_separator] != "frame" {
+        return Ok(None);
+    }
+    let frame_arguments = line[frame_separator..].trim_start();
+    if frame_arguments == "jpeg" {
+        return Err("usage: frame jpeg <path>".to_string());
+    }
+    let Some(jpeg_separator) = frame_arguments.find(char::is_whitespace) else {
+        return Ok(None);
+    };
+    if &frame_arguments[..jpeg_separator] != "jpeg" {
+        return Ok(None);
+    }
+    let path = frame_arguments[jpeg_separator..].trim();
+    if path.is_empty() {
+        return Err("usage: frame jpeg <path>".to_string());
+    }
+    Ok(Some(PathBuf::from(path)))
 }
 
 fn parse_dimensions(dimensions: &str) -> Result<(u16, u16), String> {
@@ -307,6 +338,26 @@ mod tests {
         assert!(parse_stdin_command("frame white 8").is_err());
         assert!(parse_stdin_command("frame white 0x8").is_err());
         assert!(parse_stdin_command("frame white 8x8 extra").is_err());
+
+        assert_eq!(
+            parse_stdin_command("frame jpeg ./assets/example-image.jpg"),
+            Ok(StdinCommand::Jpeg(PathBuf::from(
+                "./assets/example-image.jpg"
+            )))
+        );
+        assert_eq!(
+            parse_stdin_command("frame jpeg /Users/user/Downloads/1.jpeg"),
+            Ok(StdinCommand::Jpeg(PathBuf::from(
+                "/Users/user/Downloads/1.jpeg"
+            )))
+        );
+        assert_eq!(
+            parse_stdin_command("frame   jpeg   ./assets/image with spaces.jpg"),
+            Ok(StdinCommand::Jpeg(PathBuf::from(
+                "./assets/image with spaces.jpg"
+            )))
+        );
+        assert!(parse_stdin_command("frame jpeg").is_err());
 
         let StdinCommand::Frame(frame) =
             parse_stdin_command("frame border 9x2").expect("frame command")
