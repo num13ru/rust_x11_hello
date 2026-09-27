@@ -14,8 +14,8 @@
 //! endpoint. Neither path blocks or breaks the X11 event loop.
 
 use paper_protocol::{
-    V2_HEADER_LEN, V2DecodeResult, V2Hello, V2MessageType, V2Payload, V2PixelFormat, V2Pointer,
-    V2PointerPhase, V2Viewport, decode_v2_message, decode_v2_payload,
+    V2_HEADER_LEN, V2DecodeResult, V2Hello, V2MessageType, V2Payload, V2PixelFormat,
+    V2PixelFormats, V2Pointer, V2PointerPhase, V2Viewport, decode_v2_message, decode_v2_payload,
 };
 
 mod connection;
@@ -194,10 +194,16 @@ pub struct Paperspoon {
     writer: Option<JoinHandle<()>>,
     reconnector: Option<JoinHandle<()>>,
     startup_rx: Option<Receiver<StartupUpdate>>,
+    pixel_formats: V2PixelFormats,
 }
 
-fn write_hello(stream: &mut TcpStream, viewport: (u16, u16)) -> Result<()> {
-    let encoded = V2Hello::new(viewport.0, viewport.1).encode_message()?;
+fn write_hello(
+    stream: &mut TcpStream,
+    viewport: (u16, u16),
+    pixel_formats: V2PixelFormats,
+) -> Result<()> {
+    let encoded =
+        V2Hello::with_pixel_formats(viewport.0, viewport.1, pixel_formats).encode_message()?;
     stream
         .write_all(&encoded)
         .context("failed to write Hello to PaperSpoon")
@@ -332,15 +338,6 @@ fn read_v2_frame<R: Read>(reader: &mut R) -> io::Result<ReceivedFrame> {
             "PaperSpoon message type and typed payload disagreed",
         ));
     };
-    if frame.pixel_format() != V2PixelFormat::Mono1 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!(
-                "PaperSpoon sent unadvertised {:?} frame",
-                frame.pixel_format()
-            ),
-        ));
-    }
     Ok(ReceivedFrame {
         frame_id: frame.frame_id(),
         width: frame.width(),
@@ -390,30 +387,55 @@ impl Paperspoon {
             writer: None,
             reconnector: None,
             startup_rx: None,
+            pixel_formats: V2PixelFormats::MONO1,
         }
     }
 
     /// Start retrying PaperSpoon connection attempts without blocking X11.
-    pub fn start(config: PaperpadConfig, remote_viewport: (u16, u16)) -> Self {
-        Self::start_with(
+    pub fn start(
+        config: PaperpadConfig,
+        remote_viewport: (u16, u16),
+        pixel_formats: V2PixelFormats,
+    ) -> Self {
+        Self::start_with_pixel_formats(
             move || {
                 let addr = paperspoon_addr(config.host(), config.port())?;
                 connect_stream(addr).map(|stream| (addr, stream))
             },
             Some(STARTUP_RETRY_INTERVAL),
             remote_viewport,
+            pixel_formats,
         )
     }
 
+    #[cfg(test)]
     fn start_with<F>(
-        mut connect: F,
+        connect: F,
         retry_interval: Option<Duration>,
         remote_viewport: (u16, u16),
     ) -> Self
     where
         F: FnMut() -> StartupResult + Send + 'static,
     {
+        Self::start_with_pixel_formats(
+            connect,
+            retry_interval,
+            remote_viewport,
+            V2PixelFormats::MONO1,
+        )
+    }
+
+    fn start_with_pixel_formats<F>(
+        mut connect: F,
+        retry_interval: Option<Duration>,
+        remote_viewport: (u16, u16),
+        pixel_formats: V2PixelFormats,
+    ) -> Self
+    where
+        F: FnMut() -> StartupResult + Send + 'static,
+    {
         let mut paperspoon = Self::disconnected();
+        paperspoon.pixel_formats = pixel_formats;
         paperspoon.set_remote_viewport(remote_viewport);
         let worker_stopping = Arc::clone(&paperspoon.stopping);
         let (startup_tx, startup_rx) = mpsc::sync_channel(1);
@@ -461,8 +483,23 @@ impl Paperspoon {
     /// way so they never depend on process-global env vars.
     #[cfg(test)]
     pub(crate) fn connect_to(addr: SocketAddr, remote_viewport: (u16, u16)) -> Result<Self> {
+        Self::connect_to_with_pixel_formats(addr, remote_viewport, V2PixelFormats::MONO1)
+    }
+
+    #[cfg(test)]
+    fn connect_to_with_pixel_formats(
+        addr: SocketAddr,
+        remote_viewport: (u16, u16),
+        pixel_formats: V2PixelFormats,
+    ) -> Result<Self> {
         let stream = connect_stream(addr)?;
-        Self::from_stream(addr, stream, FrameMailbox::default(), remote_viewport)
+        Self::from_stream(
+            addr,
+            stream,
+            FrameMailbox::default(),
+            remote_viewport,
+            pixel_formats,
+        )
     }
 
     fn from_stream(
@@ -470,13 +507,14 @@ impl Paperspoon {
         mut stream: TcpStream,
         frames: FrameMailbox,
         remote_viewport: (u16, u16),
+        pixel_formats: V2PixelFormats,
     ) -> Result<Self> {
         // The socket is shared with a reconnector thread. When the reader
         // hits EOF, it clears the shared slot and wakes the reconnector,
         // which retries until PaperSpoon is reachable again and swaps in a
         // fresh socket — proactive auto-reconnect without user input.
         frames.set_viewport(remote_viewport);
-        write_hello(&mut stream, remote_viewport)?;
+        write_hello(&mut stream, remote_viewport, pixel_formats)?;
         let connection = Arc::new(Mutex::new(ConnectionState::connected(stream)));
         let remote_viewport = Arc::new(Mutex::new(remote_viewport));
         let (outbound_tx, outbound_rx) = mpsc::sync_channel(OUTBOUND_QUEUE_CAPACITY);
@@ -527,7 +565,7 @@ impl Paperspoon {
                             }
                             let viewport =
                                 *worker_remote_viewport.lock().expect("remote viewport lock");
-                            if write_hello(&mut new_stream, viewport).is_err() {
+                            if write_hello(&mut new_stream, viewport, pixel_formats).is_err() {
                                 let _ = new_stream.shutdown(Shutdown::Both);
                                 std::thread::sleep(TCP_CONNECT_TIMEOUT);
                                 continue;
@@ -565,6 +603,7 @@ impl Paperspoon {
             writer: Some(writer),
             reconnector: Some(reconnector),
             startup_rx: None,
+            pixel_formats,
         })
     }
 
@@ -585,7 +624,13 @@ impl Paperspoon {
         match update {
             StartupUpdate::Connected { addr, stream } => {
                 let remote_viewport = *self.remote_viewport.lock().expect("remote viewport lock");
-                match Self::from_stream(addr, stream, self.frames.clone(), remote_viewport) {
+                match Self::from_stream(
+                    addr,
+                    stream,
+                    self.frames.clone(),
+                    remote_viewport,
+                    self.pixel_formats,
+                ) {
                     Ok(paperspoon) => {
                         self.startup_rx.take();
                         *self = paperspoon;
@@ -769,6 +814,14 @@ mod tests {
     }
 
     fn read_expected_hello(peer: &mut TcpStream, expected: (u16, u16)) {
+        read_expected_hello_with_formats(peer, expected, V2PixelFormats::MONO1);
+    }
+
+    fn read_expected_hello_with_formats(
+        peer: &mut TcpStream,
+        expected: (u16, u16),
+        pixel_formats: V2PixelFormats,
+    ) {
         let message_len = V2_HEADER_LEN + paper_protocol::V2_HELLO_PAYLOAD_LEN;
         let mut encoded = vec![0; message_len];
         peer.read_exact(&mut encoded).expect("read Hello message");
@@ -780,7 +833,11 @@ mod tests {
         assert_eq!(consumed, message_len);
         assert_eq!(
             decode_v2_payload(message),
-            Ok(V2Payload::Hello(V2Hello::new(expected.0, expected.1)))
+            Ok(V2Payload::Hello(V2Hello::with_pixel_formats(
+                expected.0,
+                expected.1,
+                pixel_formats,
+            )))
         );
     }
 
@@ -801,6 +858,18 @@ mod tests {
                 expected.0, expected.1
             )))
         );
+    }
+
+    #[test]
+    fn hello_advertises_configured_pixel_formats() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind");
+        let mut client = TcpStream::connect(listener.local_addr().expect("listener address"))
+            .expect("connect client");
+        let mut peer = accept_before(&listener, Duration::from_secs(2));
+        let pixel_formats = V2PixelFormats::MONO1.with(V2PixelFormat::Gray8);
+
+        write_hello(&mut client, TEST_VIEWPORT, pixel_formats).expect("write Hello");
+        read_expected_hello_with_formats(&mut peer, TEST_VIEWPORT, pixel_formats);
     }
 
     #[test]
@@ -1190,7 +1259,8 @@ mod tests {
     fn inbound_reader_accepts_consecutive_binary_frames() {
         let first = paper_protocol::Mono1Frame::new(9, 2, vec![0xaa, 0x80, 0x55, 0x00])
             .expect("valid first Mono1");
-        let second = paper_protocol::Mono1Frame::new(8, 1, vec![0xff]).expect("valid second Mono1");
+        let second = paper_protocol::Gray8Frame::new(8, 1, vec![0, 32, 64, 96, 128, 160, 192, 255])
+            .expect("valid second Gray8");
         let mut stream = paper_protocol::encode_v2_frame(7, &first).expect("encode first Frame");
         stream.extend_from_slice(
             &paper_protocol::encode_v2_frame(8, &second).expect("encode second Frame"),
@@ -1208,8 +1278,9 @@ mod tests {
             .expect("read second frame")
             .expect("second frame");
         assert_eq!(frame.frame_id(), 8);
-        assert_eq!((frame.width(), frame.height(), frame.stride()), (8, 1, 1));
-        assert_eq!(frame.pixels(), &[0xff]);
+        assert_eq!(frame.pixel_format(), V2PixelFormat::Gray8);
+        assert_eq!((frame.width(), frame.height(), frame.stride()), (8, 1, 8));
+        assert_eq!(frame.pixels(), &[0, 32, 64, 96, 128, 160, 192, 255]);
         assert!(read_inbound_frame(&mut reader).expect("read EOF").is_none());
     }
 
@@ -1224,13 +1295,6 @@ mod tests {
                 .kind(),
             io::ErrorKind::InvalidData
         );
-
-        let gray8 = paper_protocol::Gray8Frame::new(1, 1, vec![0]).expect("valid Gray8");
-        let gray8 = paper_protocol::encode_v2_frame(9, &gray8).expect("encode Gray8 Frame");
-        let error = read_inbound_frame(&mut BufReader::new(Cursor::new(gray8)))
-            .expect_err("unadvertised Gray8 Frame");
-        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-        assert!(error.to_string().contains("Gray8"));
 
         let hello = paper_protocol::V2Hello::new(8, 1)
             .encode_message()
@@ -1306,9 +1370,12 @@ mod tests {
         // Start a listener (PaperSpoon), connect, then stop it to force EOF.
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind");
         let addr = listener.local_addr().expect("addr");
-        let mut paperspoon = Paperspoon::connect_to(addr, TEST_VIEWPORT).expect("connect");
+        let pixel_formats = V2PixelFormats::MONO1.with(V2PixelFormat::Gray8);
+        let mut paperspoon =
+            Paperspoon::connect_to_with_pixel_formats(addr, TEST_VIEWPORT, pixel_formats)
+                .expect("connect");
         let mut first = accept_before(&listener, Duration::from_secs(2));
-        read_expected_hello(&mut first, TEST_VIEWPORT);
+        read_expected_hello_with_formats(&mut first, TEST_VIEWPORT, pixel_formats);
         let resized_viewport = (800, 600);
         paperspoon
             .send_viewport_changed(resized_viewport)
@@ -1323,7 +1390,7 @@ mod tests {
         // accepting proves the auto-restore.
         let listener3 = TcpListener::bind(addr).expect("rebind same port");
         let mut reconnected_peer = accept_before(&listener3, Duration::from_secs(5));
-        read_expected_hello(&mut reconnected_peer, resized_viewport);
+        read_expected_hello_with_formats(&mut reconnected_peer, resized_viewport, pixel_formats);
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         loop {
             match paperspoon.send_pointer(V2PointerPhase::Up, 9, 10) {

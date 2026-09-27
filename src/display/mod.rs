@@ -3,7 +3,7 @@
 mod cache;
 
 use anyhow::{Result, ensure};
-use paper_protocol::{PixelFormat, validate_gray8_pixels, validate_mono1_pixels};
+use paper_protocol::{PixelFormat, V2PixelFormats, validate_gray8_pixels, validate_mono1_pixels};
 
 pub(crate) use cache::RemoteFrameCache;
 
@@ -130,6 +130,7 @@ pub(crate) enum RedrawCause {
 /// device-owned Exit control must remain renderable independently of PaperSpoon.
 pub(crate) trait DisplayBackend {
     fn dimensions(&self) -> (u16, u16);
+    fn pixel_formats(&self) -> V2PixelFormats;
 
     fn set_dimensions(&mut self, dimensions: (u16, u16)) -> Result<Option<CachedFrameMetadata>>;
 

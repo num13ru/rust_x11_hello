@@ -55,6 +55,10 @@ impl DisplayBackend for X11DisplayBackend<'_> {
         self.dimensions
     }
 
+    fn pixel_formats(&self) -> paper_protocol::V2PixelFormats {
+        paper_protocol::V2PixelFormats::MONO1
+    }
+
     fn set_dimensions(&mut self, dimensions: (u16, u16)) -> Result<Option<CachedFrameMetadata>> {
         self.dimensions = dimensions;
         let viewport = remote_viewport_size(dimensions);

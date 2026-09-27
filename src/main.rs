@@ -81,7 +81,11 @@ fn run() -> Result<()> {
             return Err(primary);
         }
     };
-    let mut paperspoon = net::Paperspoon::start(paperpad_config, remote_viewport_size(size));
+    let mut paperspoon = net::Paperspoon::start(
+        paperpad_config,
+        remote_viewport_size(size),
+        display_backend.pixel_formats(),
+    );
     let event_result = event_loop(&conn, win, display_backend.as_mut(), &mut paperspoon);
     drop(display_backend);
 

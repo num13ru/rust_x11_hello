@@ -55,6 +55,10 @@ impl DisplayBackend for MxcfbDisplayBackend {
         self.opened.info.screen.physical_size()
     }
 
+    fn pixel_formats(&self) -> paper_protocol::V2PixelFormats {
+        paper_protocol::V2PixelFormats::MONO1.with(paper_protocol::PixelFormat::Gray8)
+    }
+
     fn set_dimensions(&mut self, dimensions: (u16, u16)) -> Result<Option<CachedFrameMetadata>> {
         ensure!(
             dimensions == self.dimensions(),
@@ -66,14 +70,6 @@ impl DisplayBackend for MxcfbDisplayBackend {
     }
 
     fn display_remote_frame(&mut self, frame: RemoteFrame<'_>) {
-        if frame.pixel_format() != paper_protocol::PixelFormat::Mono1 {
-            eprintln!(
-                "mxcfb frame rejected id={} format={:?} reason=unsupported-pixel-format",
-                frame.frame_id(),
-                frame.pixel_format()
-            );
-            return;
-        }
         let viewport = self.opened.info.screen.remote_viewport;
         if (frame.width(), frame.height()) != (viewport.width, viewport.height) {
             eprintln!(
@@ -108,8 +104,11 @@ impl DisplayBackend for MxcfbDisplayBackend {
             Ok(submitted) => {
                 self.remote_frame_cache.replace(frame, cached_pixels);
                 eprintln!(
-                    "mxcfb frame submitted id={} marker={} region=({},{} {}x{}) cache=updated receive_decode_us={}",
+                    "mxcfb frame submitted id={} format={:?} stride={} bytes={} marker={} region=({},{} {}x{}) cache=updated receive_decode_us={}",
                     frame.frame_id(),
+                    frame.pixel_format(),
+                    frame.stride(),
+                    frame.pixels().len(),
                     submitted.marker,
                     submitted.region.x,
                     submitted.region.y,
@@ -118,7 +117,11 @@ impl DisplayBackend for MxcfbDisplayBackend {
                     frame.receive_decode_us()
                 );
             }
-            Err(error) => eprintln!("mxcfb frame failed id={}: {error:#}", frame.frame_id()),
+            Err(error) => eprintln!(
+                "mxcfb frame failed id={} format={:?}: {error:#}",
+                frame.frame_id(),
+                frame.pixel_format()
+            ),
         }
     }
 
@@ -152,8 +155,9 @@ impl DisplayBackend for MxcfbDisplayBackend {
             self.submit_update,
         ) {
             Ok(submitted) => eprintln!(
-                "mxcfb frame restored id={} cause={cause:?} marker={} region=({},{} {}x{})",
+                "mxcfb frame restored id={} format={:?} cause={cause:?} marker={} region=({},{} {}x{})",
                 frame.frame_id(),
+                frame.pixel_format(),
                 submitted.marker,
                 submitted.region.x,
                 submitted.region.y,
@@ -161,8 +165,9 @@ impl DisplayBackend for MxcfbDisplayBackend {
                 submitted.region.height
             ),
             Err(error) => eprintln!(
-                "mxcfb frame restore failed id={} cause={cause:?}: {error:#}",
-                frame.frame_id()
+                "mxcfb frame restore failed id={} format={:?} cause={cause:?}: {error:#}",
+                frame.frame_id(),
+                frame.pixel_format()
             ),
         }
     }
@@ -254,6 +259,16 @@ mod tests {
     #[test]
     fn cache_changes_only_after_accepted_remote_update() {
         let mut backend = fake_backend(accept_update);
+        assert!(
+            backend
+                .pixel_formats()
+                .supports(paper_protocol::PixelFormat::Mono1)
+        );
+        assert!(
+            backend
+                .pixel_formats()
+                .supports(paper_protocol::PixelFormat::Gray8)
+        );
         let first_pixels = [0x80; 8];
         let first = RemoteFrame::new(
             1,
@@ -279,12 +294,34 @@ mod tests {
             0,
         )
         .unwrap();
+        backend.submit_update = reject_update;
         backend.display_remote_frame(gray8);
         assert_eq!(backend.remote_frame_cache.current().unwrap().frame_id(), 1);
+        assert_eq!(
+            backend.remote_frame_cache.current().unwrap().payload(),
+            &first_pixels
+        );
+
+        backend.submit_update = accept_update;
+        let gray8_retry = RemoteFrame::new(
+            3,
+            64,
+            1,
+            paper_protocol::PixelFormat::Gray8,
+            64,
+            &gray8_pixels,
+            0,
+        )
+        .unwrap();
+        backend.display_remote_frame(gray8_retry);
+        let cached = backend.remote_frame_cache.current().unwrap();
+        assert_eq!(cached.frame_id(), 3);
+        assert_eq!(cached.pixel_format(), paper_protocol::PixelFormat::Gray8);
+        assert_eq!(cached.payload(), &gray8_pixels);
 
         let wrong_pixels = [0x80, 0x00];
         let wrong = RemoteFrame::new(
-            3,
+            4,
             9,
             1,
             paper_protocol::PixelFormat::Mono1,
@@ -294,12 +331,12 @@ mod tests {
         )
         .unwrap();
         backend.display_remote_frame(wrong);
-        assert_eq!(backend.remote_frame_cache.current().unwrap().frame_id(), 1);
+        assert_eq!(backend.remote_frame_cache.current().unwrap().frame_id(), 3);
 
         backend.submit_update = reject_update;
         let second_pixels = [0x00; 8];
         let second = RemoteFrame::new(
-            4,
+            5,
             64,
             1,
             paper_protocol::PixelFormat::Mono1,
@@ -309,13 +346,13 @@ mod tests {
         )
         .unwrap();
         backend.display_remote_frame(second);
-        assert_eq!(backend.remote_frame_cache.current().unwrap().frame_id(), 1);
+        assert_eq!(backend.remote_frame_cache.current().unwrap().frame_id(), 3);
         assert_eq!(
             backend.remote_frame_cache.current().unwrap().payload(),
-            &first_pixels
+            &gray8_pixels
         );
         backend.redraw_cached_frame(RedrawCause::SurfaceDamage);
-        assert_eq!(backend.remote_frame_cache.current().unwrap().frame_id(), 1);
+        assert_eq!(backend.remote_frame_cache.current().unwrap().frame_id(), 3);
     }
 
     #[test]
