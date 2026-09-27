@@ -241,7 +241,8 @@ mod tests {
             nonstd: 0,
         };
         let pixels = [0x80, 0x80];
-        let frame = RemoteFrame::new(1, 9, 1, 2, &pixels, 0).unwrap();
+        let frame =
+            RemoteFrame::new(1, 9, 1, paper_protocol::PixelFormat::Mono1, 2, &pixels, 0).unwrap();
         prepare_remote(frame, screen, spec, 12 * 73).unwrap()
     }
 

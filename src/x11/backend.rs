@@ -61,10 +61,25 @@ impl DisplayBackend for X11DisplayBackend<'_> {
         Ok(self
             .remote_frame_cache
             .invalidate_mismatched(viewport)
-            .map(|frame| CachedFrameMetadata::new(frame.frame_id(), frame.dimensions())))
+            .map(|frame| {
+                CachedFrameMetadata::new(
+                    frame.frame_id(),
+                    frame.dimensions(),
+                    frame.pixel_format(),
+                    frame.stride(),
+                )
+            }))
     }
 
     fn display_remote_frame(&mut self, frame: RemoteFrame<'_>) {
+        if frame.pixel_format() != paper_protocol::PixelFormat::Mono1 {
+            eprintln!(
+                "frame rejected id={} format={:?} display=x11 reason=unsupported-pixel-format",
+                frame.frame_id(),
+                frame.pixel_format()
+            );
+            return;
+        }
         let Some(adapter) = self.framebuffer_adapter.as_ref() else {
             eprintln!(
                 "frame accepted id={} width={} height={} stride={} bytes={} receive_decode_us={} render=unavailable",
@@ -107,12 +122,7 @@ impl DisplayBackend for X11DisplayBackend<'_> {
                             bitmap.bytes().len(),
                             chunks
                         );
-                        self.remote_frame_cache.replace(
-                            frame.frame_id(),
-                            frame.width(),
-                            frame.height(),
-                            bitmap,
-                        );
+                        self.remote_frame_cache.replace(frame, bitmap);
                     }
                     Err(error) => eprintln!(
                         "frame upload error id={} width={} height={} receive_decode_us={receive_decode_us} prepare_us={prepare_us} x11_upload_us={x11_upload_us}: {error:#}",

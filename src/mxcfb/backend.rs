@@ -66,6 +66,14 @@ impl DisplayBackend for MxcfbDisplayBackend {
     }
 
     fn display_remote_frame(&mut self, frame: RemoteFrame<'_>) {
+        if frame.pixel_format() != paper_protocol::PixelFormat::Mono1 {
+            eprintln!(
+                "mxcfb frame rejected id={} format={:?} reason=unsupported-pixel-format",
+                frame.frame_id(),
+                frame.pixel_format()
+            );
+            return;
+        }
         let viewport = self.opened.info.screen.remote_viewport;
         if (frame.width(), frame.height()) != (viewport.width, viewport.height) {
             eprintln!(
@@ -98,12 +106,7 @@ impl DisplayBackend for MxcfbDisplayBackend {
             self.submit_update,
         ) {
             Ok(submitted) => {
-                self.remote_frame_cache.replace(
-                    frame.frame_id(),
-                    frame.width(),
-                    frame.height(),
-                    cached_pixels,
-                );
+                self.remote_frame_cache.replace(frame, cached_pixels);
                 eprintln!(
                     "mxcfb frame submitted id={} marker={} region=({},{} {}x{}) cache=updated receive_decode_us={}",
                     frame.frame_id(),
@@ -128,7 +131,8 @@ impl DisplayBackend for MxcfbDisplayBackend {
             cached.frame_id(),
             width,
             height,
-            usize::from(width).div_ceil(8),
+            cached.pixel_format(),
+            cached.stride(),
             cached.payload(),
             0,
         ) {
@@ -251,18 +255,59 @@ mod tests {
     fn cache_changes_only_after_accepted_remote_update() {
         let mut backend = fake_backend(accept_update);
         let first_pixels = [0x80; 8];
-        let first = RemoteFrame::new(1, 64, 1, 8, &first_pixels, 0).unwrap();
+        let first = RemoteFrame::new(
+            1,
+            64,
+            1,
+            paper_protocol::PixelFormat::Mono1,
+            8,
+            &first_pixels,
+            0,
+        )
+        .unwrap();
         backend.display_remote_frame(first);
         assert_eq!(backend.remote_frame_cache.current().unwrap().frame_id(), 1);
 
+        let gray8_pixels = [128; 64];
+        let gray8 = RemoteFrame::new(
+            2,
+            64,
+            1,
+            paper_protocol::PixelFormat::Gray8,
+            64,
+            &gray8_pixels,
+            0,
+        )
+        .unwrap();
+        backend.display_remote_frame(gray8);
+        assert_eq!(backend.remote_frame_cache.current().unwrap().frame_id(), 1);
+
         let wrong_pixels = [0x80, 0x00];
-        let wrong = RemoteFrame::new(2, 9, 1, 2, &wrong_pixels, 0).unwrap();
+        let wrong = RemoteFrame::new(
+            3,
+            9,
+            1,
+            paper_protocol::PixelFormat::Mono1,
+            2,
+            &wrong_pixels,
+            0,
+        )
+        .unwrap();
         backend.display_remote_frame(wrong);
         assert_eq!(backend.remote_frame_cache.current().unwrap().frame_id(), 1);
 
         backend.submit_update = reject_update;
         let second_pixels = [0x00; 8];
-        let second = RemoteFrame::new(3, 64, 1, 8, &second_pixels, 0).unwrap();
+        let second = RemoteFrame::new(
+            4,
+            64,
+            1,
+            paper_protocol::PixelFormat::Mono1,
+            8,
+            &second_pixels,
+            0,
+        )
+        .unwrap();
         backend.display_remote_frame(second);
         assert_eq!(backend.remote_frame_cache.current().unwrap().frame_id(), 1);
         assert_eq!(

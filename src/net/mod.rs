@@ -83,6 +83,7 @@ pub(crate) struct ReceivedFrame {
     frame_id: u64,
     width: u16,
     height: u16,
+    pixel_format: V2PixelFormat,
     stride: usize,
     encoded: Vec<u8>,
     receive_decode_elapsed: Duration,
@@ -99,6 +100,10 @@ impl ReceivedFrame {
 
     pub(crate) fn height(&self) -> u16 {
         self.height
+    }
+
+    pub(crate) fn pixel_format(&self) -> V2PixelFormat {
+        self.pixel_format
     }
 
     pub(crate) fn stride(&self) -> usize {
@@ -340,6 +345,7 @@ fn read_v2_frame<R: Read>(reader: &mut R) -> io::Result<ReceivedFrame> {
         frame_id: frame.frame_id(),
         width: frame.width(),
         height: frame.height(),
+        pixel_format: frame.pixel_format(),
         stride: frame.stride(),
         encoded,
         receive_decode_elapsed: receive_decode_started.elapsed(),
@@ -1077,6 +1083,8 @@ mod tests {
         };
         assert_eq!(received.frame_id(), 17);
         assert_eq!((received.width(), received.height()), (9, 2));
+        assert_eq!(received.pixel_format(), V2PixelFormat::Mono1);
+        assert_eq!(received.stride(), 2);
         assert_eq!(received.pixels(), &[0xaa, 0x80, 0x55, 0x00]);
     }
 
