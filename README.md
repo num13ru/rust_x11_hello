@@ -1,401 +1,40 @@
-# Paperpad
+# PaperPad
 
-PaperPad is a bounded Kindle/KUAL remote framebuffer client. It displays the
-application UI rendered by the PaperSpoon macOS companion, forwards
-viewport-relative core X11 pointer events over Wi-Fi, and owns a separate
-device-local Exit control. PaperSpoon handles application hit testing and
-semantic actions.
+PaperPad turns a Kindle into a Wi-Fi-connected remote display and touch surface
+for a macOS companion called PaperSpoon.
 
-The repository, Cargo package, device binary, environment variables, and
-extension path retain the MVP identifier `rust_x11_hello`. The KUAL launcher
-serializes launch attempts with an owner-checked lock and stops a run after 90
-seconds, with a five-second `TERM` grace followed by `KILL` only after
-revalidating the recorded PID and executable.
+- PaperSpoon owns the application UI, layout, hit testing, and Mac actions.
+- PaperPad displays negotiated Mono1 or Gray8 frames and forwards
+  viewport-relative touch events.
 
-## Ownership and module boundaries
-
-| Area | Owner |
-| --- | --- |
-| Process setup and teardown | `src/main.rs` |
-| Environment parsing and validation | `src/config.rs` |
-| Remote pointer normalization and local Exit decisions | `src/app.rs`, using pure logic from `src/ui/` |
-| X11 resources, event translation, and rendering | `src/x11/` |
-| PaperPad TCP lifecycle, workers, pointer queue, and frame mailbox | `src/net/` |
-| Unique-endpoint discovery policy | `src/discovery.rs` |
-| Shared wire constants, framebuffer representation, formatting, and parsing | `crates/paper-protocol/` |
-| PaperSpoon listener, application rendering/input, discovery responder, and forwarding | `tools/paperspoon/` |
-| KUAL lifecycle and MTP packaging | `kindle-extension/` and `scripts/deploy-kindle-mtp.sh` |
-
-The dependency direction is deliberate: protocol code depends only on
-`std`; PaperPad's viewport and Exit logic know nothing about X11 or sockets;
-PaperSpoon owns application geometry and contact decisions. The X11 thread
-owns the window and `AppState`. Network workers own blocking connection work,
-with pointer messages crossing a bounded queue and frames crossing a
-single-slot latest-value mailbox.
-
-## Conditions under which this works
-
-- A jailbroken Kindle with KUAL and an X server compatible with `x11rb` core X11 requests.
-- An ARMv7/EABI5-compatible Kindle userspace. The produced binary is statically linked with musl; a device that cannot execute ARMv7 binaries needs a different build target.
-- KUAL supplies the working `DISPLAY`/`XAUTHORITY` environment used by the existing device launcher.
-- `mtp-rs` can access the unlocked Kindle over USB. Its `/extensions` path maps to `/mnt/us/extensions` at runtime.
-- The canonical extension is installed as `/extensions/rust_x11_hello`. Do not keep the legacy `/extensions/rust_hello` entry alongside it.
-- Physical-device logs are authoritative for touch support. Host compilation or desktop pointer events cannot prove Kindle touchscreen translation.
-
-## Geometry-aware rendering
-
-- The app opens a borderless window at `(0,0)` covering the selected X11 screen. The Paperwhite 6 reports `1272 x 1696` in portrait; runtime dimensions come from X11 rather than a fixed device resolution.
-- PaperPad partitions that physical extent into a top remote-content viewport and a fixed 72px PaperPad-owned system strip at the bottom. On the Paperwhite the remote viewport is `(0,0) 1272 x 1624`, and the system strip is `(0,1624) 1272 x 72`. PaperSpoon must render only the remote viewport.
-- PaperSpoon's application layout uses square grid cells. On this Kindle, cells are `384 x 384`, with 20px outer margins and 40px gaps between rows and columns. Any division remainder is absorbed by the column gaps so both outer edges stay aligned.
-- PaperSpoon draws the title above the grid and reserves a 40px status region within the remote viewport. PaperPad draws Exit in its local bottom strip, spanning `screen width - 40px` with 20px horizontal margins. The status region is not a `display` command target.
-- For shorter viewports, PaperSpoon reduces the cell side to fit the grid and status region without stretching cells; sufficiently small viewports have no application buttons. PaperPad's Exit remains available whenever the window is at least 41px wide and 72px tall. Device layout coordinates are capped at X11's signed-coordinate limit.
-- The final event in each `Expose` batch redraws PaperPad's local UI and the last successfully uploaded remote frame, if cached.
-- A size-changing `ConfigureNotify` updates PaperPad's viewport and Exit geometry, clears its local contact state, and queues `ViewportChanged` for PaperSpoon. Duplicate geometry is ignored; a zero-width/zero-height report is logged without replacing the last valid extent.
-
-Host tests cover the host application layout and input decisions, PaperPad viewport and Exit geometry, smaller and landscape windows, division remainders, gaps, and zero/maximum dimensions. ARM/static checks verify buildability. Full-screen rendering and touch behavior still require a physical Kindle run.
-
-## Logical hit testing
-
-The remote viewport contains PaperSpoon's nine application buttons in a 3×3 grid. The bottom system strip contains PaperPad's separate local Exit control. Both use half-open bounds, so trailing edges and gaps do not activate a control.
-
-X11 pointer events use signed, physical window coordinates. PaperPad maps contacts inside the remote viewport to unsigned viewport-relative coordinates and sends binary `PointerDown`/`PointerUp` messages to PaperSpoon. Physical points in the system strip or outside the window have no remote coordinate. If a remote contact ends outside the viewport, PaperPad sends an out-of-bounds `PointerUp` to cancel it. Exit hit testing remains local, in physical coordinates.
-
-Only core-X11 `detail=1` participates in remote pointer forwarding or local
-Exit activation. PaperSpoon arms an application button on a primary down and
-resolves an action only when the matching up remains inside that button.
-Exit is a PaperPad-local lifecycle control and sends no remote pointer or
-semantic action. PaperSpoon maps buttons 1–9 to:
-
-| Button | Semantic action id |
-| ------ | ------------------ |
-| 1 | `media.play_pause` |
-| 2 | `media.next` |
-| 3 | `media.previous` |
-| 4 | `terminal.new_window` |
-| 5 | `tmux.work` |
-| 6 | `zoom.toggle_mute` |
-| 7 | `stub.button_7` |
-| 8 | `stub.button_8` |
-| 9 | `stub.button_9` |
-
-Exit has its own PaperPad `SystemUi` geometry and contact state rather than an
-application button ID. Its activation is logged as `ui action=activate
-system=exit` and closes the window without writing to PaperSpoon.
-
-Buttons 7–9 resolve to placeholder action IDs for future companion bindings.
-Rendering and touch behavior remain device-specific and must be rechecked
-after changes to geometry, event translation, or the X11 adapter.
-
-These dotted IDs are resolved on the host, not sent over the Kindle wire.
-USBNetwork itself is not used: no maintained USBNetwork package targets this
-Paperwhite 6, so the transport is Wi-Fi.
-
-Presses in gaps cannot arm an application button. PaperSpoon cancels an armed contact on releases in another button or outside the grid, repeated primary downs, and viewport changes. PaperPad clears its local remote-contact state on geometry changes or window unmapping; these local cancellations do not themselves send a remote `PointerUp`. Unmatched releases do nothing. Auxiliary details such as the observed Kindle `detail=6` and `detail=9` pairs retain their raw diagnostic lines but neither activate nor cancel the armed primary contact. Pointer motion remains unlogged.
-
-## Framebuffer protocol primitives
-
-The shared protocol crate defines transport-independent `Mono1Frame` and
-`Gray8Frame` types for the remote content viewport. Mono1 is row-major and
-MSB-first within each byte: `0` is white and `1` is black. Each row occupies
-`ceil(width / 8)` bytes, and unused low bits in a partial final byte must be
-white. Gray8 is row-major with one byte per pixel: `0` is black and `255` is
-white. Both formats require nonzero dimensions and an exact `stride * height`
-payload.
-
-Protocol v2 also defines a 12-byte, big-endian binary header containing `PPFB` magic, version, message type, zero-reserved flags, and a `u32` payload length. Payloads are capped at 16 MiB and rejected from the header before allocation. The borrowing decoder supports partial and consecutive messages without performing I/O.
-
-Typed, big-endian payloads cover `Hello` (version, supported pixel formats, remote viewport), `PointerDown`/`PointerUp` (viewport-relative `x/y`), `ViewportChanged` (new remote extent), and `Frame` (`u64` frame ID, extent, pixel format, pixels). Reserved payload bytes must be zero. Frame payloads are validated as borrowed bytes without copying; pointer bounds and frame dimensions remain the receiving endpoint's responsibility against its current negotiated viewport.
-
-PaperPad's inbound TCP reader accepts complete `PPFB` v2 `Frame` messages only. Frames are validated against the current remote viewport and coalesced into a latest-frame mailbox. Legacy text, corrupt messages, and unexpected v2 message types end the connection and use the existing reconnect path; dimension mismatches are logged and skipped without replacing a valid pending frame.
-
-The X11 bitmap adapter converts accepted Mono1 frames to the server-advertised XYBitmap representation. It handles 8/16/32-bit scanline units, independent image-byte and bitmap-bit order, scanline padding, and whole-row chunking within the server's maximum request size. Each newly received frame is uploaded with checked depth-1 `PutImage` requests, confined to the remote viewport; the existing GC maps `1` to black and `0` to white. Only a successful upload replaces the cached frame. PaperPad redraws that frame after X11 `Expose` or same-viewport geometry redraws, and invalidates it when the viewport size changes. Unsupported formats, conversion failures, and X11 upload errors are logged without intentionally ending the event loop; they do not replace the cache or touch the local Exit region.
-
-## TCP transport (Wi-Fi)
-
-The Kindle connects to PaperSpoon over TCP and sends a binary v2 `Hello` with
-the remote viewport size. While connected, it sends viewport-relative
-`PointerDown`/`PointerUp` and size changes as `ViewportChanged`. PaperSpoon
-responds with binary `Frame` messages. After `Hello`, it sends the last
-successfully sent authoritative frame when its dimensions match; otherwise it
-sends the application UI. A viewport change sends a replacement application
-frame. A matching diagnostic pattern may therefore reappear after reconnect.
-
-PaperSpoon (the Rust listener in `tools/paperspoon`) logs received
-pointer phases and any host-resolved application actions. A dropped connection
-starts PaperPad's reconnect path. Pointer events attempted while disconnected
-or when its bounded outbound queue is full are not replayed; the next
-connection sends a fresh `Hello` and receives an authoritative frame. PaperPad
-keeps its local Exit available throughout.
-
-### Zero-config discovery (verified on this Paperwhite 6)
-
-By default PaperPad locates PaperSpoon with a minimal custom UDP
-zero-config discovery exchange:
+## Architecture
 
 ```text
-PaperPad binds UDP 0.0.0.0:5582
-        |
-        | DISCOVER <nonce>  -> 255.255.255.255:5580
-        |
-PaperSpoon (UDP 5580) replies with a unicast HERE <nonce> <tcp-port>
-        |
-existing TCP connect
+macOS                                      Kindle
+
+PaperSpoon -- PPFB v2 framebuffer ------> PaperPad -- X11 or MXCFB
+           <----- pointer events ---------          -- local Exit
 ```
 
-- Fixed discovery ports: **UDP 5580** (PaperSpoon listener) and **UDP 5582**
-  (PaperPad client). PaperSpoon TCP defaults to **5581**; its discovery reply
-  advertises the actual bound TCP port when a different port is selected.
-- The wire format is newline-terminated ASCII: `PAPERPAD DISCOVER <nonce>`
-  and `PAPERSPOON HERE <nonce> <tcp-port>`. The nonce distinguishes the
-  current attempt from stale/unrelated datagrams; the response must echo it.
-- The response is **unicast** to the request's source; no broadcast
-  responses, no multicast.
-- The response payload never contains an IP address; the UDP source address
-  is the discovered PaperSpoon address.
-- PaperPad listens for the full bounded probe schedule and deduplicates offers
-  for the same source-IP/advertised-port endpoint. Exactly one distinct
-  endpoint is accepted; two or more are rejected as ambiguous.
-- Each discovery attempt is bounded (3 probes, 500 ms window each). After a
-  failed startup attempt, PaperPad waits two seconds and retries the whole
-  resolution/discovery and TCP connection path in the background.
+PaperSpoon renders only the negotiated remote viewport. On the tested
+1272×1696 portrait screen, that viewport is 1272×1624; PaperPad reserves the
+bottom 72 pixels for its local system UI.
 
-On the Kindle the firewall INPUT policy is restrictive, so the launcher
-installs a narrow temporary ACCEPT rule for the discovery response before
-starting PaperPad and removes it on cleanup:
+PPFB v2 uses typed binary messages for capability negotiation, viewport
+changes, pointer phases, and frames. Mono1 is row-major and MSB-first (`0` is
+white); Gray8 uses one byte per pixel (`0` is black and `255` is white).
+Payloads are capped at 16 MiB and validated before becoming authoritative.
 
-```text
--i wlan0 -p udp --sport 5580 --dport 5582 -j ACCEPT
-```
+PaperPad retains only a successfully displayed frame. Invalid dimensions,
+unsupported formats, decode errors, or failed display updates do not replace
+it. A matching reconnect receives PaperSpoon's last authoritative frame;
+pointer events that occur while disconnected are not replayed.
 
-in a dedicated `PAPERPAD_DISCOVERY` iptables chain. The rule exists only for
-the bounded run and never flushes unrelated firewall tables.
+## Build and run
 
-### Explicit host override
+### 1. Verify and build the Kindle package
 
-Setting `PAPERPAD_COMPANION` (e.g. to a Wi-Fi run where the Mac is at
-`192.168.0.12`) bypasses discovery and connects directly:
-
-```sh
-PAPERPAD_COMPANION=192.168.0.12
-```
-
-The host value is trimmed. An absent or blank host selects discovery, which
-uses the TCP port advertised by PaperSpoon. With an explicit host,
-`PAPERPAD_COMPANION_PORT` optionally overrides the default TCP port
-5581 and must be a decimal value in `1..=65535`. Empty, zero, malformed, or
-out-of-range ports—and a port override without an explicit host—are startup
-configuration errors reported before Paperpad creates its X11 window.
-
-This remains the deterministic control path and debugging/recovery override.
-When unset, discovery runs and there is **no** fallback to a hard-coded IP.
-
-Verified on the physical Paperwhite 6 (evidence under
-`artifacts/kindle-runs/discovery-test-*`): explicit control (Test A), full
-discovery chain (Test B), PaperPad restart (Test C), Mac DHCP address change
-`192.168.0.12 -> 192.168.0.50` with no configuration edit (Test D), and
-bounded failure with the UI alive when PaperSpoon is absent (Test E).
-
-A PaperSpoon that is unreachable costs bounded time per attempt and is logged
-on the device; it never breaks the X11 event loop or the on-device input log.
-PaperPad retries in the background. Pointer messages attempted while
-disconnected fail immediately and are not queued or replayed after connection.
-The Kindle opens no listening TCP socket. No application action IDs or text
-display commands cross the TCP connection.
-
-### Display backend selection
-
-`PAPERPAD_DISPLAY_BACKEND` selects PaperPad's display backend. It defaults
-to `x11`; setting it explicitly to `x11` selects the same reference path.
-`mxcfb` explicitly selects the experimental direct-framebuffer display path.
-It still requires the X11 window for touch input and lifecycle events. Startup
-fails if `/dev/fb0`, the required HWTCON capabilities, or matching X11/window
-geometry are unavailable; it never silently falls back to X11. A first
-Paperwhite 6 trial exercised direct display alongside X11 touch and local Exit;
-see [device evidence](docs/archive/mxcfb-device-evidence.md) for the exact observations
-and still-unverified cases.
-KUAL's **Run Paperpad MXCFB (90s, experimental)** action sets this variable
-for one run; **Run Paperpad (90s)** remains the X11 reference action. The
-90-second watchdog is the fallback if Exit is not visible or touch fails.
-
-The KUAL **Inspect framebuffer metadata** action runs `--inspect-framebuffer`
-without starting the normal launcher. It collects read-only `/dev/fb0`
-information and logs the standard Linux
-`FBIOGET_FSCREENINFO` and `FBIOGET_VSCREENINFO` results to
-`rust_x11_hello.log`. It also attempts a shared, read-only mapping of the
-validated visible framebuffer span, reads its first and last bytes without
-logging or interpreting their values, and immediately unmaps it. It then opens
-`/dev/fb0` read-write and attempts a shared writable mapping of the same span,
-again unmapping immediately without accessing pixel bytes through that mapping.
-It then tries the firmware-matched, read-only HWTCON `GET_PANEL_INFO_MTK`
-query and discards its returned data. It does not write pixels, map a window,
-touch the normal launcher, or submit an e-ink refresh. No PaperSpoon listener
-is needed. Retrieve the log
-using the normal MTP log command below and look for `mxcfb probe:` lines. If
-opening `/dev/fb0`, a query, or either mapping fails, the log records the
-specific failure. An accepted writable mapping or panel-info query does not
-prove pixel writes, color polarity, e-ink update submission, or panel output.
-The MXCFB backend validates the observed `hwtcon_v2`, unrotated 8-bit
-framebuffer format and visible bounds, opens `/dev/fb0` read-write, queries
-panel info, and maps only the visible span. It expands Mono1 pixels or copies
-Gray8 values into bounded remote rows, then submits a remote-only GC16 update.
-PaperPad renders its own Exit strip using the same bounds as touch hit-testing,
-writes only that strip, and submits a separate strip-only update. A single
-marker sequence serves both paths. The last remote frame retains its pixel
-format and is cached only after the kernel accepts its update; redraws submit
-that cached frame again. A failed submission can leave changed framebuffer
-bytes, but does not replace the cache or establish a physical panel refresh.
-
-| Backend | Mono1 | Gray8 / host-decoded JPEG |
-| --- | --- | --- |
-| X11 | Supported | Rejected; not advertised in `Hello` |
-| MXCFB (experimental) | Supported | Supported and advertised |
-
-Both MXCFB formats currently use the existing GC16 update path. There is no
-content-adaptive waveform selection, animation policy, or ghosting management.
-
-Host Linux tests use `/dev/zero`, not the Kindle framebuffer. The HWTCON
-send-update and wait-complete C layouts come from the pinned PW6 firmware
-reference and compile on ARM. The first Kindle runtime trial submitted updates
-and the operator reported a working MXCFB display; update-completion timing
-and exact pixel fidelity remain unverified. The read-only metadata probe still
-does not write pixels or submit updates. X11 touch worked alongside direct
-framebuffer output in that trial, but X11 repaint and sleep/wake interference
-still need targeted testing.
-
-Runtime overrides now use the `PAPERPAD_` prefix. The KUAL launcher reads
-`PAPERPAD_EXT_DIR`, `PAPERPAD_WATCHDOG_SECONDS`, and
-`PAPERPAD_WATCHDOG_TERM_GRACE_SECONDS`. Update existing overrides; legacy
-environment names are no longer read.
-
-### Running PaperSpoon
-
-From the repository root, build and run the Rust listener on the Mac:
-
-```sh
-cargo build --release --package paperspoon
-./target/release/paperspoon 5581 /tmp/paperspoon.log
-```
-
-The application UI is sent after PaperPad's `Hello`. To exercise framebuffer
-transport and the active display backend, type a diagnostic frame command at PaperSpoon's
-stdin whose dimensions exactly match PaperPad's current remote viewport. The standard
-Paperwhite portrait viewport is `1272x1624`:
-
-```text
-frame corners 1272x1624
-frame border 1272x1624
-frame checkerboard 1272x1624
-frame horizontal 1272x1624
-frame black 1272x1624
-frame white 1272x1624
-```
-
-With a connected backend that advertises Gray8 (currently the experimental
-MXCFB backend), these generated grayscale diagnostics are also available:
-
-```text
-frame gray-gradient 1272x1624
-frame gray-bars 1272x1624
-frame gray 128 1272x1624
-```
-
-PaperSpoon can also decode any JPEG available to the host and fit it to
-PaperPad's active remote viewport:
-
-```text
-frame jpeg ./assets/example-image.jpg
-frame jpeg /Users/user/Downloads/1.jpeg
-```
-
-Relative paths are resolved from PaperSpoon's working directory. Everything
-after `frame jpeg` is treated as the path, including spaces. The image keeps
-its aspect ratio, is centered without cropping, and uses white letterboxing.
-PaperSpoon retains the rendered Gray8 pixels for a matching reconnect rather
-than reopening the path. No connection, a Mono1-only backend, a missing or
-malformed file, an oversized decode, or a connection/viewport change during
-decoding leaves the previous authoritative frame and frame ID unchanged.
-
-To render and send PaperSpoon's host-owned application UI instead of a
-diagnostic pattern, use the same explicit remote viewport dimensions:
-
-```text
-ui 1272x1624
-```
-
-For a sent application frame, PaperSpoon prints `sent application frame ...`
-and PaperPad logs `frame uploaded ... cache=updated`. Repeating `ui` with the
-same viewport and unchanged application pixels logs `application frame skipped
-unchanged ...` without sending a frame or consuming a frame ID. A viewport
-change, a switch back from a diagnostic pattern, or a new `Hello` still sends
-an authoritative frame. PaperSpoon performs matching application hit testing
-and semantic action dispatch for taps on that frame. While a diagnostic pattern
-is authoritative, host application hit testing is inactive. The 72-pixel
-local Exit strip remains PaperPad-rendered in either case.
-
-Patterns are generated as validated Mono1 or Gray8 frames and assigned
-increasing frame IDs. PaperSpoon prints `sent frame ...` (or `sent JPEG frame
-...`); PaperPad logs `frame uploaded ... cache=updated`. A mismatched extent or
-failed upload does not replace the last successfully displayed frame. PaperPad
-redraws that cached frame after X11 Expose or an MXCFB refresh path that supports
-its format; successful cache redraws log `frame redrawn ... cache=hit`. A
-viewport-size change invalidates the old cache rather than stretching or
-clipping it.
-
-For the manual device check, verify the four differently sized blocks in
-`corners` occupy the expected corners, the `border` reaches the remote
-viewport's rightmost pixel and bottom row, black/white polarity is correct, and
-no pattern overwrites the 72-pixel local Exit strip. A deliberately mismatched
-frame such as `frame white 1272x1623` must not replace the cached valid frame.
-In a separate run, stop PaperSpoon, trigger an X11 Expose (brief sleep/wake on
-the tested Paperwhite), and confirm the cached frame returns without the host;
-PaperPad logs `frame redrawn ... cause=Expose cache=hit`. Press Exit after a
-frame to confirm it remains device-local and responsive.
-
-For a Wi-Fi run, the listener binds `0.0.0.0` on TCP 5581 **and** starts the
-UDP discovery responder on `0.0.0.0:5580` (you should see both the TCP
-banner and `discovery listening address=0.0.0.0:5580`). With no
-`PAPERPAD_COMPANION`, the Kindle discovers PaperSpoon automatically
-over the LAN. Wi-Fi and MTP can coexist over the USB link. USBNetwork is not
-available on this Paperwhite 6 — no maintained USBNetwork package accepts
-the device — so the USBNetwork
-interface setup and MTP/USBNetwork exclusivity rules do not apply.
-
-Passing TCP port `0` asks the OS for an ephemeral port; PaperSpoon prints and
-advertises that actual port rather than `0` or the default.
-
-### Hammering actions into the Mac (Hammerspoon)
-
-PaperSpoon forwards each host-resolved application action to Hammerspoon as a
-URL event: it runs `open -g hammerspoon://paperpad?action=<id>` once per
-activation.
-Forwarding is on by default; pass `--no-forward-url` to disable it:
-
-```sh
-cargo build --release --package paperspoon
-./target/release/paperspoon 5581 /tmp/paperspoon.log
-```
-
-The banner now shows `forwarding actions to Hammerspoon via open -g
-hammerspoon://paperpad/...`.
-
-Hammerspoon handles this from `~/.hammerspoon/init.lua` (a working copy lives
-at `tools/hammerspoon/init.example.lua`) via `hs.urlevent.bind("paperpad",
-...)`:
-
-- `media.play_pause`, `media.next`, `media.previous` control the Music app
-  via in-process AppleScript (`hs.osascript`);
-- `terminal.new_window` and `zoom.toggle_mute` dispatch to keyboard
-  shortcuts (`cmd+n`, `cmd+shift+a`);
-- unknown ids raise a notification.
-
-Only a completed tap within the same host-rendered button resolves an action.
-PaperSpoon logs `host action button=... semantic=... dispatch=...` for that
-attempt. Hammerspoon delivery and the target application's response still
-depend on the host environment; no device-side replay is performed.
-
-## Host checks and Kindle build
-
-Run the complete gate from the repository root, in this order:
+From the repository root:
 
 ```sh
 make check
@@ -404,70 +43,215 @@ make verify
 git diff --check
 ```
 
-The verified package is `kindle-extension/rust_x11_hello`; its binary is:
+`make check` needs Rust, Bash, `jq`, and local loopback socket access. The ARM
+build and static verification use Docker. The resulting untracked binary is:
 
 ```text
 kindle-extension/rust_x11_hello/bin/rust_x11_hello
 ```
 
-`make check` formats, checks, lints, and tests the whole Rust workspace; it
-also validates the KUAL scripts, MTP deployment success/rollback/failure
-paths, and menu JSON. It requires the Rust toolchain, Bash, `jq`, and local
-loopback socket access. `make build` and `make verify` require Docker.
-Verification rejects a dynamic interpreter and GLIBC symbol requirements.
+### 2. Start PaperSpoon on the Mac
 
-## Fresh MTP installation
+```sh
+cargo build --release --package paperspoon
+./target/release/paperspoon 5581 /tmp/paperspoon.log
+```
 
-After removing the legacy extension and confirming `/extensions/rust_x11_hello` does not already exist:
+PaperSpoon listens on TCP 5581 and answers discovery on UDP 5580. Passing TCP
+port `0` selects and advertises an OS-assigned port.
+
+### 3. Install or update the Kindle extension
+
+For a fresh install, after confirming the canonical extension does not exist:
 
 ```sh
 scripts/deploy-kindle-mtp.sh install
 ```
 
-The installer verifies each upload by reading it back and uploads `menu.json` last, so KUAL does not expose a partially transferred extension. It refuses to overwrite an existing canonical installation.
-
-For a later update, first use Paperpad's in-window **Exit** button or let the
-watchdog stop the app, confirm the window is gone, and run:
+For an update, first stop PaperPad with its in-window **Exit** button or let the
+watchdog finish, confirm the window is gone, then run:
 
 ```sh
 scripts/deploy-kindle-mtp.sh update --confirm-stopped
 ```
 
-Update mode stages and verifies the new binary, downloads the active binary into a guarded host temporary directory, and uploads a verified device-side copy as `rust_x11_hello.previous`. It then activates the new binary with `put --replace --verify`, because tested Kindle firmware rejects MTP object renames. If activation fails, it attempts a verified replacement from the downloaded prior binary. Another update is refused while the retained backup exists. MTP cannot prove that a process is stopped; `--confirm-stopped` is an explicit operator assertion.
+MTP cannot inspect running processes; `--confirm-stopped` is the operator's
+assertion. The update keeps the previous verified binary as
+`bin/rust_x11_hello.previous` and refuses to overwrite an existing backup. To
+clear that backup explicitly before a later retry:
 
-MTP does not provide a multi-file transaction. If an update transfer fails before binary activation, the old binary remains selected but `.new`, `.previous`, or some support files may already exist; inspect the reported remote listing and repair the update before opening KUAL.
+```sh
+mtp-rs rm /extensions/rust_x11_hello/bin/rust_x11_hello.previous --yes
+```
 
-## Device test
+### 4. Run from KUAL
 
-In KUAL, use **Run Paperpad (90s)**. Perform taps within the visible window,
-then use Paperpad's in-window **Exit** button or allow the watchdog to end the
-run. There is no separate stop menu item because Paperpad covers KUAL while its
-full-screen window is open.
+KUAL provides three actions:
 
-For further MXCFB trials, follow the
-[physical-validation sequence](docs/archive/mxcfb-manual-validation.md). Verify the
-deployed binary checksum. With an operator-controlled PaperSpoon session
-already available, choose **Run Paperpad MXCFB (90s, experimental)**. Confirm the
-local Exit strip is visible and usable even if PaperSpoon disconnects. Compare
-the same diagnostic frames through the X11 action and MXCFB: check orientation,
-black/white polarity, the rightmost and bottom remote pixels, and that remote
-content never covers Exit. Check replacement frames, reconnect, touch input,
-and any X11 repaint or sleep/wake interference. If Exit is not visible or touch
-fails, let the watchdog end the run and confirm the window is gone before any
-MTP update. A successful ARM build or update ioctl is not a verified panel
-image; retain the device log and report what was physically visible.
+- **Run Paperpad (90s)** — reference X11 display backend.
+- **Run Paperpad MXCFB (90s, experimental)** — direct framebuffer display with
+  X11 still providing touch and lifecycle events.
+- **Inspect framebuffer metadata** — read-only diagnostics; it does not draw or
+  submit an e-ink refresh.
 
-After the process ends, retrieve the log:
+The full-screen window covers KUAL. Stop it with PaperPad's **Exit** button or
+wait for the watchdog. The launcher serializes runs and escalates from `TERM`
+to `KILL` only after revalidating the recorded PaperPad process.
+
+## Connection configuration
+
+PaperPad normally discovers PaperSpoon automatically:
+
+```text
+Kindle UDP 5582 -- DISCOVER --> broadcast UDP 5580
+Kindle UDP 5582 <-- HERE ----- PaperSpoon
+Kindle          -- PPFB v2 --> advertised TCP port
+```
+
+Discovery accepts exactly one distinct responder, uses three bounded 500 ms
+probe windows, and retries the full connection path after two seconds. The
+launcher installs and removes a narrow temporary firewall rule for the UDP
+reply; it does not flush unrelated firewall state.
+
+Use an explicit host for debugging or networks that block broadcast:
+
+```sh
+PAPERPAD_COMPANION=192.168.0.12
+PAPERPAD_COMPANION_PORT=5581
+```
+
+`PAPERPAD_COMPANION_PORT` is valid only with an explicit host and must be in
+`1..=65535`. Invalid configuration fails before the X11 window opens. There is
+no hard-coded IP fallback.
+
+Other runtime overrides are:
+
+| Variable | Meaning |
+| --- | --- |
+| `PAPERPAD_DISPLAY_BACKEND=x11` | Default X11 display path |
+| `PAPERPAD_DISPLAY_BACKEND=mxcfb` | Experimental direct framebuffer path |
+| `PAPERPAD_EXT_DIR` | KUAL extension directory |
+| `PAPERPAD_WATCHDOG_SECONDS` | Maximum run duration |
+| `PAPERPAD_WATCHDOG_TERM_GRACE_SECONDS` | Grace period before forced stop |
+
+Legacy environment variable names are not read.
+
+## Display backends
+
+| Backend | Mono1 | Gray8 and JPEG | Notes |
+| --- | --- | --- | --- |
+| X11 | Yes | No | Reference display path |
+| MXCFB | Yes | Yes | Experimental; uses X11 for input |
+
+MXCFB startup requires the tested framebuffer layout and HWTCON capabilities;
+it fails rather than silently falling back to X11. Both formats currently use
+the GC16 update path. Direct framebuffer output, X11 touch, local Exit, Gray8,
+JPEG, and Apple Music Now Playing have been observed on the documented
+Paperwhite 6. Update-completion timing, exact pixel fidelity, sleep/wake
+interaction, and every failure fallback have not all been physically verified.
+
+See [MXCFB device evidence](docs/archive/mxcfb-device-evidence.md) for recorded
+claims and [the manual validation sequence](docs/archive/mxcfb-manual-validation.md)
+for repeatable device checks.
+
+## PaperSpoon frame commands
+
+Commands are entered on PaperSpoon's stdin. Explicit diagnostic dimensions
+must match the active remote viewport.
+
+```text
+frame corners 1272x1624
+frame border 1272x1624
+frame checkerboard 1272x1624
+frame horizontal 1272x1624
+frame black 1272x1624
+frame white 1272x1624
+
+frame gray-gradient 1272x1624
+frame gray-bars 1272x1624
+frame gray 128 1272x1624
+
+frame jpeg /absolute/or/relative/path.jpg
+frame nowplaying
+ui 1272x1624
+```
+
+Gray8, JPEG, and Now Playing require a connected backend that advertises
+Gray8. JPEGs are decoded on the host, fitted without cropping, centered, and
+white-letterboxed. Relative paths use PaperSpoon's working directory; spaces
+are allowed because everything after `frame jpeg` is treated as the path.
+
+On macOS, `frame nowplaying` takes a one-shot system Now Playing snapshot using
+the exact crates.io `media-remote` 0.5.2 `NowPlayingPerl` backend. It works with
+SIP enabled and does not access `MediaRemote.framework` directly. Missing
+artwork uses a placeholder; absent optional metadata uses an `Unknown` label.
+A missing player, timeout, adapter failure, Mono1 connection, or viewport race
+leaves the previous frame unchanged. PaperSpoon terminates and reaps the helper
+and Perl adapter after each invocation.
+
+Successful JPEG and Now Playing results retain their rendered pixels for a
+matching reconnect instead of reopening the file or reacquiring system state.
+See [the Now Playing design and validation record](docs/frame-nowplaying-via-MediaRemote.md)
+for acquisition limits, lifecycle details, tests, and the exact host/device
+evidence.
+
+## Touch and Mac actions
+
+PaperPad forwards only primary core-X11 contacts (`detail=1`) inside the remote
+viewport. PaperSpoon activates a button only when a matching release remains
+inside the button that was pressed. Gaps, unmatched releases, viewport changes,
+and releases elsewhere cancel or do nothing. The local **Exit** control never
+sends an application action across the protocol.
+
+| Button | PaperSpoon action |
+| --- | --- |
+| 1 | `media.play_pause` |
+| 2 | `media.next` |
+| 3 | `media.previous` |
+| 4 | `terminal.new_window` |
+| 5 | `tmux.work` |
+| 6 | `zoom.toggle_mute` |
+| 7–9 | Reserved stub actions |
+
+By default, PaperSpoon dispatches resolved actions with:
+
+```text
+open -g hammerspoon://paperpad?action=<id>
+```
+
+Use `--no-forward-url` to disable forwarding. A sample Hammerspoon handler is
+available at `tools/hammerspoon/init.example.lua`. Dispatch success does not
+prove that the target Mac application accepted the action.
+
+## Logs and device evidence
+
+Retrieve the device log after PaperPad stops:
 
 ```sh
 mtp-rs get /extensions/rust_x11_hello/rust_x11_hello.log \
   rust_x11_hello.device.log --replace
 ```
 
-Expected input records have stable fields such as:
+The log grows across runs. Delete it before a clean evidence run if necessary;
+the launcher recreates it:
 
-```text
-input type=ButtonPress detail=1 event_x=412 event_y=183 root_x=492 root_y=303 time=123456 window=0x2600001 root=0x50d child=0x0 state=0x0000 same_screen=true
+```sh
+mtp-rs rm /extensions/rust_x11_hello/rust_x11_hello.log --yes
 ```
 
-No `ButtonPress`/`ButtonRelease` records after verifying the deployed checksum, event mask, mapped window, and test geometry means core-X11 touch remains unverified on that Kindle configuration; it is not evidence that the Rust build failed.
+Match the deployed binary's SHA-256 with the host artifact before trusting a
+run. A successful host build or accepted framebuffer ioctl is not evidence of
+visible panel output. Likewise, missing `ButtonPress`/`ButtonRelease` records
+after checksum, event-mask, window, and geometry checks means touch remains
+unverified on that configuration; it does not mean the Rust build failed.
+
+## Repository map
+
+| Path | Responsibility |
+| --- | --- |
+| `src/` | PaperPad lifecycle, X11 input, networking, and display backends |
+| `crates/paper-protocol/` | Transport-independent PPFB types and codecs |
+| `tools/paperspoon/` | Host rendering, input resolution, discovery, and actions |
+| `kindle-extension/` | KUAL package and launch scripts |
+| `scripts/deploy-kindle-mtp.sh` | Verified MTP install/update workflow |
+| `docs/` | Feature designs and physical-validation records |

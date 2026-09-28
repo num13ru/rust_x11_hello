@@ -6,3 +6,9 @@ edition = "2024"
 [dependencies]
 image = { version = "=0.25.8", default-features = false, features = ["jpeg"] }
 paper-protocol = { path = "../../crates/paper-protocol" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Exact crates.io v0.5.2: exports NowPlayingPerl, embeds mediaremote-adapter,
+# uses /usr/bin/perl, and keeps the default artwork feature enabled.
+libc = "0.2"
+media-remote = "=0.5.2"

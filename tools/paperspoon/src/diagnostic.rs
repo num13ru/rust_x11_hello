@@ -169,6 +169,7 @@ impl DiagnosticFrame {
 pub(crate) enum StdinCommand {
     Frame(DiagnosticFrame),
     Jpeg(PathBuf),
+    NowPlaying,
     ApplicationFrame { width: u16, height: u16 },
 }
 
@@ -196,6 +197,12 @@ pub(crate) fn parse_stdin_command(line: &str) -> Result<StdinCommand, String> {
     let pattern_name = parts
         .next()
         .ok_or_else(|| "usage: frame <pattern> <width>x<height>".to_string())?;
+    if pattern_name == "nowplaying" {
+        if parts.next().is_some() {
+            return Err("usage: frame nowplaying".to_string());
+        }
+        return Ok(StdinCommand::NowPlaying);
+    }
     let (pattern, dimensions, usage) = if pattern_name == "gray" {
         let usage = "usage: frame gray <0..255> <width>x<height>";
         let value = parts
@@ -338,6 +345,18 @@ mod tests {
         assert!(parse_stdin_command("frame white 8").is_err());
         assert!(parse_stdin_command("frame white 0x8").is_err());
         assert!(parse_stdin_command("frame white 8x8 extra").is_err());
+        assert_eq!(
+            parse_stdin_command("frame nowplaying"),
+            Ok(StdinCommand::NowPlaying)
+        );
+        assert_eq!(
+            parse_stdin_command(" frame   nowplaying  "),
+            Ok(StdinCommand::NowPlaying)
+        );
+        assert_eq!(
+            parse_stdin_command("frame nowplaying extra"),
+            Err("usage: frame nowplaying".to_string())
+        );
 
         assert_eq!(
             parse_stdin_command("frame jpeg ./assets/example-image.jpg"),

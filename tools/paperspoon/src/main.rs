@@ -34,7 +34,7 @@ use paper_protocol::{
 };
 use paperspoon::{
     application_input::ApplicationInput, application_renderer::render_application_bounded,
-    application_ui::ApplicationUi,
+    application_ui::ApplicationUi, now_playing::load_now_playing_frame,
 };
 
 mod diagnostic;
@@ -158,6 +158,7 @@ enum AuthoritativeFrame {
     Application { viewport: (u16, u16) },
     Diagnostic(DiagnosticFrame),
     Jpeg(Arc<Gray8Frame>),
+    NowPlaying(Arc<Gray8Frame>),
 }
 
 impl AuthoritativeFrame {
@@ -165,14 +166,14 @@ impl AuthoritativeFrame {
         match self {
             Self::Application { viewport } => *viewport,
             Self::Diagnostic(frame) => frame.dimensions(),
-            Self::Jpeg(frame) => (frame.width(), frame.height()),
+            Self::Jpeg(frame) | Self::NowPlaying(frame) => (frame.width(), frame.height()),
         }
     }
 
     fn application_viewport(&self) -> Option<(u16, u16)> {
         match self {
             Self::Application { viewport } => Some(*viewport),
-            Self::Diagnostic(_) | Self::Jpeg(_) => None,
+            Self::Diagnostic(_) | Self::Jpeg(_) | Self::NowPlaying(_) => None,
         }
     }
 
@@ -180,7 +181,7 @@ impl AuthoritativeFrame {
         match self {
             Self::Application { .. } => PixelFormat::Mono1,
             Self::Diagnostic(frame) => frame.pixel_format(),
-            Self::Jpeg(_) => PixelFormat::Gray8,
+            Self::Jpeg(_) | Self::NowPlaying(_) => PixelFormat::Gray8,
         }
     }
 }
@@ -196,6 +197,12 @@ struct SentFrame {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct SentJpeg {
+    sent: SentFrame,
+    viewport: (u16, u16),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SentNowPlaying {
     sent: SentFrame,
     viewport: (u16, u16),
 }
@@ -344,6 +351,50 @@ impl FrameSender {
         Ok(sent.map(|sent| SentJpeg { sent, viewport }))
     }
 
+    fn send_now_playing(&self) -> Result<Option<SentNowPlaying>, String> {
+        self.send_now_playing_with(load_now_playing_frame)
+    }
+
+    fn send_now_playing_with(
+        &self,
+        load: impl FnOnce(u16, u16) -> Result<Gray8Frame, String>,
+    ) -> Result<Option<SentNowPlaying>, String> {
+        let target = match self.current.frame_target(PixelFormat::Gray8) {
+            Ok(target) => target,
+            Err(FrameTargetError::NoConnection) => return Ok(None),
+            Err(FrameTargetError::UnsupportedPixelFormat) => {
+                return Err("connected PaperPad does not support Gray8 frames".to_string());
+            }
+            Err(FrameTargetError::ViewportUnavailable) => {
+                return Err("connected PaperPad has no active viewport".to_string());
+            }
+        };
+        let viewport = target.viewport();
+        let frame = Arc::new(load(viewport.0, viewport.1)?);
+        self.send_now_playing_frame(frame, target)
+    }
+
+    fn send_now_playing_frame(
+        &self,
+        frame: Arc<Gray8Frame>,
+        target: FrameTarget,
+    ) -> Result<Option<SentNowPlaying>, String> {
+        let viewport = target.viewport();
+        let encoded_frame = Arc::clone(&frame);
+        let mut state = self.state.lock().expect("frame sender lock");
+        let sent = self.send_locked(
+            &mut state,
+            PixelFormat::Gray8,
+            Some(&target),
+            move |frame_id| {
+                encode_v2_frame(frame_id, encoded_frame.as_ref())
+                    .map_err(|error| format!("failed to encode Now Playing frame: {error}"))
+            },
+            Some(AuthoritativeFrame::NowPlaying(frame)),
+        )?;
+        Ok(sent.map(|sent| SentNowPlaying { sent, viewport }))
+    }
+
     fn send_application(
         &self,
         ui: &ApplicationUi,
@@ -438,15 +489,16 @@ impl FrameSender {
                 |frame_id| diagnostic.encode(frame_id),
                 Some(frame.clone()),
             )?,
-            AuthoritativeFrame::Jpeg(jpeg) => {
-                let encoded_frame = Arc::clone(jpeg);
+            AuthoritativeFrame::Jpeg(gray8) | AuthoritativeFrame::NowPlaying(gray8) => {
+                let encoded_frame = Arc::clone(gray8);
                 self.send_locked(
                     &mut state,
                     PixelFormat::Gray8,
                     None,
                     move |frame_id| {
-                        encode_v2_frame(frame_id, encoded_frame.as_ref())
-                            .map_err(|error| format!("failed to encode JPEG frame: {error}"))
+                        encode_v2_frame(frame_id, encoded_frame.as_ref()).map_err(|error| {
+                            format!("failed to encode retained Gray8 frame: {error}")
+                        })
                     },
                     Some(frame.clone()),
                 )?
@@ -497,6 +549,29 @@ fn replace_hello_frame(
 
 fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().collect();
+    if args.get(1).map(String::as_str) == Some(paperspoon::now_playing::HELPER_ARGUMENT) {
+        if args.len() != 4 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "internal Now Playing helper requires width and height",
+            ));
+        }
+        let parse_dimension = |value: &str, name: &str| {
+            value
+                .parse::<u16>()
+                .ok()
+                .filter(|value| *value > 0)
+                .ok_or_else(|| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("invalid internal Now Playing helper {name}"),
+                    )
+                })
+        };
+        let width = parse_dimension(&args[2], "width")?;
+        let height = parse_dimension(&args[3], "height")?;
+        paperspoon::now_playing::run_helper(width, height);
+    }
     let opts = parse_options(&args);
 
     let listener = TcpListener::bind(("0.0.0.0", opts.port))?;
@@ -517,7 +592,7 @@ fn main() -> io::Result<()> {
     println!("discovery listening address=0.0.0.0:{DISCOVERY_PORT}");
 
     println!(
-        "type 'frame <white|black|horizontal|checkerboard|border|corners|gray-gradient|gray-bars> <width>x<height>', 'frame gray <0..255> <width>x<height>', or 'frame jpeg <path>' to send a diagnostic framebuffer"
+        "type 'frame <white|black|horizontal|checkerboard|border|corners|gray-gradient|gray-bars> <width>x<height>', 'frame gray <0..255> <width>x<height>', 'frame jpeg <path>', or 'frame nowplaying' to send a framebuffer"
     );
     println!("type 'ui <width>x<height>' to send the host-rendered application UI");
     if opts.forward_url {
@@ -600,6 +675,32 @@ fn main() -> io::Result<()> {
                         Ok(None) => eprintln!("JPEG frame not sent: no PaperPad connected"),
                         Err(error) => eprintln!("JPEG frame command error: {error}"),
                     },
+                    Ok(StdinCommand::NowPlaying) => {
+                        match frame_sender.send_now_playing() {
+                            Ok(Some(now_playing)) => {
+                                if application_viewport_tx.send(None).is_err() {
+                                    eprintln!("application viewport tracker stopped");
+                                }
+                                let sent = now_playing.sent;
+                                let record = format!(
+                                    "sent Now Playing frame id={} width={} height={} bytes={} encode_us={} socket_write_us={} source=stdin",
+                                    sent.frame_id,
+                                    now_playing.viewport.0,
+                                    now_playing.viewport.1,
+                                    sent.encoded_len,
+                                    sent.encode_elapsed.as_micros(),
+                                    sent.socket_write_elapsed.as_micros()
+                                );
+                                println!("{record}");
+                                flush_stdout("after Now Playing frame");
+                                append_host_log_record(&log_path, &record);
+                            }
+                            Ok(None) => {
+                                eprintln!("Now Playing frame not sent: no PaperPad connected");
+                            }
+                            Err(error) => eprintln!("Now Playing frame error: {error}"),
+                        }
+                    }
                     Ok(StdinCommand::ApplicationFrame { width, height }) => {
                         match frame_sender.send_application(&application_ui, (width, height)) {
                             Ok(ApplicationSend::Sent(sent)) => {
@@ -718,6 +819,7 @@ fn main() -> io::Result<()> {
                         ("diagnostic", format!(" pattern={}", frame.pattern_name()))
                     }
                     AuthoritativeFrame::Jpeg(_) => ("jpeg", String::new()),
+                    AuthoritativeFrame::NowPlaying(_) => ("nowplaying", String::new()),
                 };
                 let record = format!(
                     "sent {kind} frame id={}{pattern} width={} height={} bytes={} encode_us={} socket_write_us={} source=hello retained={}",
@@ -1080,6 +1182,84 @@ mod tests {
         assert_eq!(state.next_frame_id, baseline.0);
         assert_eq!(state.authoritative, baseline.1);
         assert_eq!(state.last_application_frame, baseline.2);
+    }
+
+    #[test]
+    fn now_playing_requires_gray8_before_acquisition_and_preserves_on_failure() {
+        let disconnected = FrameSender::new(CurrentConnection::default());
+        assert_eq!(
+            disconnected.send_now_playing_with(|_, _| panic!("must not acquire")),
+            Ok(None)
+        );
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind listener");
+        let current = CurrentConnection::default();
+        let frame_sender = FrameSender::new(current.clone());
+        let (_token, _peer) =
+            install_hello_connection(&listener, &current, V2PixelFormats::MONO1, (12, 16));
+        let error = frame_sender
+            .send_now_playing_with(|_, _| panic!("must not acquire"))
+            .expect_err("Mono1-only peer rejects Now Playing");
+        assert!(error.contains("does not support Gray8"));
+
+        let formats = V2PixelFormats::MONO1.with(PixelFormat::Gray8);
+        let (_token, mut peer) = install_hello_connection(&listener, &current, formats, (12, 16));
+        let baseline = frame_sender
+            .send_diagnostic(diagnostic("frame gray 96 12x16"))
+            .expect("send baseline")
+            .expect("active connection");
+        read_sent_frame(&mut peer, baseline);
+        let baseline_state = {
+            let state = frame_sender.state.lock().expect("frame sender lock");
+            (state.next_frame_id, state.authoritative.clone())
+        };
+
+        let error = frame_sender
+            .send_now_playing_with(|_, _| Err("no usable Now Playing state".to_string()))
+            .expect_err("acquisition failure");
+        assert!(error.contains("no usable"));
+        let state = frame_sender.state.lock().expect("frame sender lock");
+        assert_eq!(state.next_frame_id, baseline_state.0);
+        assert_eq!(state.authoritative, baseline_state.1);
+    }
+
+    #[test]
+    fn now_playing_uses_viewport_and_resends_rendered_pixels() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind listener");
+        let current = CurrentConnection::default();
+        let frame_sender = FrameSender::new(current.clone());
+        let formats = V2PixelFormats::MONO1.with(PixelFormat::Gray8);
+        let (first_token, mut first_peer) =
+            install_hello_connection(&listener, &current, formats, (12, 16));
+
+        let first = frame_sender
+            .send_now_playing_with(|width, height| {
+                assert_eq!((width, height), (12, 16));
+                Gray8Frame::new(
+                    width,
+                    height,
+                    vec![77; usize::from(width) * usize::from(height)],
+                )
+                .map_err(|error| error.to_string())
+            })
+            .expect("send Now Playing")
+            .expect("active connection");
+        let (first_id, first_frame) = read_sent_owned_frame(&mut first_peer, first.sent);
+        assert_eq!(first_id, 1);
+        assert_eq!(first_frame.pixels(), &[77; 12 * 16]);
+
+        assert!(current.clear_if_current(&first_token));
+        let (_second_token, mut second_peer) =
+            install_hello_connection(&listener, &current, formats, (12, 16));
+        let resent = frame_sender
+            .send_for_hello(&ApplicationUi::default(), (12, 16), formats)
+            .expect("resend retained Now Playing")
+            .expect("active connection");
+        let (resent_id, resent_frame) = read_sent_owned_frame(&mut second_peer, resent.sent);
+        assert_eq!(resent_id, 2);
+        assert_eq!(resent_frame.pixels(), first_frame.pixels());
+        assert!(resent.retained);
+        assert!(matches!(resent.frame, AuthoritativeFrame::NowPlaying(_)));
     }
 
     #[test]
