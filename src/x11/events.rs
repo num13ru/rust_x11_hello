@@ -39,6 +39,7 @@ pub(crate) fn event_loop(
                 frame.frame_id(),
                 frame.width(),
                 frame.height(),
+                frame.pixel_format(),
                 frame.stride(),
                 frame.pixels(),
                 frame.receive_decode_us(),
@@ -83,10 +84,12 @@ pub(crate) fn event_loop(
                         }
                         if let Some(frame) = display.set_dimensions((width, height))? {
                             eprintln!(
-                                "frame cache invalidated id={} width={} height={} viewport_width={} viewport_height={}",
+                                "frame cache invalidated id={} width={} height={} format={:?} stride={} viewport_width={} viewport_height={}",
                                 frame.frame_id(),
                                 frame.dimensions().0,
                                 frame.dimensions().1,
+                                frame.pixel_format(),
+                                frame.stride(),
                                 viewport.0,
                                 viewport.1
                             );

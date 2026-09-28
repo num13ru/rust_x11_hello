@@ -185,7 +185,16 @@ mod tests {
         let mut opened = fake_framebuffer(9, 12);
         let mut markers = UpdateMarkerSequence::for_process();
         let called = Cell::new(false);
-        let frame = RemoteFrame::new(7, 9, 1, 2, &[0x80, 0x80], 0).unwrap();
+        let frame = RemoteFrame::new(
+            7,
+            9,
+            1,
+            paper_protocol::PixelFormat::Mono1,
+            2,
+            &[0x80, 0x80],
+            0,
+        )
+        .unwrap();
         let submitted =
             present_remote_with(&mut opened, &mut markers, frame, |_, request, w, h| {
                 called.set(true);
@@ -199,7 +208,8 @@ mod tests {
         assert_eq!(submitted.marker, std::process::id().max(1));
         assert_eq!(submitted.region, opened.info.screen.remote_viewport);
 
-        let bad = RemoteFrame::new(8, 8, 1, 1, &[0x80], 0).unwrap();
+        let bad =
+            RemoteFrame::new(8, 8, 1, paper_protocol::PixelFormat::Mono1, 1, &[0x80], 0).unwrap();
         called.set(false);
         assert!(
             present_remote_with(&mut opened, &mut markers, bad, |_, _, _, _| {
@@ -215,7 +225,16 @@ mod tests {
     fn kernel_rejection_is_not_reported_as_success() {
         let mut opened = fake_framebuffer(9, 12);
         let mut markers = UpdateMarkerSequence::for_process();
-        let frame = RemoteFrame::new(7, 9, 1, 2, &[0x80, 0x80], 0).unwrap();
+        let frame = RemoteFrame::new(
+            7,
+            9,
+            1,
+            paper_protocol::PixelFormat::Mono1,
+            2,
+            &[0x80, 0x80],
+            0,
+        )
+        .unwrap();
         let error = present_remote(&mut opened, &mut markers, frame)
             .err()
             .unwrap();

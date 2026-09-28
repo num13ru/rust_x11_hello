@@ -94,11 +94,17 @@ Presses in gaps cannot arm an application button. PaperSpoon cancels an armed co
 
 ## Framebuffer protocol primitives
 
-The shared protocol crate defines a transport-independent `Mono1Frame` for the remote content viewport. It is row-major and MSB-first within each byte: `0` is white and `1` is black. Each row occupies `ceil(width / 8)` bytes with no extra bytes between rows. For widths not divisible by eight, unused low bits in the final byte are required to be white. Frames require nonzero dimensions and an exact `stride * height` payload.
+The shared protocol crate defines transport-independent `Mono1Frame` and
+`Gray8Frame` types for the remote content viewport. Mono1 is row-major and
+MSB-first within each byte: `0` is white and `1` is black. Each row occupies
+`ceil(width / 8)` bytes, and unused low bits in a partial final byte must be
+white. Gray8 is row-major with one byte per pixel: `0` is black and `255` is
+white. Both formats require nonzero dimensions and an exact `stride * height`
+payload.
 
 Protocol v2 also defines a 12-byte, big-endian binary header containing `PPFB` magic, version, message type, zero-reserved flags, and a `u32` payload length. Payloads are capped at 16 MiB and rejected from the header before allocation. The borrowing decoder supports partial and consecutive messages without performing I/O.
 
-Typed, big-endian payloads cover `Hello` (version, Mono1 support, remote viewport), `PointerDown`/`PointerUp` (viewport-relative `x/y`), `ViewportChanged` (new remote extent), and `Frame` (`u64` frame ID, extent, Mono1 format, pixels). Reserved payload bytes must be zero. Frame payloads are validated as borrowed bytes without copying; pointer bounds and frame dimensions remain the receiving endpoint's responsibility against its current negotiated viewport.
+Typed, big-endian payloads cover `Hello` (version, supported pixel formats, remote viewport), `PointerDown`/`PointerUp` (viewport-relative `x/y`), `ViewportChanged` (new remote extent), and `Frame` (`u64` frame ID, extent, pixel format, pixels). Reserved payload bytes must be zero. Frame payloads are validated as borrowed bytes without copying; pointer bounds and frame dimensions remain the receiving endpoint's responsibility against its current negotiated viewport.
 
 PaperPad's inbound TCP reader accepts complete `PPFB` v2 `Frame` messages only. Frames are validated against the current remote viewport and coalesced into a latest-frame mailbox. Legacy text, corrupt messages, and unexpected v2 message types end the connection and use the existing reconnect path; dimension mismatches are logged and skipped without replacing a valid pending frame.
 
@@ -114,7 +120,7 @@ successfully sent authoritative frame when its dimensions match; otherwise it
 sends the application UI. A viewport change sends a replacement application
 frame. A matching diagnostic pattern may therefore reappear after reconnect.
 
-PaperSpoon (a std-only Rust listener, `tools/paperspoon`) logs received
+PaperSpoon (the Rust listener in `tools/paperspoon`) logs received
 pointer phases and any host-resolved application actions. A dropped connection
 starts PaperPad's reconnect path. Pointer events attempted while disconnected
 or when its bounded outbound queue is full are not replayed; the next
@@ -205,7 +211,7 @@ It still requires the X11 window for touch input and lifecycle events. Startup
 fails if `/dev/fb0`, the required HWTCON capabilities, or matching X11/window
 geometry are unavailable; it never silently falls back to X11. A first
 Paperwhite 6 trial exercised direct display alongside X11 touch and local Exit;
-see [device evidence](docs/mxcfb-device-evidence.md) for the exact observations
+see [device evidence](docs/archive/mxcfb-device-evidence.md) for the exact observations
 and still-unverified cases.
 KUAL's **Run Paperpad MXCFB (90s, experimental)** action sets this variable
 for one run; **Run Paperpad (90s)** remains the X11 reference action. The
@@ -230,14 +236,22 @@ specific failure. An accepted writable mapping or panel-info query does not
 prove pixel writes, color polarity, e-ink update submission, or panel output.
 The MXCFB backend validates the observed `hwtcon_v2`, unrotated 8-bit
 framebuffer format and visible bounds, opens `/dev/fb0` read-write, queries
-panel info, and maps only the visible span. It prepares Mono1 remote rows before
-bounded framebuffer writes, then submits a remote-only GC16 update. PaperPad
-renders its own Exit strip using the same bounds as touch hit-testing, writes
-only that strip, and submits a separate strip-only update. A single marker
-sequence serves both paths. The last remote Mono1 frame is cached only after
-the kernel accepts its update; redraws submit that cached frame again. A failed
-submission can leave changed framebuffer bytes, but does not replace the cache
-or establish a physical panel refresh.
+panel info, and maps only the visible span. It expands Mono1 pixels or copies
+Gray8 values into bounded remote rows, then submits a remote-only GC16 update.
+PaperPad renders its own Exit strip using the same bounds as touch hit-testing,
+writes only that strip, and submits a separate strip-only update. A single
+marker sequence serves both paths. The last remote frame retains its pixel
+format and is cached only after the kernel accepts its update; redraws submit
+that cached frame again. A failed submission can leave changed framebuffer
+bytes, but does not replace the cache or establish a physical panel refresh.
+
+| Backend | Mono1 | Gray8 / host-decoded JPEG |
+| --- | --- | --- |
+| X11 | Supported | Rejected; not advertised in `Hello` |
+| MXCFB (experimental) | Supported | Supported and advertised |
+
+Both MXCFB formats currently use the existing GC16 update path. There is no
+content-adaptive waveform selection, animation policy, or ghosting management.
 
 Host Linux tests use `/dev/zero`, not the Kindle framebuffer. The HWTCON
 send-update and wait-complete C layouts come from the pinned PW6 firmware
@@ -263,7 +277,7 @@ cargo build --release --package paperspoon
 ```
 
 The application UI is sent after PaperPad's `Hello`. To exercise framebuffer
-transport and the X11 blitter, type a diagnostic frame command at PaperSpoon's
+transport and the active display backend, type a diagnostic frame command at PaperSpoon's
 stdin whose dimensions exactly match PaperPad's current remote viewport. The standard
 Paperwhite portrait viewport is `1272x1624`:
 
@@ -275,6 +289,31 @@ frame horizontal 1272x1624
 frame black 1272x1624
 frame white 1272x1624
 ```
+
+With a connected backend that advertises Gray8 (currently the experimental
+MXCFB backend), these generated grayscale diagnostics are also available:
+
+```text
+frame gray-gradient 1272x1624
+frame gray-bars 1272x1624
+frame gray 128 1272x1624
+```
+
+PaperSpoon can also decode any JPEG available to the host and fit it to
+PaperPad's active remote viewport:
+
+```text
+frame jpeg ./assets/example-image.jpg
+frame jpeg /Users/user/Downloads/1.jpeg
+```
+
+Relative paths are resolved from PaperSpoon's working directory. Everything
+after `frame jpeg` is treated as the path, including spaces. The image keeps
+its aspect ratio, is centered without cropping, and uses white letterboxing.
+PaperSpoon retains the rendered Gray8 pixels for a matching reconnect rather
+than reopening the path. No connection, a Mono1-only backend, a missing or
+malformed file, an oversized decode, or a connection/viewport change during
+decoding leaves the previous authoritative frame and frame ID unchanged.
 
 To render and send PaperSpoon's host-owned application UI instead of a
 diagnostic pattern, use the same explicit remote viewport dimensions:
@@ -293,13 +332,14 @@ and semantic action dispatch for taps on that frame. While a diagnostic pattern
 is authoritative, host application hit testing is inactive. The 72-pixel
 local Exit strip remains PaperPad-rendered in either case.
 
-Patterns are generated as validated Mono1 frames and assigned increasing frame
-IDs. PaperSpoon prints `sent frame ...`; PaperPad logs `frame uploaded ...
-cache=updated`. A mismatched extent or failed upload does not replace the last
-successfully displayed frame. PaperPad redraws that cached frame after X11
-Expose and same-viewport geometry redraws; successful cache
-redraws log `frame redrawn ... cache=hit`. A viewport-size change invalidates
-the old cache rather than stretching or clipping it.
+Patterns are generated as validated Mono1 or Gray8 frames and assigned
+increasing frame IDs. PaperSpoon prints `sent frame ...` (or `sent JPEG frame
+...`); PaperPad logs `frame uploaded ... cache=updated`. A mismatched extent or
+failed upload does not replace the last successfully displayed frame. PaperPad
+redraws that cached frame after X11 Expose or an MXCFB refresh path that supports
+its format; successful cache redraws log `frame redrawn ... cache=hit`. A
+viewport-size change invalidates the old cache rather than stretching or
+clipping it.
 
 For the manual device check, verify the four differently sized blocks in
 `corners` occupy the expected corners, the `border` reaches the remote
@@ -405,7 +445,7 @@ run. There is no separate stop menu item because Paperpad covers KUAL while its
 full-screen window is open.
 
 For further MXCFB trials, follow the
-[physical-validation sequence](docs/mxcfb-manual-validation.md). Verify the
+[physical-validation sequence](docs/archive/mxcfb-manual-validation.md). Verify the
 deployed binary checksum. With an operator-controlled PaperSpoon session
 already available, choose **Run Paperpad MXCFB (90s, experimental)**. Confirm the
 local Exit strip is visible and usable even if PaperSpoon disconnects. Compare

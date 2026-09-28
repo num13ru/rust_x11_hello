@@ -4,6 +4,8 @@ use std::io::{self, Write};
 use std::net::{Shutdown, TcpStream};
 use std::sync::{Arc, Mutex};
 
+use paper_protocol::{V2PixelFormat, V2PixelFormats};
+
 #[derive(Clone, Default)]
 pub(crate) struct CurrentConnection {
     inner: Arc<Mutex<Option<ActiveConnection>>>,
@@ -12,9 +14,40 @@ pub(crate) struct CurrentConnection {
 struct ActiveConnection {
     token: Arc<()>,
     stream: TcpStream,
+    pixel_formats: V2PixelFormats,
+    viewport: Option<(u16, u16)>,
 }
 
+#[derive(Clone)]
 pub(crate) struct ConnectionToken(Arc<()>);
+
+#[derive(Clone)]
+pub(crate) struct FrameTarget {
+    token: ConnectionToken,
+    viewport: (u16, u16),
+}
+
+impl FrameTarget {
+    pub(crate) fn viewport(&self) -> (u16, u16) {
+        self.viewport
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum FrameTargetError {
+    NoConnection,
+    UnsupportedPixelFormat,
+    ViewportUnavailable,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum FrameForward {
+    Sent,
+    NoConnection,
+    UnsupportedPixelFormat,
+    ConnectionChanged,
+    ViewportChanged,
+}
 
 impl CurrentConnection {
     pub(crate) fn is_active(&self) -> bool {
@@ -24,14 +57,127 @@ impl CurrentConnection {
             .is_some()
     }
 
+    #[cfg(test)]
     pub(crate) fn install(&self, stream: &TcpStream) -> io::Result<ConnectionToken> {
+        self.install_inner(stream, V2PixelFormats::MONO1, None)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn install_with_pixel_formats(
+        &self,
+        stream: &TcpStream,
+        pixel_formats: V2PixelFormats,
+    ) -> io::Result<ConnectionToken> {
+        self.install_inner(stream, pixel_formats, None)
+    }
+
+    pub(crate) fn install_for_hello(
+        &self,
+        stream: &TcpStream,
+        pixel_formats: V2PixelFormats,
+        viewport: (u16, u16),
+    ) -> io::Result<ConnectionToken> {
+        self.install_inner(stream, pixel_formats, Some(viewport))
+    }
+
+    fn install_inner(
+        &self,
+        stream: &TcpStream,
+        pixel_formats: V2PixelFormats,
+        viewport: Option<(u16, u16)>,
+    ) -> io::Result<ConnectionToken> {
         let token = Arc::new(());
         let active = ActiveConnection {
             token: Arc::clone(&token),
             stream: stream.try_clone()?,
+            pixel_formats,
+            viewport,
         };
         *self.inner.lock().expect("current connection lock") = Some(active);
         Ok(ConnectionToken(token))
+    }
+
+    pub(crate) fn frame_target(
+        &self,
+        pixel_format: V2PixelFormat,
+    ) -> Result<FrameTarget, FrameTargetError> {
+        let guard = self.inner.lock().expect("current connection lock");
+        let Some(active) = guard.as_ref() else {
+            return Err(FrameTargetError::NoConnection);
+        };
+        if !active.pixel_formats.supports(pixel_format) {
+            return Err(FrameTargetError::UnsupportedPixelFormat);
+        }
+        let viewport = active
+            .viewport
+            .ok_or(FrameTargetError::ViewportUnavailable)?;
+        Ok(FrameTarget {
+            token: ConnectionToken(Arc::clone(&active.token)),
+            viewport,
+        })
+    }
+
+    /// Write a framebuffer only when the active peer advertised its format.
+    pub(crate) fn forward_frame(
+        &self,
+        bytes: &[u8],
+        pixel_format: V2PixelFormat,
+    ) -> io::Result<FrameForward> {
+        self.forward_frame_inner(bytes, pixel_format, None)
+    }
+
+    pub(crate) fn forward_frame_to(
+        &self,
+        bytes: &[u8],
+        pixel_format: V2PixelFormat,
+        target: &FrameTarget,
+    ) -> io::Result<FrameForward> {
+        self.forward_frame_inner(bytes, pixel_format, Some(target))
+    }
+
+    fn forward_frame_inner(
+        &self,
+        bytes: &[u8],
+        pixel_format: V2PixelFormat,
+        target: Option<&FrameTarget>,
+    ) -> io::Result<FrameForward> {
+        let mut guard = self.inner.lock().expect("current connection lock");
+        let Some(active) = guard.as_mut() else {
+            return Ok(FrameForward::NoConnection);
+        };
+        if let Some(target) = target {
+            if !Arc::ptr_eq(&active.token, &target.token.0) {
+                return Ok(FrameForward::ConnectionChanged);
+            }
+            if active.viewport != Some(target.viewport) {
+                return Ok(FrameForward::ViewportChanged);
+            }
+        }
+        if !active.pixel_formats.supports(pixel_format) {
+            return Ok(FrameForward::UnsupportedPixelFormat);
+        }
+        if let Err(error) = active.stream.write_all(bytes) {
+            let _ = active.stream.shutdown(Shutdown::Both);
+            guard.take();
+            return Err(error);
+        }
+        Ok(FrameForward::Sent)
+    }
+
+    pub(crate) fn update_viewport_if_current(
+        &self,
+        candidate: &ConnectionToken,
+        viewport: (u16, u16),
+    ) -> bool {
+        let mut guard = self.inner.lock().expect("current connection lock");
+        let Some(active) = guard.as_mut() else {
+            return false;
+        };
+        if !Arc::ptr_eq(&active.token, &candidate.0) {
+            return false;
+        }
+        active.viewport = Some(viewport);
+        true
     }
 
     pub(crate) fn clear_if_current(&self, candidate: &ConnectionToken) -> bool {
@@ -52,6 +198,7 @@ impl CurrentConnection {
     /// closes and clears the connection generation used for the write.
     /// Holding the connection lock across `write_all` prevents concurrent
     /// frame producers from interleaving protocol bytes on cloned sockets.
+    #[cfg(test)]
     pub(crate) fn forward_bytes(&self, bytes: &[u8]) -> io::Result<bool> {
         let mut guard = self.inner.lock().expect("current connection lock");
         let Some(active) = guard.as_mut() else {
@@ -114,6 +261,81 @@ mod tests {
 
         assert!(current.clear_if_current(&second_token));
         assert!(!current.forward_bytes(b"nobody").expect("cleared target"));
+    }
+
+    #[test]
+    fn frame_forwarding_enforces_active_hello_capabilities() {
+        let current = CurrentConnection::default();
+        let (stream, mut peer) = tcp_pair();
+        current
+            .install_with_pixel_formats(&stream, V2PixelFormats::GRAY8)
+            .expect("install Gray8 connection");
+
+        assert_eq!(
+            current
+                .forward_frame(b"mono", V2PixelFormat::Mono1)
+                .expect("reject unsupported format"),
+            FrameForward::UnsupportedPixelFormat
+        );
+        assert_eq!(
+            current
+                .forward_frame(b"gray", V2PixelFormat::Gray8)
+                .expect("forward Gray8"),
+            FrameForward::Sent
+        );
+        let mut received = [0; 4];
+        peer.read_exact(&mut received).expect("read Gray8 bytes");
+        assert_eq!(&received, b"gray");
+    }
+
+    #[test]
+    fn frame_target_rejects_viewport_and_connection_races() {
+        let current = CurrentConnection::default();
+        let (stream, mut peer) = tcp_pair();
+        let token = current
+            .install_for_hello(&stream, V2PixelFormats::GRAY8, (5, 7))
+            .expect("install Gray8 connection");
+        assert_eq!(
+            current.frame_target(V2PixelFormat::Mono1).err(),
+            Some(FrameTargetError::UnsupportedPixelFormat)
+        );
+
+        let target = current
+            .frame_target(V2PixelFormat::Gray8)
+            .expect("Gray8 frame target");
+        assert_eq!(target.viewport(), (5, 7));
+        assert_eq!(
+            current
+                .forward_frame_to(b"first", V2PixelFormat::Gray8, &target)
+                .expect("forward matching target"),
+            FrameForward::Sent
+        );
+        let mut received = [0; 5];
+        peer.read_exact(&mut received).expect("read targeted bytes");
+        assert_eq!(&received, b"first");
+
+        assert!(current.update_viewport_if_current(&token, (6, 8)));
+        assert_eq!(
+            current
+                .forward_frame_to(b"stale", V2PixelFormat::Gray8, &target)
+                .expect("reject stale viewport"),
+            FrameForward::ViewportChanged
+        );
+        let updated = current
+            .frame_target(V2PixelFormat::Gray8)
+            .expect("updated frame target");
+        assert_eq!(updated.viewport(), (6, 8));
+
+        let (replacement, _replacement_peer) = tcp_pair();
+        current
+            .install_for_hello(&replacement, V2PixelFormats::GRAY8, (6, 8))
+            .expect("install replacement");
+        assert_eq!(
+            current
+                .forward_frame_to(b"stale", V2PixelFormat::Gray8, &updated)
+                .expect("reject replaced connection"),
+            FrameForward::ConnectionChanged
+        );
     }
 
     #[test]

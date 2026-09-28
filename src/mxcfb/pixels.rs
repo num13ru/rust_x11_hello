@@ -1,12 +1,13 @@
-//! Mono1 to the probed 8-bit grayscale framebuffer layout.
+//! Protocol framebuffer pixels to the probed 8-bit grayscale layout.
 //!
 //! This module has no device access. It assumes the standard Linux
-//! `FB_VISUAL_MONO10` polarity (`0x00` black, `0xff` white), which still needs
-//! a physical display test on this Kindle.
+//! `FB_VISUAL_MONO10` polarity (`0x00` black, `0xff` white). Mono1 is expanded
+//! to those endpoints; Gray8 luminance bytes are copied without inversion.
 
 use crate::display::RemoteFrame;
 use crate::ui::screen::{ScreenLayout, ScreenRect};
 use anyhow::{Context, Result, ensure};
+use paper_protocol::PixelFormat;
 
 const FB_TYPE_PACKED_PIXELS: u32 = 0;
 const FB_VISUAL_MONO10: u32 = 1;
@@ -139,9 +140,14 @@ pub(super) fn blit_remote(
         let source = &pixels[row * frame.stride()..][..frame.stride()];
         let destination_start = (first_y + row) * spec.line_length + first_x;
         let destination = &mut memory[destination_start..destination_start + width];
-        for (column, byte) in destination.iter_mut().enumerate() {
-            let black = source[column / 8] & (0x80 >> (column % 8)) != 0;
-            *byte = if black { 0x00 } else { 0xff };
+        match frame.pixel_format() {
+            PixelFormat::Mono1 => {
+                for (column, byte) in destination.iter_mut().enumerate() {
+                    let black = source[column / 8] & (0x80 >> (column % 8)) != 0;
+                    *byte = if black { 0x00 } else { 0xff };
+                }
+            }
+            PixelFormat::Gray8 => destination.copy_from_slice(source),
         }
     }
     Ok(region)
@@ -289,7 +295,15 @@ mod tests {
             let screen = screen(width, 1);
             let spec = spec(screen, 3);
             let pixels = mono(width, 1, &[(0, 0), (usize::from(width) - 1, 0)]);
-            let frame = RemoteFrame::new(1, width, 1, pixels.len(), &pixels, 0);
+            let frame = RemoteFrame::new(
+                1,
+                width,
+                1,
+                paper_protocol::PixelFormat::Mono1,
+                pixels.len(),
+                &pixels,
+                0,
+            );
             // The test uses a single Mono1 row, so its payload length is its stride.
             let frame = frame.unwrap();
             let mut memory = vec![0x5a; spec.memory_len];
@@ -317,7 +331,8 @@ mod tests {
         let screen = screen(9, 2);
         let spec = spec(screen, 3);
         let pixels = mono(9, 2, &[(0, 0), (8, 1)]);
-        let frame = RemoteFrame::new(2, 9, 2, 2, &pixels, 0).unwrap();
+        let frame =
+            RemoteFrame::new(2, 9, 2, paper_protocol::PixelFormat::Mono1, 2, &pixels, 0).unwrap();
         let mut memory = vec![0x5a; spec.memory_len];
 
         blit_remote(frame, screen, spec, &mut memory).unwrap();
@@ -332,6 +347,32 @@ mod tests {
     }
 
     #[test]
+    fn gray8_copies_luminance_with_offsets_padding_and_exit_untouched() {
+        let screen = screen(5, 2);
+        let mut spec = spec(screen, 0);
+        spec.xoffset = 2;
+        spec.yoffset = 1;
+        spec.virtual_width = 7;
+        spec.virtual_height += 1;
+        spec.line_length = 10;
+        spec.memory_len = spec.line_length * usize::try_from(spec.virtual_height).unwrap();
+
+        let pixels = [0, 64, 128, 192, 255, 255, 192, 128, 64, 0];
+        let frame =
+            RemoteFrame::new(2, 5, 2, paper_protocol::PixelFormat::Gray8, 5, &pixels, 0).unwrap();
+        let mut memory = vec![0x5a; spec.memory_len];
+        let mut expected = memory.clone();
+        expected[spec.line_length + 2..spec.line_length + 7].copy_from_slice(&pixels[..5]);
+        expected[spec.line_length * 2 + 2..spec.line_length * 2 + 7].copy_from_slice(&pixels[5..]);
+
+        assert_eq!(
+            blit_remote(frame, screen, spec, &mut memory).unwrap(),
+            screen.remote_viewport
+        );
+        assert_eq!(memory, expected);
+    }
+
+    #[test]
     fn virtual_offsets_and_stride_are_honored() {
         let screen = screen(9, 1);
         let mut spec = spec(screen, 0);
@@ -342,7 +383,8 @@ mod tests {
         spec.line_length = 16;
         spec.memory_len = spec.line_length * usize::try_from(spec.virtual_height).unwrap();
         let pixels = mono(9, 1, &[(0, 0), (8, 0)]);
-        let frame = RemoteFrame::new(3, 9, 1, 2, &pixels, 0).unwrap();
+        let frame =
+            RemoteFrame::new(3, 9, 1, paper_protocol::PixelFormat::Mono1, 2, &pixels, 0).unwrap();
         let mut memory = vec![0x5a; spec.memory_len];
 
         blit_remote(frame, screen, spec, &mut memory).unwrap();
@@ -369,7 +411,16 @@ mod tests {
         spec.virtual_height = 3392;
         spec.memory_len = 4_314_624;
         let pixels = mono(1272, 1624, &[(0, 0), (1271, 1623)]);
-        let frame = RemoteFrame::new(6, 1272, 1624, 159, &pixels, 0).unwrap();
+        let frame = RemoteFrame::new(
+            6,
+            1272,
+            1624,
+            paper_protocol::PixelFormat::Mono1,
+            159,
+            &pixels,
+            0,
+        )
+        .unwrap();
         let mut memory = vec![0x5a; spec.memory_len];
 
         blit_remote(frame, screen, spec, &mut memory).unwrap();
@@ -394,7 +445,8 @@ mod tests {
         spec.line_length = 16;
         spec.memory_len = spec.line_length * usize::try_from(spec.virtual_height).unwrap();
         let pixels = mono(9, 2, &[(0, 0), (8, 1)]);
-        let frame = RemoteFrame::new(7, 9, 2, 2, &pixels, 0).unwrap();
+        let frame =
+            RemoteFrame::new(7, 9, 2, paper_protocol::PixelFormat::Mono1, 2, &pixels, 0).unwrap();
 
         let prepared = prepare_remote(frame, screen, spec, spec.memory_len).unwrap();
         let mut actual = vec![0x5a; spec.memory_len];
@@ -419,7 +471,8 @@ mod tests {
         let screen = screen(9, 1);
         let spec = spec(screen, 3);
         let pixels = mono(9, 1, &[]);
-        let frame = RemoteFrame::new(8, 9, 1, 2, &pixels, 0).unwrap();
+        let frame =
+            RemoteFrame::new(8, 9, 1, paper_protocol::PixelFormat::Mono1, 2, &pixels, 0).unwrap();
         assert!(prepare_remote(frame, screen, spec, 8).is_err());
         assert!(prepare_remote(frame, screen, spec, spec.memory_len + 1).is_err());
         assert!(
@@ -441,7 +494,16 @@ mod tests {
         spec.memory_len = 4_314_624;
         let mapped_len = 1272 * 1696;
         let pixels = mono(1272, 1624, &[(1271, 1623)]);
-        let frame = RemoteFrame::new(9, 1272, 1624, 159, &pixels, 0).unwrap();
+        let frame = RemoteFrame::new(
+            9,
+            1272,
+            1624,
+            paper_protocol::PixelFormat::Mono1,
+            159,
+            &pixels,
+            0,
+        )
+        .unwrap();
         let prepared = prepare_remote(frame, screen, spec, mapped_len).unwrap();
 
         assert_eq!(prepared.region(), screen.remote_viewport);
@@ -456,7 +518,8 @@ mod tests {
         let screen = screen(9, 1);
         let base = spec(screen, 3);
         let pixels = mono(9, 1, &[]);
-        let frame = RemoteFrame::new(4, 9, 1, 2, &pixels, 0).unwrap();
+        let frame =
+            RemoteFrame::new(4, 9, 1, paper_protocol::PixelFormat::Mono1, 2, &pixels, 0).unwrap();
         let cases = vec![
             FramebufferSpec {
                 bits_per_pixel: 4,
@@ -483,7 +546,16 @@ mod tests {
         }
 
         let wrong_pixels = mono(8, 1, &[]);
-        let wrong_frame = RemoteFrame::new(5, 8, 1, 1, &wrong_pixels, 0).unwrap();
+        let wrong_frame = RemoteFrame::new(
+            5,
+            8,
+            1,
+            paper_protocol::PixelFormat::Mono1,
+            1,
+            &wrong_pixels,
+            0,
+        )
+        .unwrap();
         let mut memory = vec![0x5a; base.memory_len];
         assert!(blit_remote(wrong_frame, screen, base, &mut memory).is_err());
         assert!(memory.iter().all(|&byte| byte == 0x5a));

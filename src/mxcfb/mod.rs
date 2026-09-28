@@ -43,7 +43,7 @@ mod update_marker;
 // Firmware-attributed layouts compile and update submission was accepted on a
 // PW6; complete field semantics remain unverified.
 mod update_abi;
-// Pure Mono1 conversion remains independent of framebuffer writes.
+// Pure Mono1/Gray8 conversion remains independent of framebuffer writes.
 // On non-Linux hosts only its unit tests use these Linux presentation helpers.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 mod pixels;

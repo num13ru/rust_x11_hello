@@ -15,7 +15,7 @@ steps an agent should follow, especially around physical-device work.
   watchdog end the run; the full-screen window covers KUAL. A first MXCFB
   trial on the Paperwhite 6 exercised direct display, X11 touch, and local Exit;
   remaining visual and lifecycle checks are recorded in
-  `docs/mxcfb-device-evidence.md`.
+  `docs/archive/mxcfb-device-evidence.md`.
 - **Inspect framebuffer metadata** is a read-only KUAL diagnostic. It logs
   `/dev/fb0` metadata without using the normal launcher or drawing.
 - Physical device: Kindle Paperwhite 6 (Sangria / Bellatrix4), FW 5.17.1.0.4.
@@ -25,19 +25,21 @@ steps an agent should follow, especially around physical-device work.
 
 PaperSpoon owns application state, layout, rendering, hit testing, and the
 mapping from application controls to semantic actions. PaperPad treats the
-remote viewport as an opaque Mono1 framebuffer: it may interpret physical X11
-coordinates only to map them into viewport-relative pointer coordinates or to
-handle its own device-local system UI, including Exit. Do not duplicate
+remote viewport as an opaque, negotiated Mono1 or Gray8 framebuffer: it may
+interpret physical X11 coordinates only to map them into viewport-relative
+pointer coordinates or to handle its own device-local system UI, including
+Exit. Do not duplicate
 application button geometry in PaperPad or send application action IDs across
 the PaperPad/PaperSpoon protocol boundary. Exit and other device-local
 lifecycle controls must work even when PaperSpoon is disconnected.
 
-The dependency direction is PaperSpoon application layout/rendering/input →
-transport-independent `paper-protocol` PPFB v2 frames → PaperPad framebuffer
-receiver → sibling X11 or MXCFB display backend. Viewport-relative pointer
-messages travel in the opposite direction through the X11 input window for
-both display modes. Keep framebuffer primitives independent of transport and
-display backend; X11-specific bitmap conversion belongs in PaperPad's X11
+The dependency direction is PaperSpoon application layout/rendering/input and
+host-side JPEG decoding → transport-independent `paper-protocol` PPFB v2
+frames → PaperPad framebuffer receiver → sibling X11 or MXCFB display backend.
+JPEG bytes and paths never cross the protocol boundary. Viewport-relative
+pointer messages travel in the opposite direction through the X11 input window
+for both display modes. Keep framebuffer primitives independent of transport
+and display backend; X11-specific bitmap conversion belongs in PaperPad's X11
 adapter, not in `paper-protocol` or MXCFB.
 
 ## Device deployment (MTP)

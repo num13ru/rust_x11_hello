@@ -5,7 +5,9 @@ mod v2;
 mod v2_payload;
 
 pub use framebuffer::{
-    Mono1Frame, Mono1FrameError, Mono1Pixel, mono1_payload_len, mono1_stride, validate_mono1_pixels,
+    Frame, FrameError, Gray8Frame, Gray8FrameError, Mono1Frame, Mono1FrameError, Mono1Pixel,
+    PixelFormat, gray8_payload_len, gray8_stride, mono1_payload_len, mono1_stride,
+    validate_gray8_pixels, validate_mono1_pixels,
 };
 pub use v2::{
     V2_HEADER_LEN, V2_MAGIC, V2_MAX_PAYLOAD_LEN, V2_VERSION, V2DecodeError, V2DecodeResult,
@@ -13,8 +15,8 @@ pub use v2::{
 };
 pub use v2_payload::{
     V2_FRAME_PREFIX_LEN, V2_HELLO_PAYLOAD_LEN, V2_POINTER_PAYLOAD_LEN, V2_VIEWPORT_PAYLOAD_LEN,
-    V2FramePayload, V2Hello, V2Payload, V2PayloadError, V2PixelFormat, V2Pointer, V2PointerPhase,
-    V2Viewport, decode_v2_payload, encode_v2_frame,
+    V2FramePayload, V2FrameRef, V2Hello, V2Payload, V2PayloadError, V2PixelFormat, V2PixelFormats,
+    V2Pointer, V2PointerPhase, V2Viewport, decode_v2_payload, encode_v2_frame,
 };
 
 /// Default PaperSpoon TCP listener port.
