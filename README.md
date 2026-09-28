@@ -315,6 +315,38 @@ than reopening the path. No connection, a Mono1-only backend, a missing or
 malformed file, an oversized decode, or a connection/viewport change during
 decoding leaves the previous authoritative frame and frame ID unchanged.
 
+On macOS, PaperSpoon can render a one-shot system Now Playing snapshot into
+the connected Gray8 viewport:
+
+```text
+frame nowplaying
+```
+
+This command has no arguments. It uses the exact crates.io `media-remote`
+v0.5.2 release and specifically its
+`NowPlayingPerl` backend, which bundles `mediaremote-adapter` and launches it
+through `/usr/bin/perl`; SIP remains enabled. PaperSpoon waits at most two
+seconds for metadata with a meaningful title, then allows up to 400 ms for
+artwork that may arrive after metadata. Missing artwork uses a placeholder;
+missing artist or album uses an `Unknown` label. Invalid progress values are
+omitted. No current player, adapter failure, timeout, Mono1-only connection,
+or connection/viewport change leaves the previous authoritative frame and
+frame ID unchanged. A successful result retains the rendered Gray8 pixels for
+matching reconnects without rerunning MediaRemote. Each invocation runs in an
+isolated helper process group that is terminated and reaped together with its
+Perl adapter; this avoids relying on the upstream provider's asynchronous
+`Drop` behavior.
+
+Host smoke validation on macOS 26.5.2 (build 25F84) with System Integrity
+Protection enabled obtained a usable live snapshot, sent it as Gray8, resent
+the rendered pixels after a matching reconnect, and completed two repeated
+one-shot acquisitions without leaving a PaperSpoon helper or
+`mediaremote-adapter.pl` process. Physical validation on the documented
+Paperwhite 6 with PaperPad's MXCFB backend and Apple Music then confirmed the
+complete Now Playing screen works on-device; the operator reported it working
+perfectly. Paused playback, track switching, missing-artwork fallback, and a
+physical reconnect were not reported as separate checkpoints.
+
 To render and send PaperSpoon's host-owned application UI instead of a
 diagnostic pattern, use the same explicit remote viewport dimensions:
 

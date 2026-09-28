@@ -8,9 +8,9 @@ use std::path::Path;
 use std::io::Cursor;
 
 use image::codecs::jpeg::JpegDecoder;
-use image::imageops::FilterType;
-use image::{DynamicImage, GrayImage, ImageDecoder};
-use paper_protocol::{Gray8Frame, V2_FRAME_PREFIX_LEN, V2_MAX_PAYLOAD_LEN};
+use image::{DynamicImage, ImageDecoder};
+use paper_protocol::Gray8Frame;
+use paperspoon::gray_renderer::GrayCanvas;
 
 const MAX_DECODED_JPEG_BYTES: u64 = 256 * 1024 * 1024;
 
@@ -35,7 +35,8 @@ fn decode_jpeg<R: BufRead + Seek>(
     width: u16,
     height: u16,
 ) -> Result<Gray8Frame, String> {
-    validate_target_size(width, height)?;
+    // Validate the target before decoding potentially expensive external input.
+    let mut canvas = GrayCanvas::new(width, height)?;
     let decoder = JpegDecoder::new(reader)
         .map_err(|error| format!("failed to decode JPEG header: {error}"))?;
     let decoded_bytes = decoder.total_bytes();
@@ -45,97 +46,9 @@ fn decode_jpeg<R: BufRead + Seek>(
         ));
     }
     let decoded = DynamicImage::from_decoder(decoder)
-        .map_err(|error| format!("failed to decode JPEG pixels: {error}"))?
-        .into_luma8();
-    fit_contain(&decoded, width, height)
-}
-
-fn validate_target_size(width: u16, height: u16) -> Result<(), String> {
-    if width == 0 || height == 0 {
-        return Err(format!(
-            "JPEG target dimensions must be nonzero, got {width}x{height}"
-        ));
-    }
-    let pixel_bytes = usize::from(width)
-        .checked_mul(usize::from(height))
-        .ok_or_else(|| "JPEG target payload size overflow".to_string())?;
-    let payload_bytes = V2_FRAME_PREFIX_LEN
-        .checked_add(pixel_bytes)
-        .ok_or_else(|| "JPEG frame payload size overflow".to_string())?;
-    if payload_bytes > V2_MAX_PAYLOAD_LEN {
-        return Err(format!(
-            "JPEG frame payload is {payload_bytes} bytes; maximum is {V2_MAX_PAYLOAD_LEN}"
-        ));
-    }
-    Ok(())
-}
-
-fn fit_contain(source: &GrayImage, width: u16, height: u16) -> Result<Gray8Frame, String> {
-    let source_width = source.width();
-    let source_height = source.height();
-    if source_width == 0 || source_height == 0 {
-        return Err("JPEG source dimensions must be nonzero".to_string());
-    }
-
-    let (scaled_width, scaled_height) = fit_dimensions(
-        source_width,
-        source_height,
-        u32::from(width),
-        u32::from(height),
-    );
-    let scaled = image::imageops::resize(source, scaled_width, scaled_height, FilterType::Triangle);
-
-    let target_width = usize::from(width);
-    let target_height = usize::from(height);
-    let pixel_bytes = target_width
-        .checked_mul(target_height)
-        .ok_or_else(|| "JPEG target payload size overflow".to_string())?;
-    let mut pixels = Vec::new();
-    pixels
-        .try_reserve_exact(pixel_bytes)
-        .map_err(|error| format!("failed to allocate JPEG target framebuffer: {error}"))?;
-    pixels.resize(pixel_bytes, u8::MAX);
-
-    let scaled_width = usize::try_from(scaled_width)
-        .map_err(|_| "scaled JPEG width does not fit usize".to_string())?;
-    let scaled_height = usize::try_from(scaled_height)
-        .map_err(|_| "scaled JPEG height does not fit usize".to_string())?;
-    let offset_x = (target_width - scaled_width) / 2;
-    let offset_y = (target_height - scaled_height) / 2;
-    for row in 0..scaled_height {
-        let source_start = row * scaled_width;
-        let destination_start = (offset_y + row) * target_width + offset_x;
-        pixels[destination_start..destination_start + scaled_width]
-            .copy_from_slice(&scaled.as_raw()[source_start..source_start + scaled_width]);
-    }
-
-    Gray8Frame::new(width, height, pixels)
-        .map_err(|error| format!("failed to build JPEG Gray8 frame: {error}"))
-}
-
-fn fit_dimensions(
-    source_width: u32,
-    source_height: u32,
-    target_width: u32,
-    target_height: u32,
-) -> (u32, u32) {
-    let width_limited = u64::from(source_width) * u64::from(target_height)
-        > u64::from(target_width) * u64::from(source_height);
-    if width_limited {
-        let scaled_height =
-            (u64::from(source_height) * u64::from(target_width) / u64::from(source_width)).max(1);
-        (
-            target_width,
-            u32::try_from(scaled_height).expect("scaled height is bounded by target height"),
-        )
-    } else {
-        let scaled_width =
-            (u64::from(source_width) * u64::from(target_height) / u64::from(source_height)).max(1);
-        (
-            u32::try_from(scaled_width).expect("scaled width is bounded by target width"),
-            target_height,
-        )
-    }
+        .map_err(|error| format!("failed to decode JPEG pixels: {error}"))?;
+    canvas.draw_image_fit_contain(&decoded, 0, 0, width, height)?;
+    canvas.into_frame()
 }
 
 #[cfg(test)]
@@ -148,11 +61,11 @@ mod tests {
 
     fn black_jpeg(width: u32, height: u32) -> Vec<u8> {
         let image = ImageBuffer::from_pixel(width, height, Luma([0_u8]));
-        let mut encoded = Vec::new();
-        JpegEncoder::new_with_quality(&mut encoded, 100)
+        let mut jpeg = Vec::new();
+        JpegEncoder::new_with_quality(&mut jpeg, 100)
             .encode_image(&DynamicImage::ImageLuma8(image))
             .expect("encode test JPEG");
-        encoded
+        jpeg
     }
 
     fn assert_white_rows(frame: &Gray8Frame, rows: std::ops::Range<usize>) {
@@ -167,7 +80,7 @@ mod tests {
     }
 
     #[test]
-    fn fit_contain_handles_landscape_portrait_exact_small_and_odd_targets() {
+    fn fit_contain_preserves_aspect_ratio_and_centers_with_integer_rounding() {
         let landscape = decode_jpeg_fit_contain(&black_jpeg(4, 2), 5, 9).unwrap();
         assert_eq!((landscape.width(), landscape.height()), (5, 9));
         assert_white_rows(&landscape, 0..3);
@@ -200,8 +113,7 @@ mod tests {
     fn project_fixture_decodes_to_centered_gray8_and_bad_jpeg_is_rejected() {
         let fixture_path =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/grayscale-example.jpg");
-        let frame =
-            decode_jpeg_path_fit_contain(&fixture_path, 12, 16).expect("decode fixture path");
+        let frame = decode_jpeg_path_fit_contain(&fixture_path, 12, 16).expect("decode fixture");
         assert_eq!(frame.stride(), 12);
         assert_white_rows(&frame, 0..4);
         assert_white_rows(&frame, 12..16);

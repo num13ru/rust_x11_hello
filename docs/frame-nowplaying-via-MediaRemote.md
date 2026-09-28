@@ -1,5 +1,12 @@
 Implement a PaperSpoon **Now Playing framebuffer spike** using the Rust `media-remote` crate and its `NowPlayingPerl` backend.
 
+**Status (2026-09-28):** implemented and verified on the documented physical
+Paperwhite 6 using PaperPad's MXCFB backend with Apple Music. The operator
+reported the complete Now Playing screen working perfectly. Host validation
+also covered retained-frame reconnect behavior and repeated helper cleanup.
+The individual paused, track-switch, missing-artwork, and physical-reconnect
+checkpoints below were not separately reported.
+
 Repository:
 `https://github.com/num13ru/rust_x11_hello`
 
@@ -654,6 +661,26 @@ frame nowplaying
 7. disconnect/reconnect PaperPad and verify retained-frame behavior
 
 Do not add automatic updates during this validation.
+
+### Recorded physical result (2026-09-28)
+
+The primary physical path passed on the documented Paperwhite 6:
+
+```text
+Apple Music
+→ media_remote::NowPlayingPerl
+→ in-memory Gray8 composition
+→ PPFB v2 Frame
+→ PaperPad MXCFB
+→ Kindle display
+```
+
+The operator reported the resulting Now Playing screen working perfectly on
+the device. This is direct operator validation of the end-to-end display path;
+no separate device log, deployed-binary checksum, photograph, or per-checkpoint
+results were captured for this run. Host smoke validation separately proved a
+matching reconnect reused retained pixels and repeated one-shot acquisitions
+left no helper or `mediaremote-adapter.pl` process running.
 
 ---
 
