@@ -72,30 +72,33 @@ pub(super) fn present_remote_with(
 pub(super) fn present_system_ui(
     opened: &mut OpenedFramebuffer,
     markers: &mut UpdateMarkerSequence,
+    connected: bool,
 ) -> Result<SubmittedUpdate> {
-    present_system_ui_with(opened, markers, controller::submit_update)
+    present_system_ui_with(opened, markers, connected, controller::submit_update)
 }
 
 pub(super) fn present_system_ui_with(
     opened: &mut OpenedFramebuffer,
     markers: &mut UpdateMarkerSequence,
+    connected: bool,
     mut submit: impl FnMut(&File, &mut UpdateDataMtk, u32, u32) -> Result<()>,
 ) -> Result<SubmittedUpdate> {
     let info = &opened.info;
-    let pixels = rasterize_system_ui(info.screen).context("MXCFB prepare local Exit pixels")?;
+    let pixels = rasterize_system_ui(info.screen, connected)
+        .context("MXCFB prepare local system UI pixels")?;
     let mut request = next_full_gc16_system_ui_request(
         info.screen,
         info.spec.visible_width,
         info.spec.visible_height,
         markers,
     )
-    .context("MXCFB prepare local Exit update")?;
+    .context("MXCFB prepare local system UI update")?;
     ensure_matching_update_region(pixels.region, &request)?;
 
     opened
         .mapping
         .write_system_ui(&pixels, info.spec)
-        .context("MXCFB write local Exit framebuffer rows")?;
+        .context("MXCFB write local system UI framebuffer rows")?;
     let marker = request.update_marker;
     submit(
         &opened.file,
@@ -103,7 +106,7 @@ pub(super) fn present_system_ui_with(
         info.spec.visible_width,
         info.spec.visible_height,
     )
-    .context("MXCFB submit local Exit update")?;
+    .context("MXCFB submit local system UI update")?;
     Ok(SubmittedUpdate {
         marker,
         region: pixels.region,
@@ -246,20 +249,21 @@ mod tests {
         let mut opened = fake_framebuffer(64, 68);
         let mut markers = UpdateMarkerSequence::for_process();
         let called = Cell::new(false);
-        let submitted = present_system_ui_with(&mut opened, &mut markers, |_, request, w, h| {
-            called.set(true);
-            assert_eq!((w, h), (64, 73));
-            assert_eq!(
-                (request.update_region.top, request.update_region.height),
-                (1, 72)
-            );
-            assert_eq!(
-                (request.update_region.left, request.update_region.width),
-                (0, 64)
-            );
-            Ok(())
-        })
-        .unwrap();
+        let submitted =
+            present_system_ui_with(&mut opened, &mut markers, false, |_, request, w, h| {
+                called.set(true);
+                assert_eq!((w, h), (64, 73));
+                assert_eq!(
+                    (request.update_region.top, request.update_region.height),
+                    (1, 72)
+                );
+                assert_eq!(
+                    (request.update_region.left, request.update_region.width),
+                    (0, 64)
+                );
+                Ok(())
+            })
+            .unwrap();
         assert!(called.get());
         assert_eq!(submitted.marker, std::process::id().max(1));
         assert_eq!(submitted.region, opened.info.screen.system_ui_region);
@@ -267,7 +271,7 @@ mod tests {
         opened.info.spec.visual = 0;
         called.set(false);
         assert!(
-            present_system_ui_with(&mut opened, &mut markers, |_, _, _, _| {
+            present_system_ui_with(&mut opened, &mut markers, true, |_, _, _, _| {
                 called.set(true);
                 Ok(())
             })
@@ -280,7 +284,9 @@ mod tests {
     fn local_exit_kernel_rejection_is_not_reported_as_success() {
         let mut opened = fake_framebuffer(64, 68);
         let mut markers = UpdateMarkerSequence::for_process();
-        let error = present_system_ui(&mut opened, &mut markers).err().unwrap();
+        let error = present_system_ui(&mut opened, &mut markers, false)
+            .err()
+            .unwrap();
         assert!(format!("{error:#}").contains("MXCFB_SEND_UPDATE_MTK"));
     }
 }

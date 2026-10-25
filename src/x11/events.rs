@@ -32,8 +32,16 @@ pub(crate) fn event_loop(
     paperspoon: &mut Paperspoon,
 ) -> Result<EventLoopExit> {
     let mut app = AppState::new(display.dimensions());
+    let mut displayed_connection = None;
 
     loop {
+        let connected = paperspoon.is_connected();
+        if connection_indicator_changed(&mut displayed_connection, connected) {
+            display
+                .draw_system_ui(connected)
+                .context("failed to draw connection state")?;
+            eprintln!("ui connection indicator connected={connected}");
+        }
         if let Some(frame) = paperspoon.poll_frame() {
             match RemoteFrame::new(
                 frame.frame_id(),
@@ -63,7 +71,7 @@ pub(crate) fn event_loop(
 
         match event {
             Event::Expose(event) if event.window == win && event.count == 0 => {
-                draw_surface(display, app.redraw(), RedrawCause::SurfaceDamage)
+                draw_surface(display, app.redraw(), RedrawCause::SurfaceDamage, connected)
                     .context("failed to redraw final Expose batch")?;
             }
             Event::Expose(_) => {}
@@ -98,7 +106,7 @@ pub(crate) fn event_loop(
                             "event type=ConfigureNotify x={} y={} width={width} height={height} window=0x{:x}",
                             event.x, event.y, event.window
                         );
-                        draw_surface(display, redraw, RedrawCause::GeometryChange)
+                        draw_surface(display, redraw, RedrawCause::GeometryChange, connected)
                             .context("failed to redraw after ConfigureNotify")?;
                     }
                 }
@@ -179,6 +187,14 @@ pub(crate) fn event_loop(
     }
 }
 
+fn connection_indicator_changed(displayed: &mut Option<bool>, connected: bool) -> bool {
+    if *displayed == Some(connected) {
+        return false;
+    }
+    *displayed = Some(connected);
+    true
+}
+
 pub(crate) fn remote_viewport_size(physical_size: (u16, u16)) -> (u16, u16) {
     ScreenLayout::new(physical_size.0, physical_size.1)
         .map(|layout| (layout.remote_viewport.width, layout.remote_viewport.height))
@@ -189,9 +205,10 @@ fn draw_surface(
     display: &mut dyn DisplayBackend,
     redraw: Redraw,
     cause: RedrawCause,
+    connected: bool,
 ) -> Result<()> {
     debug_assert_eq!(display.dimensions(), redraw.size());
-    display.draw_system_ui()?;
+    display.draw_system_ui(connected)?;
     display.redraw_cached_frame(cause);
     Ok(())
 }
@@ -269,6 +286,16 @@ mod tests {
             format_pointer_event("ButtonRelease", &event),
             "input type=ButtonRelease detail=3 event_x=-1 event_y=360 root_x=79 root_y=480 time=123456 window=0x2600001 root=0x50d child=0x0 state=0x0101 same_screen=true"
         );
+    }
+
+    #[test]
+    fn connection_indicator_redraws_initially_and_only_on_transitions() {
+        let mut displayed = None;
+        assert!(connection_indicator_changed(&mut displayed, false));
+        assert!(!connection_indicator_changed(&mut displayed, false));
+        assert!(connection_indicator_changed(&mut displayed, true));
+        assert!(!connection_indicator_changed(&mut displayed, true));
+        assert!(connection_indicator_changed(&mut displayed, false));
     }
 
     #[test]

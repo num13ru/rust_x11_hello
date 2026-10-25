@@ -18,7 +18,10 @@ PaperSpoon -- PPFB v2 framebuffer ------> PaperPad -- X11 or MXCFB
 
 PaperSpoon renders only the negotiated remote viewport. On the tested
 1272×1696 portrait screen, that viewport is 1272×1624; PaperPad reserves the
-bottom 72 pixels for its local system UI.
+bottom 72 pixels for its local system UI. An outlined circle at the left of
+the **Exit** button means PaperSpoon is disconnected; the circle is filled
+solid black while the PPFB transport session is connected. The indicator is
+device-local and is not a touch target.
 
 PPFB v2 uses typed binary messages for capability negotiation, viewport
 changes, pointer phases, and frames. Mono1 is row-major and MSB-first (`0` is
@@ -28,7 +31,9 @@ Payloads are capped at 16 MiB and validated before becoming authoritative.
 PaperPad retains only a successfully displayed frame. Invalid dimensions,
 unsupported formats, decode errors, or failed display updates do not replace
 it. A matching reconnect receives PaperSpoon's last authoritative frame;
-pointer events that occur while disconnected are not replayed.
+pointer events that occur while disconnected are not replayed. Disconnecting
+does not clear the retained application frame; only the local connection
+indicator changes state.
 
 ## Build and run
 

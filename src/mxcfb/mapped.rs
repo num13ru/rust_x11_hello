@@ -406,7 +406,7 @@ mod tests {
         let mut mapping =
             unsafe { WritableFramebuffer::map_visible(&file, system_geometry()) }.unwrap();
         mapping.write_at(0, &vec![0x5a; 68 * 73]).unwrap();
-        let ui = rasterize_system_ui(ScreenLayout::new(64, 73).unwrap()).unwrap();
+        let ui = rasterize_system_ui(ScreenLayout::new(64, 73).unwrap(), false).unwrap();
         assert_eq!(
             mapping.write_system_ui(&ui, system_spec()).unwrap(),
             ui.region
@@ -450,7 +450,7 @@ mod tests {
         // SAFETY: /dev/zero supports this validated 5,100-byte mapping.
         let mut mapping = unsafe { WritableFramebuffer::map_visible(&file, geometry) }.unwrap();
         mapping.write_at(0, &vec![0x5a; 68 * 75]).unwrap();
-        let ui = rasterize_system_ui(ScreenLayout::new(64, 73).unwrap()).unwrap();
+        let ui = rasterize_system_ui(ScreenLayout::new(64, 73).unwrap(), false).unwrap();
         mapping.write_system_ui(&ui, spec).unwrap();
 
         // SAFETY: each offset below lies within the live 5,100-byte mapping.
@@ -476,7 +476,7 @@ mod tests {
         let mut mapping =
             unsafe { WritableFramebuffer::map_visible(&file, system_geometry()) }.unwrap();
         mapping.write_at(0, &vec![0x5a; 68 * 73]).unwrap();
-        let mut ui = rasterize_system_ui(ScreenLayout::new(64, 73).unwrap()).unwrap();
+        let mut ui = rasterize_system_ui(ScreenLayout::new(64, 73).unwrap(), false).unwrap();
         let mut spec = system_spec();
         spec.visual = 0;
         assert!(mapping.write_system_ui(&ui, spec).is_err());

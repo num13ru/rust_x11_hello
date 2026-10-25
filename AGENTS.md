@@ -31,7 +31,9 @@ pointer coordinates or to handle its own device-local system UI, including
 Exit. Do not duplicate
 application button geometry in PaperPad or send application action IDs across
 the PaperPad/PaperSpoon protocol boundary. Exit and other device-local
-lifecycle controls must work even when PaperSpoon is disconnected.
+lifecycle controls must work even when PaperSpoon is disconnected. PaperPad's
+device-local system strip may also report transport state; its connection
+indicator must not become an application action or touch target.
 
 The dependency direction is PaperSpoon application layout/rendering/input and
 host-side JPEG decoding → transport-independent `paper-protocol` PPFB v2
