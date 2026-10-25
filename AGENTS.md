@@ -18,6 +18,9 @@ steps an agent should follow, especially around physical-device work.
   `docs/archive/mxcfb-device-evidence.md`.
 - **Inspect framebuffer metadata** is a read-only KUAL diagnostic. It logs
   `/dev/fb0` metadata without using the normal launcher or drawing.
+- The four **Benchmark MXCFB** KUAL actions are bounded, local completion tests
+  for GC16, DU, A2, and DU4. They bypass PaperSpoon, retain X11 for local Exit,
+  and must not be described as visual FPS without camera/operator evidence.
 - Physical device: Kindle Paperwhite 6 (Sangria / Bellatrix4), FW 5.17.1.0.4.
   USBNetwork is NOT available on this device; transport is Wi-Fi via `PAPERPAD_COMPANION`.
 

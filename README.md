@@ -91,11 +91,14 @@ mtp-rs rm /extensions/rust_x11_hello/bin/rust_x11_hello.previous --yes
 
 ### 4. Run from KUAL
 
-KUAL provides three actions:
+KUAL provides normal run, explicit benchmark, and diagnostic actions:
 
 - **Run Paperpad (5m)** — reference X11 display backend with a five-minute watchdog.
 - **Run Paperpad MXCFB (5m, experimental)** — direct framebuffer display with
   a five-minute watchdog and X11 still providing touch and lifecycle events.
+- **Benchmark MXCFB GC16/DU/A2/DU4** — separate, explicit 12-frame local
+  completion benchmarks with a one-minute watchdog. They do not connect to
+  PaperSpoon; DU, A2, and DU4 are experimental fidelity/ghosting tradeoffs.
 - **Inspect framebuffer metadata** — read-only diagnostics; it does not draw or
   submit an e-ink refresh.
 
@@ -135,6 +138,8 @@ Other runtime overrides are:
 | --- | --- |
 | `PAPERPAD_DISPLAY_BACKEND=x11` | Default X11 display path |
 | `PAPERPAD_DISPLAY_BACKEND=mxcfb` | Experimental direct framebuffer path |
+| `PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=gc16\|du\|a2\|du4` | Explicit benchmark waveform; defaults to GC16 |
+| `PAPERPAD_MXCFB_BENCHMARK_FRAMES=2..120` | Completed benchmark samples; defaults to 8 |
 | `PAPERPAD_EXT_DIR` | KUAL extension directory |
 | `PAPERPAD_WATCHDOG_SECONDS` | Maximum run duration |
 | `PAPERPAD_WATCHDOG_TERM_GRACE_SECONDS` | Grace period before forced stop |
@@ -158,6 +163,48 @@ interaction, and every failure fallback have not all been physically verified.
 See [MXCFB device evidence](docs/archive/mxcfb-device-evidence.md) for recorded
 claims and [the manual validation sequence](docs/archive/mxcfb-manual-validation.md)
 for repeatable device checks.
+
+### MXCFB completion benchmark
+
+The opt-in benchmark alternates solid black and white over only the remote
+viewport; PaperPad's local Exit strip remains outside the tested region. It
+first verifies the PW6 `MXCFB_WAIT_FOR_ANY_UPDATE_COMPLETE_MTK` capability,
+draws and waits for the local UI, performs one uncounted warmup, then submits
+and waits for each measured frame in sequence. The X11 input window remains
+active, and local Exit is checked between completion waits. On the matching
+5.17.1.0.4 driver, one wait can time out with zero marker bytes after two
+seconds without cancelling the update. PaperPad therefore allows at most four
+waits (an eight-second bound) while still requiring the exact submitted marker.
+
+Each sample logs `prepare_write_submit_us`, `completion_wait_us`, and
+`total_us`. The summary reports throughput and latency percentiles. A true
+`software_60fps_budget_met` requires every measured total to be at most
+16,667 microseconds and aggregate throughput to be at least 60 updates/s.
+`visual_60fps_verified` is always false: kernel completion markers do not prove
+pixel fidelity, acceptable ghosting, or camera-observed panel transitions.
+
+Direct command-line use on the Kindle is:
+
+```sh
+PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=a2 \
+PAPERPAD_MXCFB_BENCHMARK_FRAMES=60 \
+rust_x11_hello --benchmark-mxcfb
+```
+
+The benchmark works only when `/dev/fb0` reports the validated 8-bit
+`hwtcon_v2` layout, the MediaTek completion ioctl passes its feature check,
+the X11 input window matches the framebuffer dimensions, and no competing
+display writer invalidates marker attribution. Any unsupported metadata,
+ioctl rejection, malformed completion batch, geometry change, or marker still
+absent after the bounded waits stops the run instead of producing an FPS
+result.
+
+The waveform name is the request sent by PaperPad, not independently observed
+panel state. In the matching driver, a sufficiently large DU request is
+automatically replaced with full GLR16 unless the global fast-mode flag is set;
+the full 1272 x 1624 viewport crosses that threshold. Fast mode also bypasses
+the wait-any marker store, so this completion benchmark cannot claim pure DU
+timing under either policy without additional driver evidence.
 
 ## PaperSpoon frame commands
 

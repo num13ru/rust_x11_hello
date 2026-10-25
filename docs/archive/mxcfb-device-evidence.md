@@ -1,5 +1,40 @@
 # Paperwhite 6 framebuffer evidence
 
+## Four-mode completion benchmark trial (2026-10-25)
+
+The deployed benchmark binary was read back over MTP and matched the host ARM
+artifact at SHA-256
+`280b0c9bb2e51ae02c77ae93118023e6f6f2f2afcb73e6ff466193c3483cc3a6`.
+The retrieved cumulative Kindle log is saved as
+`rust_x11_hello.device.log` with SHA-256
+`aa768f3b0c5ceeb6f00f94a223d95156eacc8e8b252e362cd190233a45fdddc1`;
+the final status file hashes to
+`a1a81a1df41da6d7e608a414e63dc894191e4ac0eae0a49532d35aaf125f7ddd`.
+
+The operator launched all four 12-frame KUAL actions. A2, DU, DU4, and GC16
+each passed the wait-any feature query and configured the expected 1272 x 1624
+remote region. Only DU4 completed: 12 samples in 1,724,235 microseconds,
+6.959 updates/s end to end, 139,444-microsecond p50, and
+157,400-microsecond p95 and maximum. Every DU4 sample exceeded the 16,667
+microsecond 60 FPS budget, so `software_60fps_budget_met=false`; no camera
+evidence exists, so `visual_60fps_verified=false`.
+
+A2, DU, and GC16 each drained an unrelated completion marker while waiting for
+the local system-strip marker, then received zero markers on the first wait for
+their warmup frame and exited with status 1 before recording a sample. GC16
+was the final action, so the retrieved KUAL status was
+`STOPPED status=1 reason=process_exit`. These are incomplete benchmarks, not
+zero-FPS measurements.
+
+Amazon's matching `Kindle_src_5.17.1.0.4_4351970007` GPL archive confirms in
+`hwtcon_extra_feature.c` that wait-any blocks for at most 2,000 ms and returns
+zero bytes when no markers are stored by then. It also confirms that large DU
+requests are automatically changed to full GLR16 unless global fast mode is
+enabled, while fast mode bypasses completion-marker storage. The benchmark was
+subsequently changed to retry zero-byte waits up to a total eight-second bound,
+polling local Exit between waits and continuing to require the exact submitted
+marker. That retry change has host tests but no physical-device result yet.
+
 ## Read-only mapping check (2026-09-26)
 
 The deployed probe binary was read back over MTP and matched the host artifact

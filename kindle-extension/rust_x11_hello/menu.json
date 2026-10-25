@@ -9,6 +9,22 @@
       "action": "PAPERPAD_WATCHDOG_SECONDS=300 PAPERPAD_DISPLAY_BACKEND=mxcfb sh bin/run.sh"
     },
     {
+      "name": "Benchmark MXCFB GC16 (12)",
+      "action": "PAPERPAD_WATCHDOG_SECONDS=60 PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=gc16 PAPERPAD_MXCFB_BENCHMARK_FRAMES=12 sh bin/run.sh --benchmark-mxcfb"
+    },
+    {
+      "name": "Benchmark MXCFB DU (12, experimental)",
+      "action": "PAPERPAD_WATCHDOG_SECONDS=60 PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=du PAPERPAD_MXCFB_BENCHMARK_FRAMES=12 sh bin/run.sh --benchmark-mxcfb"
+    },
+    {
+      "name": "Benchmark MXCFB A2 (12, experimental)",
+      "action": "PAPERPAD_WATCHDOG_SECONDS=60 PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=a2 PAPERPAD_MXCFB_BENCHMARK_FRAMES=12 sh bin/run.sh --benchmark-mxcfb"
+    },
+    {
+      "name": "Benchmark MXCFB DU4 (12, experimental)",
+      "action": "PAPERPAD_WATCHDOG_SECONDS=60 PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=du4 PAPERPAD_MXCFB_BENCHMARK_FRAMES=12 sh bin/run.sh --benchmark-mxcfb"
+    },
+    {
       "name": "Inspect framebuffer metadata",
       "action": "sh bin/probe-fb.sh"
     }

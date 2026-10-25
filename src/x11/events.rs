@@ -22,6 +22,88 @@ pub enum EventLoopExit {
     WindowDestroyed,
 }
 
+/// Minimal X11 input pump for the local MXCFB benchmark. It deliberately
+/// forwards no remote pointer messages, but preserves PaperPad's local Exit
+/// behavior and aborts if the fixed framebuffer/window geometry diverges.
+#[cfg(target_os = "linux")]
+pub(crate) struct LocalExitPoll {
+    app: AppState,
+    window_destroyed: bool,
+}
+
+#[cfg(target_os = "linux")]
+impl LocalExitPoll {
+    pub(crate) fn new(size: (u16, u16)) -> Self {
+        Self {
+            app: AppState::new(size),
+            window_destroyed: false,
+        }
+    }
+
+    pub(crate) fn window_destroyed(&self) -> bool {
+        self.window_destroyed
+    }
+
+    pub(crate) fn poll(&mut self, conn: &RustConnection, win: Window) -> Result<bool> {
+        while let Some(event) = conn
+            .poll_for_event()
+            .context("X11 connection failed while polling benchmark input")?
+        {
+            match event {
+                Event::ButtonPress(event) if event.event == win => {
+                    eprintln!("{}", format_pointer_event("ButtonPress", &event));
+                    if self.handle_pointer(PointerEventKind::Press, &event) {
+                        return Ok(true);
+                    }
+                }
+                Event::ButtonRelease(event) if event.event == win => {
+                    eprintln!("{}", format_pointer_event("ButtonRelease", &event));
+                    if self.handle_pointer(PointerEventKind::Release, &event) {
+                        return Ok(true);
+                    }
+                }
+                Event::ConfigureNotify(event) if event.window == win => {
+                    ensure_benchmark_geometry(self.app.size(), (event.width, event.height))?;
+                }
+                Event::UnmapNotify(event) if event.window == win => {
+                    self.app.cancel_contact();
+                    eprintln!("event type=UnmapNotify window=0x{:x}", event.window);
+                    return Ok(true);
+                }
+                Event::DestroyNotify(event) if event.window == win => {
+                    eprintln!("event type=DestroyNotify window=0x{:x}", event.window);
+                    self.window_destroyed = true;
+                    return Ok(true);
+                }
+                Event::Error(error) => return Err(anyhow!("X11 server error: {error:?}")),
+                _ => {}
+            }
+        }
+        Ok(false)
+    }
+
+    fn handle_pointer(&mut self, kind: PointerEventKind, event: &ButtonPressEvent) -> bool {
+        let outcome = self.app.handle_pointer(PointerEvent {
+            kind,
+            detail: event.detail,
+            point: PhysicalPoint {
+                x: event.event_x,
+                y: event.event_y,
+            },
+        });
+        outcome.activation().is_some_and(dispatch_activation)
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn ensure_benchmark_geometry(expected: (u16, u16), reported: (u16, u16)) -> Result<()> {
+    anyhow::ensure!(
+        reported == expected,
+        "MXCFB benchmark X11 window geometry {reported:?} differs from fixed framebuffer {expected:?}"
+    );
+    Ok(())
+}
+
 const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 /// Run the event loop until the window is destroyed or the connection fails.

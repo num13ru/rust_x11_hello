@@ -58,6 +58,16 @@ pub(super) struct UpdateDataMtk {
 pub(super) const SEND_UPDATE_MTK: u32 =
     (1u32 << 30) | ((size_of::<UpdateDataMtk>() as u32) << 16) | ((b'F' as u32) << 8) | 0x2e;
 
+// Bellatrix4/PW6 extension from the pinned FBInk `mtk-kindle.h`. Although the
+// ioctl encoding advertises one `u32`, the driver may write up to 64 markers
+// to the caller-provided array and returns the number of bytes written.
+#[cfg(target_os = "linux")]
+pub(super) const MAX_PENDING_UPDATES: usize = 64;
+pub(super) const WAIT_FOR_ANY_UPDATE_COMPLETE_MTK: u32 =
+    (3u32 << 30) | ((size_of::<u32>() as u32) << 16) | ((b'F' as u32) << 8) | 0x37;
+#[cfg(target_os = "linux")]
+pub(super) const WAIT_FOR_ANY_UPDATE_COMPLETE_CHECK: u32 = u32::MAX;
+
 const _: () = {
     assert!(size_of::<UpdateRegion>() == 16);
     assert!(size_of::<AltBufferData>() == 28);
@@ -67,4 +77,5 @@ const _: () = {
     assert!(offset_of!(UpdateDataMtk, swipe_data) == 72);
     assert!(offset_of!(UpdateDataMtk, ts_epdc) == 92);
     assert!(SEND_UPDATE_MTK == 0x4060_462e);
+    assert!(WAIT_FOR_ANY_UPDATE_COMPLETE_MTK == 0xc004_4637);
 };

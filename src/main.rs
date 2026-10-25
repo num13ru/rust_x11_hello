@@ -14,6 +14,8 @@ use x11rb::rust_connection::RustConnection;
 
 use x11::X11DisplayBackend;
 use x11::display as x11_display;
+#[cfg(target_os = "linux")]
+use x11::events::LocalExitPoll;
 use x11::events::{EventLoopExit, event_loop, remote_viewport_size};
 
 mod app;
@@ -46,7 +48,10 @@ fn run() -> Result<()> {
         (Some(arg), None) if arg == "--inspect-framebuffer" => {
             return mxcfb::inspect_framebuffer();
         }
-        _ => bail!("usage: rust_x11_hello [--inspect-framebuffer]"),
+        (Some(arg), None) if arg == "--benchmark-mxcfb" => {
+            return run_mxcfb_benchmark();
+        }
+        _ => bail!("usage: rust_x11_hello [--inspect-framebuffer|--benchmark-mxcfb]"),
     }
 
     let display_kind = config::DisplayBackendKind::from_env()?;
@@ -104,6 +109,57 @@ fn run() -> Result<()> {
         (Ok(_), Err(cleanup_error)) => Err(cleanup_error),
         (Ok(_), Ok(())) => Ok(()),
     }
+}
+
+#[cfg(target_os = "linux")]
+fn run_mxcfb_benchmark() -> Result<()> {
+    let config = mxcfb::BenchmarkConfig::from_env()?;
+    let (conn, screen_num) = RustConnection::connect(None)
+        .context("failed to connect to X11 display; check DISPLAY and /tmp/.X11-unix/X0")?;
+    x11_display::print_screen_info(&conn, screen_num);
+    let (win, gc, size) = x11_display::setup_window(&conn, screen_num)?;
+    eprintln!(
+        "benchmark input window mapped id=0x{win:x} x={} y={} width={} height={}",
+        x11::display::WINDOW_X,
+        x11::display::WINDOW_Y,
+        size.0,
+        size.1
+    );
+
+    let benchmark_result = (|| -> Result<(mxcfb::BenchmarkOutcome, bool)> {
+        let mut benchmark = mxcfb::MxcfbBenchmark::open(config)?;
+        anyhow::ensure!(
+            benchmark.dimensions() == size,
+            "MXCFB framebuffer {:?} differs from X11 input window {:?}",
+            benchmark.dimensions(),
+            size
+        );
+        let mut local_exit = LocalExitPoll::new(size);
+        let outcome = benchmark.run(|| local_exit.poll(&conn, win))?;
+        Ok((outcome, local_exit.window_destroyed()))
+    })();
+
+    let destroy_window = !matches!(&benchmark_result, Ok((_, true)));
+    let cleanup_result = x11_display::cleanup(&conn, win, gc, destroy_window);
+
+    match (benchmark_result, cleanup_result) {
+        (Err(primary), Err(cleanup_error)) => {
+            eprintln!("cleanup after benchmark failure also failed: {cleanup_error:#}");
+            Err(primary)
+        }
+        (Err(primary), Ok(())) => Err(primary),
+        (Ok(_), Err(cleanup_error)) => Err(cleanup_error),
+        (Ok((mxcfb::BenchmarkOutcome::Completed, _)), Ok(())) => Ok(()),
+        (Ok((mxcfb::BenchmarkOutcome::Stopped { completed }, _)), Ok(())) => {
+            eprintln!("mxcfb benchmark exited early completed={completed}");
+            Ok(())
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn run_mxcfb_benchmark() -> Result<()> {
+    bail!("MXCFB benchmark requires Linux and /dev/fb0")
 }
 
 fn create_display_backend<'a>(

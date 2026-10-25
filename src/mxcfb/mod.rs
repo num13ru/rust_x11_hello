@@ -8,6 +8,8 @@ mod backend;
 #[cfg(target_os = "linux")]
 pub(crate) use backend::MxcfbDisplayBackend;
 // Update submission is used by the display backend, never by the probe.
+#[cfg(any(target_os = "linux", test))]
+mod benchmark;
 #[cfg(target_os = "linux")]
 mod controller;
 #[cfg(target_os = "linux")]
@@ -48,6 +50,8 @@ mod update_abi;
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 mod pixels;
 
+#[cfg(target_os = "linux")]
+pub(crate) use benchmark::{BenchmarkConfig, BenchmarkOutcome, MxcfbBenchmark};
 #[cfg(target_os = "linux")]
 pub(crate) use probe::inspect_framebuffer;
 
