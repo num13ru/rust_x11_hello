@@ -138,7 +138,7 @@ pub(crate) trait DisplayBackend {
 
     fn redraw_cached_frame(&mut self, cause: RedrawCause);
 
-    fn draw_system_ui(&mut self) -> Result<()>;
+    fn draw_system_ui(&mut self, connected: bool) -> Result<()>;
 }
 
 #[cfg(test)]

@@ -6,9 +6,9 @@ use crate::display::{
     CachedFrameMetadata, DisplayBackend, RedrawCause, RemoteFrame, RemoteFrameCache,
 };
 use crate::ui::screen::ScreenLayout;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::time::Instant;
-use x11rb::protocol::xproto::{Gcontext, Window};
+use x11rb::protocol::xproto::{ConnectionExt, Gcontext, Window};
 use x11rb::rust_connection::RustConnection;
 
 pub(crate) struct X11DisplayBackend<'a> {
@@ -47,6 +47,26 @@ impl<'a> X11DisplayBackend<'a> {
             framebuffer_adapter,
             remote_frame_cache: RemoteFrameCache::default(),
         }
+    }
+
+    fn clear_remote_viewport(&self) -> Result<()> {
+        let Some(screen) = ScreenLayout::new(self.dimensions.0, self.dimensions.1) else {
+            return Ok(());
+        };
+        let viewport = screen.remote_viewport;
+        self.conn
+            .clear_area(
+                false,
+                self.win,
+                viewport.x as i16,
+                viewport.y as i16,
+                viewport.width,
+                viewport.height,
+            )
+            .context("failed to send remote-viewport clear request")?
+            .check()
+            .context("X11 server rejected remote-viewport clear request")?;
+        Ok(())
     }
 }
 
@@ -146,6 +166,10 @@ impl DisplayBackend for X11DisplayBackend<'_> {
     }
 
     fn redraw_cached_frame(&mut self, cause: RedrawCause) {
+        if let Err(error) = self.clear_remote_viewport() {
+            eprintln!("remote viewport clear error cause={cause:?}: {error:#}");
+            return;
+        }
         let (Some(adapter), Some(frame)) = (
             self.framebuffer_adapter.as_ref(),
             self.remote_frame_cache.current(),
@@ -181,13 +205,14 @@ impl DisplayBackend for X11DisplayBackend<'_> {
         }
     }
 
-    fn draw_system_ui(&mut self) -> Result<()> {
+    fn draw_system_ui(&mut self, connected: bool) -> Result<()> {
         draw(
             self.conn,
             self.win,
             self.gc,
             self.dimensions.0,
             self.dimensions.1,
+            connected,
         )
     }
 }

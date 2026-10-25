@@ -745,6 +745,14 @@ impl Paperspoon {
         self.promote_startup();
         self.frames.take()
     }
+
+    pub(crate) fn is_connected(&mut self) -> bool {
+        self.promote_startup();
+        self.connection
+            .lock()
+            .expect("shared stream lock")
+            .is_connected()
+    }
 }
 
 impl Drop for Paperspoon {
@@ -1383,6 +1391,15 @@ mod tests {
         read_expected_viewport(&mut first, resized_viewport);
         drop(first);
         drop(listener); // Force EOF: the reconnector must notice.
+
+        let disconnect_deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while paperspoon.is_connected() {
+            assert!(
+                std::time::Instant::now() < disconnect_deadline,
+                "transport did not publish disconnected state"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
 
         // A new PaperSpoon appears; the reconnector should restore the stream
         // without any outbound pointer call from us. The reconnector loops forever

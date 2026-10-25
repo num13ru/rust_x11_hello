@@ -40,6 +40,10 @@ impl ConnectionState {
         }
     }
 
+    pub(super) fn is_connected(&self) -> bool {
+        matches!(self, Self::Connected { .. })
+    }
+
     pub(super) fn current_token(&self) -> Result<ConnectionToken> {
         let Self::Connected { token, .. } = self else {
             return Err(anyhow!("PaperSpoon not connected"));
@@ -116,6 +120,7 @@ mod tests {
     #[test]
     fn disconnected_state_rejects_stream_clone() {
         let state = ConnectionState::disconnected();
+        assert!(!state.is_connected());
         let error = state.clone_stream().expect_err("must be disconnected");
         assert!(error.to_string().contains("PaperSpoon not connected"));
         state.current_token().expect_err("must have no token");
@@ -134,6 +139,7 @@ mod tests {
 
         let mut state = ConnectionState::connected(first);
         state.reconnect(replacement);
+        assert!(state.is_connected());
 
         let mut byte = [0];
         assert_eq!(first_peer.read(&mut byte).expect("read first EOF"), 0);

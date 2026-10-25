@@ -11,6 +11,7 @@ use super::screen::{SYSTEM_UI_HEIGHT, ScreenLayout};
 
 const EXIT_TEXT_X_OFFSET: u16 = 18;
 const EXIT_TEXT: &[u8] = b"EXIT";
+pub(crate) const CONNECTION_INDICATOR_DIAMETER: u16 = 24;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum SystemAction {
@@ -29,6 +30,7 @@ enum ExitContact {
 pub(crate) struct SystemDrawLayout {
     pub(crate) rectangle: LayoutRect,
     pub(crate) text: TextPlacement,
+    pub(crate) connection_indicator: Option<LayoutRect>,
 }
 
 #[derive(Debug, Default)]
@@ -85,11 +87,40 @@ pub(crate) fn exit_bounds(width: u16, height: u16) -> Option<LogicalRect> {
         return None;
     }
 
+    let left = connection_indicator_bounds(width, height)
+        .map(|indicator| indicator.x + indicator.width + CELL_MARGIN)
+        .unwrap_or(CELL_MARGIN);
+    if physical_width <= left + CELL_MARGIN {
+        return None;
+    }
+
+    Some(LogicalRect {
+        x: left,
+        y: region.y,
+        width: physical_width - left - CELL_MARGIN,
+        height: region.height,
+    })
+}
+
+pub(crate) fn connection_indicator_bounds(width: u16, height: u16) -> Option<LogicalRect> {
+    let screen = ScreenLayout::new(width, height)?;
+    let region = screen.system_ui_region;
+    let required_width = CELL_MARGIN
+        .checked_mul(3)?
+        .checked_add(CONNECTION_INDICATOR_DIAMETER)?
+        .checked_add(1)?;
+    if region.height < SYSTEM_UI_HEIGHT
+        || region.width < required_width
+        || region.height < CONNECTION_INDICATOR_DIAMETER
+    {
+        return None;
+    }
+
     Some(LogicalRect {
         x: CELL_MARGIN,
-        y: region.y,
-        width: physical_width - CELL_MARGIN * 2,
-        height: region.height,
+        y: region.y + (region.height - CONNECTION_INDICATOR_DIAMETER) / 2,
+        width: CONNECTION_INDICATOR_DIAMETER,
+        height: CONNECTION_INDICATOR_DIAMETER,
     })
 }
 
@@ -110,6 +141,12 @@ pub(crate) fn draw_layout(width: u16, height: u16) -> Option<SystemDrawLayout> {
             y: logical_coordinate(center_y + u32::from(LABEL_TEXT_Y_OFFSET)),
             text: EXIT_TEXT,
         },
+        connection_indicator: connection_indicator_bounds(width, height).map(|bounds| LayoutRect {
+            x: logical_coordinate(u32::from(bounds.x)),
+            y: logical_coordinate(u32::from(bounds.y)),
+            width: bounds.width,
+            height: bounds.height,
+        }),
     })
 }
 
@@ -142,9 +179,9 @@ mod tests {
         assert_eq!(
             exit_bounds(WINDOW_WIDTH, WINDOW_HEIGHT),
             Some(LogicalRect {
-                x: 20,
+                x: 64,
                 y: 1624,
-                width: 1232,
+                width: 1188,
                 height: 72,
             })
         );
@@ -152,16 +189,22 @@ mod tests {
             draw_layout(WINDOW_WIDTH, WINDOW_HEIGHT),
             Some(SystemDrawLayout {
                 rectangle: LayoutRect {
-                    x: 20,
+                    x: 64,
                     y: 1624,
-                    width: 1232,
+                    width: 1188,
                     height: 72,
                 },
                 text: TextPlacement {
-                    x: 618,
+                    x: 640,
                     y: 1665,
                     text: b"EXIT",
                 },
+                connection_indicator: Some(LayoutRect {
+                    x: 20,
+                    y: 1648,
+                    width: 24,
+                    height: 24,
+                }),
             })
         );
     }
@@ -179,7 +222,10 @@ mod tests {
         ] {
             let exit = exit_bounds(width, height).expect("Exit bounds");
             let screen = ScreenLayout::new(width, height).expect("screen layout");
-            assert_eq!(exit.x, CELL_MARGIN);
+            let indicator = connection_indicator_bounds(width, height).expect("indicator bounds");
+            assert_eq!(indicator.x, CELL_MARGIN);
+            assert_eq!(indicator.y, screen.system_ui_region.y + 24);
+            assert_eq!(exit.x, indicator.x + indicator.width + CELL_MARGIN);
             assert_eq!(exit.y, screen.system_ui_region.y);
             assert_eq!(exit.height, SYSTEM_UI_HEIGHT);
             assert_eq!(exit.x + exit.width + CELL_MARGIN, screen.physical_size().0);
@@ -196,8 +242,38 @@ mod tests {
         }
 
         assert!(exit_bounds(41, 72).is_some());
+        assert!(connection_indicator_bounds(41, 72).is_none());
         assert!(exit_bounds(122, 1696).is_some());
+        assert!(connection_indicator_bounds(122, 1696).is_some());
         assert!(exit_bounds(1272, 262).is_some());
+    }
+
+    #[test]
+    fn connection_indicator_is_not_an_exit_hit_target() {
+        let indicator =
+            connection_indicator_bounds(WINDOW_WIDTH, WINDOW_HEIGHT).expect("indicator bounds");
+        let point = PhysicalPoint {
+            x: (indicator.x + indicator.width / 2) as i16,
+            y: (indicator.y + indicator.height / 2) as i16,
+        };
+        let mut ui = SystemUi::default();
+
+        assert_eq!(
+            ui.handle_pointer(
+                pointer(PointerEventKind::Press, point),
+                WINDOW_WIDTH,
+                WINDOW_HEIGHT
+            ),
+            None
+        );
+        assert_eq!(
+            ui.handle_pointer(
+                pointer(PointerEventKind::Release, point),
+                WINDOW_WIDTH,
+                WINDOW_HEIGHT
+            ),
+            None
+        );
     }
 
     #[test]

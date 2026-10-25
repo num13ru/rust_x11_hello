@@ -172,11 +172,15 @@ impl DisplayBackend for MxcfbDisplayBackend {
         }
     }
 
-    fn draw_system_ui(&mut self) -> Result<()> {
-        let submitted =
-            present_system_ui_with(&mut self.opened, &mut self.markers, self.submit_update)?;
+    fn draw_system_ui(&mut self, connected: bool) -> Result<()> {
+        let submitted = present_system_ui_with(
+            &mut self.opened,
+            &mut self.markers,
+            connected,
+            self.submit_update,
+        )?;
         eprintln!(
-            "mxcfb local Exit submitted marker={} region=({},{} {}x{})",
+            "mxcfb local system UI submitted connected={connected} marker={} region=({},{} {}x{})",
             submitted.marker,
             submitted.region.x,
             submitted.region.y,
@@ -361,8 +365,8 @@ mod tests {
         assert_eq!(backend.dimensions(), (64, 73));
         assert_eq!(backend.set_dimensions((64, 73)).unwrap(), None);
         assert!(backend.set_dimensions((65, 73)).is_err());
-        backend.draw_system_ui().unwrap();
+        backend.draw_system_ui(false).unwrap();
         backend.submit_update = reject_update;
-        assert!(backend.draw_system_ui().is_err());
+        assert!(backend.draw_system_ui(true).is_err());
     }
 }
