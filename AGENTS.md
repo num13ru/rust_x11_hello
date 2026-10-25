@@ -9,8 +9,8 @@ steps an agent should follow, especially around physical-device work.
 - Rust binary (`src/`) builds for ARMv7 musl via Docker (`make build`, `make verify`).
 - Host artifact: `kindle-extension/rust_x11_hello/bin/rust_x11_hello` (untracked, rebuilt by `make build`).
 - Device extension root: `/extensions/rust_x11_hello` (MTP) = `/mnt/us/extensions/rust_x11_hello` (runtime).
-- KUAL actions: **Run Paperpad (90s)** uses the X11 default; **Run Paperpad
-  MXCFB (90s, experimental)** selects direct framebuffer output while retaining
+- KUAL actions: **Run Paperpad (5m)** uses the X11 default; **Run Paperpad
+  MXCFB (5m, experimental)** selects direct framebuffer output while retaining
   the X11 window for input. Stop from the in-window **Exit** button or let the
   watchdog end the run; the full-screen window covers KUAL. A first MXCFB
   trial on the Paperwhite 6 exercised direct display, X11 touch, and local Exit;

@@ -93,9 +93,9 @@ mtp-rs rm /extensions/rust_x11_hello/bin/rust_x11_hello.previous --yes
 
 KUAL provides three actions:
 
-- **Run Paperpad (90s)** — reference X11 display backend.
-- **Run Paperpad MXCFB (90s, experimental)** — direct framebuffer display with
-  X11 still providing touch and lifecycle events.
+- **Run Paperpad (5m)** — reference X11 display backend with a five-minute watchdog.
+- **Run Paperpad MXCFB (5m, experimental)** — direct framebuffer display with
+  a five-minute watchdog and X11 still providing touch and lifecycle events.
 - **Inspect framebuffer metadata** — read-only diagnostics; it does not draw or
   submit an e-ink refresh.
 
