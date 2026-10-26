@@ -15,13 +15,40 @@ pub const WINDOW_BORDER_WIDTH: u16 = 0;
 /// X11 wire value meaning "inherit from parent" for the window visual.
 pub const VISUAL_COPY_FROM_PARENT: u32 = 0;
 
-/// Event mask selecting the core events Paperpad consumes.
-pub fn touch_event_mask() -> EventMask {
-    EventMask::EXPOSURE
-        | EventMask::STRUCTURE_NOTIFY
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WindowMode {
+    Drawable,
+    InputOnly,
+}
+
+impl WindowMode {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Drawable => "input-output",
+            Self::InputOnly => "input-only",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MappedWindow {
+    pub window: Window,
+    pub gc: Option<Gcontext>,
+    pub size: (u16, u16),
+    pub mode: WindowMode,
+}
+
+/// Events that do not require a drawable X11 surface.
+pub fn input_event_mask() -> EventMask {
+    EventMask::STRUCTURE_NOTIFY
         | EventMask::BUTTON_PRESS
         | EventMask::BUTTON_RELEASE
         | EventMask::POINTER_MOTION
+}
+
+/// Event mask selecting the core events Paperpad consumes.
+pub fn touch_event_mask() -> EventMask {
+    EventMask::EXPOSURE | input_event_mask()
 }
 /// Connect to the X server and create, map, and publish the test window.
 ///
@@ -29,7 +56,8 @@ pub fn touch_event_mask() -> EventMask {
 pub fn setup_window(
     conn: &RustConnection,
     screen_num: usize,
-) -> Result<(Window, Gcontext, (u16, u16))> {
+    mode: WindowMode,
+) -> Result<MappedWindow> {
     let screen = conn
         .setup()
         .roots
@@ -39,8 +67,26 @@ pub fn setup_window(
     anyhow::ensure!(size.0 > 0 && size.1 > 0, "X11 screen has zero dimensions");
 
     let win = conn.generate_id().context("failed to generate window id")?;
-    let gc = conn.generate_id().context("failed to generate GC id")?;
-    let event_mask = touch_event_mask();
+    let event_mask = match mode {
+        WindowMode::Drawable => touch_event_mask(),
+        WindowMode::InputOnly => input_event_mask(),
+    };
+    let (class, attributes) = match mode {
+        WindowMode::Drawable => (
+            WindowClass::INPUT_OUTPUT,
+            CreateWindowAux::new()
+                .background_pixel(screen.white_pixel)
+                .border_pixel(screen.black_pixel)
+                .override_redirect(1)
+                .event_mask(event_mask),
+        ),
+        WindowMode::InputOnly => (
+            WindowClass::INPUT_ONLY,
+            CreateWindowAux::new()
+                .override_redirect(1)
+                .event_mask(event_mask),
+        ),
+    };
 
     conn.create_window(
         COPY_DEPTH_FROM_PARENT,
@@ -51,28 +97,31 @@ pub fn setup_window(
         size.0,
         size.1,
         WINDOW_BORDER_WIDTH,
-        WindowClass::INPUT_OUTPUT,
+        class,
         VISUAL_COPY_FROM_PARENT,
-        &CreateWindowAux::new()
-            .background_pixel(screen.white_pixel)
-            .border_pixel(screen.black_pixel)
-            .override_redirect(1)
-            .event_mask(event_mask),
+        &attributes,
     )
     .context("failed to send create-window request")?
     .check()
     .context("X11 server rejected create-window request")?;
 
-    conn.create_gc(
-        gc,
-        win,
-        &CreateGCAux::new()
-            .foreground(screen.black_pixel)
-            .background(screen.white_pixel),
-    )
-    .context("failed to send create-GC request")?
-    .check()
-    .context("X11 server rejected create-GC request")?;
+    let gc = match mode {
+        WindowMode::Drawable => {
+            let gc = conn.generate_id().context("failed to generate GC id")?;
+            conn.create_gc(
+                gc,
+                win,
+                &CreateGCAux::new()
+                    .foreground(screen.black_pixel)
+                    .background(screen.white_pixel),
+            )
+            .context("failed to send create-GC request")?
+            .check()
+            .context("X11 server rejected create-GC request")?;
+            Some(gc)
+        }
+        WindowMode::InputOnly => None,
+    };
 
     conn.map_window(win)
         .context("failed to send map-window request")?
@@ -80,32 +129,34 @@ pub fn setup_window(
         .context("X11 server rejected map-window request")?;
     conn.flush().context("failed to flush map request")?;
 
-    Ok((win, gc, size))
+    Ok(MappedWindow {
+        window: win,
+        gc,
+        size,
+        mode,
+    })
 }
 
 /// Release the window and GC, destroying the window unless it is already gone.
-pub fn cleanup(
-    conn: &RustConnection,
-    win: Window,
-    gc: Gcontext,
-    destroy_window: bool,
-) -> Result<()> {
+pub fn cleanup(conn: &RustConnection, mapped: MappedWindow, destroy_window: bool) -> Result<()> {
     let mut first_error = None;
 
-    record_cleanup_error(
-        &mut first_error,
-        conn.free_gc(gc)
-            .context("failed to send free-GC request")
-            .and_then(|cookie| {
-                cookie
-                    .check()
-                    .context("X11 server rejected free-GC request")
-            }),
-    );
+    if let Some(gc) = mapped.gc {
+        record_cleanup_error(
+            &mut first_error,
+            conn.free_gc(gc)
+                .context("failed to send free-GC request")
+                .and_then(|cookie| {
+                    cookie
+                        .check()
+                        .context("X11 server rejected free-GC request")
+                }),
+        );
+    }
     if destroy_window {
         record_cleanup_error(
             &mut first_error,
-            conn.destroy_window(win)
+            conn.destroy_window(mapped.window)
                 .context("failed to send destroy-window request")
                 .and_then(|cookie| {
                     cookie
@@ -159,6 +210,20 @@ mod tests {
 
         for required in [
             EventMask::EXPOSURE,
+            EventMask::STRUCTURE_NOTIFY,
+            EventMask::BUTTON_PRESS,
+            EventMask::BUTTON_RELEASE,
+            EventMask::POINTER_MOTION,
+        ] {
+            assert_eq!(mask & u32::from(required), u32::from(required));
+        }
+    }
+
+    #[test]
+    fn input_only_mask_excludes_exposure_but_preserves_input_and_lifecycle() {
+        let mask = u32::from(input_event_mask());
+        assert_eq!(mask & u32::from(EventMask::EXPOSURE), 0);
+        for required in [
             EventMask::STRUCTURE_NOTIFY,
             EventMask::BUTTON_PRESS,
             EventMask::BUTTON_RELEASE,

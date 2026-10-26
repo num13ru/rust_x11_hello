@@ -5,7 +5,7 @@ use anyhow::{Result, ensure};
 
 use crate::ui::screen::ScreenLayout;
 
-use super::region::{remote_update_region, system_ui_update_region};
+use super::region::{checked_visible_region, remote_update_region, system_ui_update_region};
 use super::update_abi::{UpdateDataMtk, UpdateRegion};
 use super::update_marker::UpdateMarkerSequence;
 
@@ -98,6 +98,7 @@ pub(super) fn next_remote_request(
 }
 
 /// Preserve the established conservative policy for normal PaperPad frames.
+#[cfg(test)]
 pub(super) fn next_full_gc16_remote_request(
     screen: ScreenLayout,
     visible_width: u32,
@@ -122,6 +123,24 @@ pub(super) fn next_full_gc16_system_ui_request(
     markers: &mut UpdateMarkerSequence,
 ) -> Result<UpdateDataMtk> {
     let update_region = system_ui_update_region(screen, visible_width, visible_height)?;
+    request_for_region(update_region, markers.next_marker(), MxcfbWaveform::Gc16)
+}
+
+/// Full-screen GC16 refresh used after restoring the framebuffer bytes that
+/// preceded direct rendering.
+pub(super) fn next_full_screen_gc16_request(
+    visible_width: u32,
+    visible_height: u32,
+    markers: &mut UpdateMarkerSequence,
+) -> Result<UpdateDataMtk> {
+    let update_region = checked_visible_region(
+        0,
+        0,
+        visible_width,
+        visible_height,
+        visible_width,
+        visible_height,
+    )?;
     request_for_region(update_region, markers.next_marker(), MxcfbWaveform::Gc16)
 }
 
@@ -170,6 +189,25 @@ mod tests {
         );
         assert_eq!(local.waveform_mode, remote.waveform_mode);
         assert_eq!(local.update_mode, remote.update_mode);
+    }
+
+    #[test]
+    fn restoration_request_covers_the_entire_visible_screen() {
+        let mut markers = UpdateMarkerSequence::for_process();
+        let request = next_full_screen_gc16_request(1272, 1696, &mut markers).unwrap();
+        assert_eq!(
+            request.update_region,
+            UpdateRegion {
+                top: 0,
+                left: 0,
+                width: 1272,
+                height: 1696,
+            }
+        );
+        assert_eq!(request.waveform_mode, WAVEFORM_GC16);
+        assert_eq!(request.update_mode, UPDATE_MODE_FULL);
+        assert!(next_full_screen_gc16_request(0, 1696, &mut markers).is_err());
+        assert!(next_full_screen_gc16_request(1272, 0, &mut markers).is_err());
     }
 
     #[test]

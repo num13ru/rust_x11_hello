@@ -9,8 +9,8 @@ use anyhow::{Context, Result, bail, ensure};
 
 use super::region::checked_visible_region;
 use super::update_abi::{
-    MAX_PENDING_UPDATES, SEND_UPDATE_MTK, UpdateDataMtk, WAIT_FOR_ANY_UPDATE_COMPLETE_CHECK,
-    WAIT_FOR_ANY_UPDATE_COMPLETE_MTK,
+    MAX_PENDING_UPDATES, SEND_UPDATE_MTK, UpdateDataMtk, UpdateMarkerData,
+    WAIT_FOR_ANY_UPDATE_COMPLETE_CHECK, WAIT_FOR_ANY_UPDATE_COMPLETE_MTK, WAIT_FOR_UPDATE_COMPLETE,
 };
 
 /// Submit an already prepared update for a kernel-reported visible screen.
@@ -48,9 +48,36 @@ pub(super) fn submit_update(
     }
 }
 
+/// Wait for one process-owned marker using the firmware's marker-specific
+/// path. The PW6 driver returns zero whether the marker completed, was absent,
+/// or timed out, so callers must classify the elapsed time conservatively.
+pub(super) fn wait_for_update_complete(file: &File, marker: u32) -> Result<()> {
+    ensure!(marker != 0, "MXCFB completion marker must be nonzero");
+    let mut marker_data = UpdateMarkerData {
+        update_marker: marker,
+        collision_test: 0,
+    };
+
+    // SAFETY: `file` remains open and `marker_data` is a stable, mutable
+    // repr(C) buffer matching the source-verified 8-byte PW6 ABI.
+    let result = unsafe {
+        libc::ioctl(
+            file.as_raw_fd(),
+            WAIT_FOR_UPDATE_COMPLETE as _,
+            &mut marker_data,
+        )
+    };
+    match result {
+        0 => Ok(()),
+        -1 => Err(io::Error::last_os_error()).context("MXCFB_WAIT_FOR_UPDATE_COMPLETE"),
+        other => bail!("unexpected MXCFB_WAIT_FOR_UPDATE_COMPLETE return value {other}"),
+    }
+}
+
 /// Confirm that the PW6 wait-for-any-completion extension is accepted before
 /// a benchmark changes framebuffer pixels. A nonnegative feature value means
 /// the ioctl exists; its REAGL feature bits are logged but otherwise unused.
+#[allow(dead_code)] // Retained as an explicit diagnostic; not safe for attribution.
 pub(super) fn check_completion_wait_support(file: &File) -> Result<i32> {
     let mut markers = [0u32; MAX_PENDING_UPDATES];
     markers[0] = WAIT_FOR_ANY_UPDATE_COMPLETE_CHECK;
@@ -78,6 +105,7 @@ pub(super) fn check_completion_wait_support(file: &File) -> Result<i32> {
 /// until its 2-second FW 5.17.1.0.4 timeout returns zero markers. A zero-byte
 /// result is one timed-out wait, not proof that the submitted update failed;
 /// callers decide whether and how many times to retry.
+#[allow(dead_code)] // Global destructive marker store; diagnostic use only.
 pub(super) fn wait_for_any_update_complete(file: &File) -> Result<Vec<u32>> {
     let mut markers = [0u32; MAX_PENDING_UPDATES];
 
@@ -97,6 +125,7 @@ pub(super) fn wait_for_any_update_complete(file: &File) -> Result<Vec<u32>> {
     }
 }
 
+#[allow(dead_code)]
 fn decode_completed_markers(
     bytes: usize,
     markers: &[u32; MAX_PENDING_UPDATES],
@@ -193,6 +222,7 @@ mod tests {
     fn completion_ioctls_preserve_errno() {
         let file = File::open("/dev/null").unwrap();
         for error in [
+            wait_for_update_complete(&file, 1).unwrap_err(),
             check_completion_wait_support(&file).unwrap_err(),
             wait_for_any_update_complete(&file).unwrap_err(),
         ] {

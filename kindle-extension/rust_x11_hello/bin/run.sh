@@ -9,7 +9,7 @@ WATCHDOG_MARKER="$EXT_DIR/rust_x11_hello.watchdog"
 LOCK_DIR="$EXT_DIR/rust_x11_hello.lock"
 LOCK_OWNER_FILE="$LOCK_DIR/launcher.pid"
 WATCHDOG_SECONDS="${PAPERPAD_WATCHDOG_SECONDS:-90}"
-WATCHDOG_TERM_GRACE_SECONDS="${PAPERPAD_WATCHDOG_TERM_GRACE_SECONDS:-5}"
+WATCHDOG_TERM_GRACE_SECONDS="${PAPERPAD_WATCHDOG_TERM_GRACE_SECONDS:-15}"
 # The normal KUAL action leaves this unset for UDP discovery. An explicit host
 # remains available as a manual diagnostic override.
 COMPANION_HOST="${PAPERPAD_COMPANION:-}"
@@ -29,7 +29,7 @@ case "$WATCHDOG_SECONDS" in
     ''|0|*[!0-9]*) WATCHDOG_SECONDS=90 ;;
 esac
 case "$WATCHDOG_TERM_GRACE_SECONDS" in
-    ''|0|*[!0-9]*) WATCHDOG_TERM_GRACE_SECONDS=5 ;;
+    ''|0|*[!0-9]*) WATCHDOG_TERM_GRACE_SECONDS=15 ;;
 esac
 
 read_pid_file() {

@@ -29,6 +29,8 @@ use super::present::{present_remote_with_waveform, present_system_ui_with};
 #[cfg(target_os = "linux")]
 use super::update_marker::UpdateMarkerSequence;
 use super::update_request::MxcfbWaveform;
+#[cfg(target_os = "linux")]
+use super::update_request::next_full_screen_gc16_request;
 
 const WAVEFORM_ENV: &str = "PAPERPAD_MXCFB_BENCHMARK_WAVEFORM";
 const FRAMES_ENV: &str = "PAPERPAD_MXCFB_BENCHMARK_FRAMES";
@@ -37,11 +39,16 @@ const DEFAULT_FRAMES: usize = 8;
 const MIN_FRAMES: usize = 2;
 const MAX_FRAMES: usize = 120;
 #[cfg(any(target_os = "linux", test))]
-const MAX_COMPLETION_WAITS: usize = 4;
-// PW6 FW 5.17.1.0.4 waits this long in the driver before returning zero
-// completed-marker bytes. A timeout does not cancel the submitted update.
+const MIN_ATTRIBUTABLE_WAIT_US: u128 = 1_000;
 #[cfg(target_os = "linux")]
-const DRIVER_COMPLETION_WAIT_TIMEOUT_MS: u64 = 2_000;
+const MAX_COMPLETION_WAITS: usize = 1;
+// The source-derived marker-specific ioctl returns zero for completion,
+// a missing marker, and its five-second timeout. Durations outside these
+// bounds are not attributable to the submitted update.
+#[cfg(any(target_os = "linux", test))]
+const DRIVER_TIMEOUT_FLOOR_US: u128 = 4_500_000;
+#[cfg(target_os = "linux")]
+const DRIVER_COMPLETION_WAIT_TIMEOUT_MS: u64 = 5_000;
 const SIXTY_FPS_BUDGET_US: u128 = 16_667;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -93,15 +100,22 @@ pub(crate) struct MxcfbBenchmark {
     opened: OpenedFramebuffer,
     markers: UpdateMarkerSequence,
     config: BenchmarkConfig,
+    initial_screen: Option<Vec<u8>>,
+    screen_modified: bool,
 }
 
 #[cfg(target_os = "linux")]
 impl MxcfbBenchmark {
     pub(crate) fn open(config: BenchmarkConfig) -> Result<Self> {
         let opened = OpenedFramebuffer::open().context("initialize MXCFB benchmark")?;
-        let completion_feature = controller::check_completion_wait_support(&opened.file)
-            .context("MXCFB benchmark requires completion-marker support")?;
-        eprintln!("mxcfb benchmark completion-wait supported feature={completion_feature}");
+        let initial_screen = opened
+            .mapping
+            .snapshot_visible()
+            .context("snapshot framebuffer before MXCFB benchmark")?;
+        eprintln!(
+            "mxcfb benchmark completion mode=marker-specific ioctl=0xc008462f return_semantics=ambiguous snapshot_bytes={}",
+            initial_screen.len()
+        );
         eprintln!(
             "mxcfb benchmark configured waveform={} frames={} region={}x{} pattern=alternating-solid",
             config.waveform.name(),
@@ -113,6 +127,8 @@ impl MxcfbBenchmark {
             opened,
             markers: UpdateMarkerSequence::for_process(),
             config,
+            initial_screen: Some(initial_screen),
+            screen_modified: false,
         })
     }
 
@@ -128,6 +144,7 @@ impl MxcfbBenchmark {
             return Ok(BenchmarkOutcome::Stopped { completed: 0 });
         }
 
+        self.screen_modified = true;
         let system_ui = present_system_ui_with(
             &mut self.opened,
             &mut self.markers,
@@ -256,6 +273,50 @@ impl MxcfbBenchmark {
         .context("present MXCFB benchmark frame")
     }
 
+    pub(crate) fn restore_initial_screen(&mut self) -> Result<()> {
+        if !self.screen_modified {
+            return Ok(());
+        }
+        let snapshot = self
+            .initial_screen
+            .as_deref()
+            .context("MXCFB benchmark initial framebuffer snapshot is missing")?;
+        self.opened
+            .mapping
+            .restore_visible(snapshot)
+            .context("restore pre-benchmark framebuffer bytes")?;
+
+        let spec = self.opened.info.spec;
+        let mut request = next_full_screen_gc16_request(
+            spec.visible_width,
+            spec.visible_height,
+            &mut self.markers,
+        )
+        .context("prepare full-screen MXCFB restoration refresh")?;
+        let marker = request.update_marker;
+        controller::submit_update(
+            &self.opened.file,
+            &mut request,
+            spec.visible_width,
+            spec.visible_height,
+        )
+        .context("submit full-screen MXCFB restoration refresh")?;
+        let wait_started = Instant::now();
+        controller::wait_for_update_complete(&self.opened.file, marker)
+            .context("wait for full-screen MXCFB restoration refresh")?;
+        let wait_elapsed = wait_started.elapsed();
+        eprintln!(
+            "mxcfb benchmark cleanup restored_snapshot_bytes={} marker={} wait_us={} classification={} ioctl_completion_proven=false visual_completion_verified=false",
+            snapshot.len(),
+            marker,
+            wait_elapsed.as_micros(),
+            marker_wait_classification(wait_elapsed).label()
+        );
+        self.screen_modified = false;
+        self.initial_screen = None;
+        Ok(())
+    }
+
     fn wait_for_marker(
         &self,
         expected: u32,
@@ -266,8 +327,28 @@ impl MxcfbBenchmark {
             if exit_requested().context("poll local Exit while waiting for MXCFB completion")? {
                 return Ok(None);
             }
-            let completed = controller::wait_for_any_update_complete(&self.opened.file)
+            let wait_started = Instant::now();
+            controller::wait_for_update_complete(&self.opened.file, expected)
                 .with_context(|| format!("wait for MXCFB marker {expected}"))?;
+            let wait_elapsed = wait_started.elapsed();
+            let classification = marker_wait_classification(wait_elapsed);
+            eprintln!(
+                "mxcfb benchmark marker-specific wait marker={expected} elapsed_us={} classification={} ioctl_completion_proven=false visual_completion_verified=false",
+                wait_elapsed.as_micros(),
+                classification.label()
+            );
+            match classification {
+                MarkerWaitClassification::Attributable => {}
+                MarkerWaitClassification::ImmediateOrMissing => bail!(
+                    "MXCFB marker {expected} wait returned too quickly to attribute ({} us)",
+                    wait_elapsed.as_micros()
+                ),
+                MarkerWaitClassification::DriverTimeout => bail!(
+                    "MXCFB marker {expected} wait reached the ambiguous driver-timeout range ({} us)",
+                    wait_elapsed.as_micros()
+                ),
+            }
+            let completed = [expected];
             let decision = completion_batch_decision(expected, &completed, attempt);
             if decision == CompletionBatchDecision::Completed {
                 return Ok(Some(started.elapsed()));
@@ -293,7 +374,16 @@ impl MxcfbBenchmark {
     }
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(target_os = "linux")]
+impl Drop for MxcfbBenchmark {
+    fn drop(&mut self) {
+        if let Err(error) = self.restore_initial_screen() {
+            eprintln!("mxcfb benchmark cleanup failed during drop: {error:#}");
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CompletionBatchDecision {
     Completed,
@@ -301,7 +391,7 @@ enum CompletionBatchDecision {
     Exhausted,
 }
 
-#[cfg(any(target_os = "linux", test))]
+#[cfg(target_os = "linux")]
 fn completion_batch_decision(
     expected: u32,
     completed: &[u32],
@@ -313,6 +403,36 @@ fn completion_batch_decision(
         CompletionBatchDecision::Retry
     } else {
         CompletionBatchDecision::Exhausted
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum MarkerWaitClassification {
+    Attributable,
+    ImmediateOrMissing,
+    DriverTimeout,
+}
+
+#[cfg(target_os = "linux")]
+impl MarkerWaitClassification {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Attributable => "attributable-kernel-wait",
+            Self::ImmediateOrMissing => "ambiguous-immediate-or-missing",
+            Self::DriverTimeout => "ambiguous-driver-timeout",
+        }
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn marker_wait_classification(elapsed: Duration) -> MarkerWaitClassification {
+    if elapsed.as_micros() < MIN_ATTRIBUTABLE_WAIT_US {
+        MarkerWaitClassification::ImmediateOrMissing
+    } else if elapsed.as_micros() >= DRIVER_TIMEOUT_FLOOR_US {
+        MarkerWaitClassification::DriverTimeout
+    } else {
+        MarkerWaitClassification::Attributable
     }
 }
 
@@ -449,26 +569,26 @@ mod tests {
     }
 
     #[test]
-    fn completion_wait_retries_timeouts_and_unrelated_markers_but_requires_exact_match() {
+    fn marker_specific_wait_classifies_unattributable_boundaries() {
         assert_eq!(
-            completion_batch_decision(42, &[], 1),
-            CompletionBatchDecision::Retry
+            marker_wait_classification(Duration::from_micros(999)),
+            MarkerWaitClassification::ImmediateOrMissing
         );
         assert_eq!(
-            completion_batch_decision(42, &[41, 43], MAX_COMPLETION_WAITS - 1),
-            CompletionBatchDecision::Retry
+            marker_wait_classification(Duration::from_micros(1_000)),
+            MarkerWaitClassification::Attributable
         );
         assert_eq!(
-            completion_batch_decision(42, &[41, 42, 43], MAX_COMPLETION_WAITS),
-            CompletionBatchDecision::Completed
+            marker_wait_classification(Duration::from_millis(100)),
+            MarkerWaitClassification::Attributable
         );
         assert_eq!(
-            completion_batch_decision(42, &[], MAX_COMPLETION_WAITS),
-            CompletionBatchDecision::Exhausted
+            marker_wait_classification(Duration::from_micros(4_499_999)),
+            MarkerWaitClassification::Attributable
         );
         assert_eq!(
-            completion_batch_decision(42, &[41, 43], MAX_COMPLETION_WAITS),
-            CompletionBatchDecision::Exhausted
+            marker_wait_classification(Duration::from_millis(4_500)),
+            MarkerWaitClassification::DriverTimeout
         );
     }
 }

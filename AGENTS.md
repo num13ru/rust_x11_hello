@@ -11,7 +11,8 @@ steps an agent should follow, especially around physical-device work.
 - Device extension root: `/extensions/rust_x11_hello` (MTP) = `/mnt/us/extensions/rust_x11_hello` (runtime).
 - KUAL actions: **Run Paperpad (5m)** uses the X11 default; **Run Paperpad
   MXCFB (5m, experimental)** selects direct framebuffer output while retaining
-  the X11 window for input. Stop from the in-window **Exit** button or let the
+  an X11 InputOnly window for input without an X11 background or GC. Stop from
+  the in-window **Exit** button or let the
   watchdog end the run; the full-screen window covers KUAL. A first MXCFB
   trial on the Paperwhite 6 exercised direct display, X11 touch, and local Exit;
   remaining visual and lifecycle checks are recorded in
@@ -23,6 +24,17 @@ steps an agent should follow, especially around physical-device work.
   and must not be described as visual FPS without camera/operator evidence.
 - Physical device: Kindle Paperwhite 6 (Sangria / Bellatrix4), FW 5.17.1.0.4.
   USBNetwork is NOT available on this device; transport is Wi-Fi via `PAPERPAD_COMPANION`.
+
+## Documentation hygiene
+
+- Keep `README.md` concise: it is the project overview and operator entry point,
+  not a destination for raw logs, per-sample benchmark dumps, or accumulating
+  device-test history.
+- Maintain benchmark methodology and the latest compact result set in
+  `docs/mxcfb-benchmarks.md`. Put dated runs, checksums, failures, and historical
+  device evidence in `docs/archive/mxcfb-device-evidence.md`.
+- Keep retrieved device logs and status snapshots local and uncommitted. Summarize
+  only the evidence needed to support a claim in the appropriate documentation.
 
 ## Architecture ownership
 

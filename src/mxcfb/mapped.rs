@@ -59,6 +59,34 @@ impl WritableFramebuffer {
         })
     }
 
+    /// Copy the entire validated mapped span before any direct framebuffer
+    /// writes. Volatile loads preserve the device-memory access semantics.
+    pub(super) fn snapshot_visible(&self) -> Result<Vec<u8>> {
+        let mut snapshot = Vec::new();
+        snapshot
+            .try_reserve_exact(self.len)
+            .context("allocate framebuffer snapshot")?;
+        snapshot.resize(self.len, 0);
+        for (offset, byte) in snapshot.iter_mut().enumerate() {
+            // SAFETY: `offset` is bounded by the live mapping length. Volatile
+            // loads avoid treating driver-owned memory as ordinary RAM.
+            *byte = unsafe { std::ptr::read_volatile(self.address.as_ptr().add(offset)) };
+        }
+        Ok(snapshot)
+    }
+
+    /// Restore a snapshot created for this exact mapped span. Length is
+    /// checked before the first device-memory store.
+    pub(super) fn restore_visible(&mut self, snapshot: &[u8]) -> Result<()> {
+        ensure!(
+            snapshot.len() == self.len,
+            "framebuffer snapshot length {} differs from mapping length {}",
+            snapshot.len(),
+            self.len
+        );
+        self.write_at(0, snapshot)
+    }
+
     /// Write a fully in-bounds byte run. A bad range changes no bytes.
     pub(super) fn write_at(&mut self, offset: usize, bytes: &[u8]) -> Result<()> {
         self.check_range(offset, bytes.len())?;
@@ -311,6 +339,29 @@ mod tests {
             unsafe { std::ptr::read_volatile(mapping.address.as_ptr().add(7)) },
             0x56
         );
+    }
+
+    #[test]
+    fn snapshot_restore_round_trip_and_rejects_wrong_length() {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/zero")
+            .unwrap();
+        // SAFETY: /dev/zero supports the validated eight-byte shared mapping.
+        let mut mapping = unsafe { WritableFramebuffer::map_visible(&file, geometry()) }.unwrap();
+        mapping.write_at(0, &[1, 2, 3, 4, 5, 6, 7, 8]).unwrap();
+        let snapshot = mapping.snapshot_visible().unwrap();
+
+        mapping.write_at(0, &[8, 7, 6, 5, 4, 3, 2, 1]).unwrap();
+        assert!(mapping.restore_visible(&snapshot[..7]).is_err());
+        assert_eq!(
+            mapping.snapshot_visible().unwrap(),
+            [8, 7, 6, 5, 4, 3, 2, 1]
+        );
+
+        mapping.restore_visible(&snapshot).unwrap();
+        assert_eq!(mapping.snapshot_visible().unwrap(), snapshot);
     }
 
     #[test]
