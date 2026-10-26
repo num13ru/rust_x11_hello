@@ -99,6 +99,8 @@ KUAL provides normal run, explicit benchmark, and diagnostic actions:
 - **Benchmark MXCFB GC16/DU/A2/DU4** — separate, explicit 12-frame local
   completion benchmarks with a one-minute watchdog. They do not connect to
   PaperSpoon; DU, A2, and DU4 are experimental fidelity/ghosting tradeoffs.
+- **Benchmark A2 512px/256px/64px** — centered dirty-region completion tests
+  for measuring how update area affects the fastest full-screen waveform.
 - **Inspect framebuffer metadata** — read-only diagnostics; it does not draw or
   submit an e-ink refresh.
 
@@ -140,6 +142,7 @@ Other runtime overrides are:
 | `PAPERPAD_DISPLAY_BACKEND=mxcfb` | Experimental direct framebuffer path |
 | `PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=gc16\|du\|a2\|du4` | Explicit benchmark waveform; defaults to GC16 |
 | `PAPERPAD_MXCFB_BENCHMARK_FRAMES=2..120` | Completed benchmark samples; defaults to 8 |
+| `PAPERPAD_MXCFB_BENCHMARK_REGION=full\|WIDTHxHEIGHT` | Centered benchmark region inside the remote viewport; defaults to full |
 | `PAPERPAD_EXT_DIR` | KUAL extension directory |
 | `PAPERPAD_WATCHDOG_SECONDS` | Maximum run duration |
 | `PAPERPAD_WATCHDOG_TERM_GRACE_SECONDS` | Grace period before forced stop; defaults to 15 seconds |

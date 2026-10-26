@@ -31,6 +31,19 @@ the 2,157,312-byte framebuffer snapshot and submitted a full-screen GC16
 cleanup refresh. The operator confirmed that the original screen visibly
 returned after every benchmark.
 
+## Dirty-region sweep
+
+The next tuning pass keeps the proven A2 marker-specific completion path but
+limits both framebuffer writes and submitted updates to centered 512 x 512,
+256 x 256, and 64 x 64 rectangles. These results must be reported with their
+region sizes and must not replace the full-screen baseline above. The KUAL
+actions are present, but no physical-device result has been recorded yet.
+
+The measured region remains wholly inside the remote viewport. The local Exit
+strip is unchanged, while cleanup still restores the complete 2,157,312-byte
+snapshot and performs a full-screen GC16 refresh. An invalid, zero-sized, or
+out-of-viewport region fails before framebuffer bytes are changed.
+
 ## What is measured
 
 The benchmark:
@@ -58,11 +71,13 @@ classified as attributable kernel waits.
 
 ## Running it
 
-KUAL exposes separate **Benchmark MXCFB GC16**, **DU**, **A2**, and **DU4**
-actions. Direct command-line use on the Kindle is:
+KUAL exposes separate full-screen **Benchmark MXCFB GC16**, **DU**, **A2**, and
+**DU4** actions, plus A2 actions for 512 x 512, 256 x 256, and 64 x 64 centered
+regions. Direct command-line use on the Kindle is:
 
 ```sh
 PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=a2 \
+PAPERPAD_MXCFB_BENCHMARK_REGION=256x256 \
 PAPERPAD_MXCFB_BENCHMARK_FRAMES=60 \
 rust_x11_hello --benchmark-mxcfb
 ```
@@ -71,8 +86,8 @@ The benchmark works only when `/dev/fb0` reports the validated readable and
 writable 8-bit `hwtcon_v2` layout, the marker-specific MediaTek completion
 ioctl matches the source-derived ABI, and the X11 input window matches the
 framebuffer dimensions. Unsupported metadata, snapshot allocation failure,
-ioctl rejection, geometry change, or a non-attributable wait stops the run
-instead of producing a throughput result.
+an invalid or out-of-viewport region, ioctl rejection, geometry change, or a
+non-attributable wait stops the run instead of producing a throughput result.
 
 Snapshot restoration is attempted after normal completion, local Exit,
 ordinary errors, and forwarded `HUP`, `INT`, or `TERM`. `SIGKILL`, power loss,

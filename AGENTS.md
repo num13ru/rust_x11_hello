@@ -22,6 +22,9 @@ steps an agent should follow, especially around physical-device work.
 - The four **Benchmark MXCFB** KUAL actions are bounded, local completion tests
   for GC16, DU, A2, and DU4. They bypass PaperSpoon, retain X11 for local Exit,
   and must not be described as visual FPS without camera/operator evidence.
+- The **Benchmark A2 512px/256px/64px** actions use centered dirty regions to
+  isolate update-area scaling. They retain full-framebuffer snapshot cleanup;
+  do not compare them to full-screen throughput without stating region size.
 - Physical device: Kindle Paperwhite 6 (Sangria / Bellatrix4), FW 5.17.1.0.4.
   USBNetwork is NOT available on this device; transport is Wi-Fi via `PAPERPAD_COMPANION`.
 

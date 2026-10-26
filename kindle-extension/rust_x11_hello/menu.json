@@ -21,6 +21,18 @@
       "action": "PAPERPAD_WATCHDOG_SECONDS=60 PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=a2 PAPERPAD_MXCFB_BENCHMARK_FRAMES=12 sh bin/run.sh --benchmark-mxcfb"
     },
     {
+      "name": "Benchmark A2 512px (12, experimental)",
+      "action": "PAPERPAD_WATCHDOG_SECONDS=60 PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=a2 PAPERPAD_MXCFB_BENCHMARK_REGION=512x512 PAPERPAD_MXCFB_BENCHMARK_FRAMES=12 sh bin/run.sh --benchmark-mxcfb"
+    },
+    {
+      "name": "Benchmark A2 256px (12, experimental)",
+      "action": "PAPERPAD_WATCHDOG_SECONDS=60 PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=a2 PAPERPAD_MXCFB_BENCHMARK_REGION=256x256 PAPERPAD_MXCFB_BENCHMARK_FRAMES=12 sh bin/run.sh --benchmark-mxcfb"
+    },
+    {
+      "name": "Benchmark A2 64px (12, experimental)",
+      "action": "PAPERPAD_WATCHDOG_SECONDS=60 PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=a2 PAPERPAD_MXCFB_BENCHMARK_REGION=64x64 PAPERPAD_MXCFB_BENCHMARK_FRAMES=12 sh bin/run.sh --benchmark-mxcfb"
+    },
+    {
       "name": "Benchmark MXCFB DU4 (12, experimental)",
       "action": "PAPERPAD_WATCHDOG_SECONDS=60 PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=du4 PAPERPAD_MXCFB_BENCHMARK_FRAMES=12 sh bin/run.sh --benchmark-mxcfb"
     },

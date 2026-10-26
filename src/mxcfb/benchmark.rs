@@ -11,29 +11,26 @@ use std::time::Duration;
 #[cfg(target_os = "linux")]
 use std::time::Instant;
 
+use crate::ui::screen::ScreenRect;
 #[cfg(target_os = "linux")]
 use anyhow::bail;
 use anyhow::{Context, Result, ensure};
-#[cfg(target_os = "linux")]
-use paper_protocol::PixelFormat;
-
-#[cfg(target_os = "linux")]
-use crate::display::RemoteFrame;
 
 #[cfg(target_os = "linux")]
 use super::controller;
 #[cfg(target_os = "linux")]
 use super::opened::OpenedFramebuffer;
 #[cfg(target_os = "linux")]
-use super::present::{present_remote_with_waveform, present_system_ui_with};
+use super::present::present_system_ui_with;
 #[cfg(target_os = "linux")]
 use super::update_marker::UpdateMarkerSequence;
 use super::update_request::MxcfbWaveform;
 #[cfg(target_os = "linux")]
-use super::update_request::next_full_screen_gc16_request;
+use super::update_request::{next_benchmark_request, next_full_screen_gc16_request};
 
 const WAVEFORM_ENV: &str = "PAPERPAD_MXCFB_BENCHMARK_WAVEFORM";
 const FRAMES_ENV: &str = "PAPERPAD_MXCFB_BENCHMARK_FRAMES";
+const REGION_ENV: &str = "PAPERPAD_MXCFB_BENCHMARK_REGION";
 const DEFAULT_WAVEFORM: MxcfbWaveform = MxcfbWaveform::Gc16;
 const DEFAULT_FRAMES: usize = 8;
 const MIN_FRAMES: usize = 2;
@@ -55,6 +52,70 @@ const SIXTY_FPS_BUDGET_US: u128 = 16_667;
 pub(crate) struct BenchmarkConfig {
     waveform: MxcfbWaveform,
     frames: usize,
+    region: BenchmarkRegion,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BenchmarkRegion {
+    Full,
+    Size { width: u16, height: u16 },
+}
+
+impl BenchmarkRegion {
+    fn parse(value: Option<&str>) -> Result<Self> {
+        let Some(value) = value else {
+            return Ok(Self::Full);
+        };
+        if value == "full" {
+            return Ok(Self::Full);
+        }
+
+        let (width, height) = value.split_once('x').with_context(|| {
+            format!("invalid {REGION_ENV}={value:?}; expected full or WIDTHxHEIGHT")
+        })?;
+        ensure!(
+            !width.is_empty() && !height.is_empty() && !height.contains('x'),
+            "invalid {REGION_ENV}={value:?}; expected full or WIDTHxHEIGHT"
+        );
+        let width = width
+            .parse::<u16>()
+            .with_context(|| format!("invalid {REGION_ENV} width in {value:?}"))?;
+        let height = height
+            .parse::<u16>()
+            .with_context(|| format!("invalid {REGION_ENV} height in {value:?}"))?;
+        ensure!(
+            width > 0 && height > 0,
+            "{REGION_ENV} dimensions must be nonzero"
+        );
+        Ok(Self::Size { width, height })
+    }
+
+    fn resolve(self, viewport: ScreenRect) -> Result<ScreenRect> {
+        let (width, height) = match self {
+            Self::Full => (viewport.width, viewport.height),
+            Self::Size { width, height } => (width, height),
+        };
+        ensure!(
+            width <= viewport.width && height <= viewport.height,
+            "{REGION_ENV} {width}x{height} exceeds remote viewport {}x{}",
+            viewport.width,
+            viewport.height
+        );
+        let x = viewport
+            .x
+            .checked_add((viewport.width - width) / 2)
+            .context("MXCFB benchmark region x overflow")?;
+        let y = viewport
+            .y
+            .checked_add((viewport.height - height) / 2)
+            .context("MXCFB benchmark region y overflow")?;
+        Ok(ScreenRect {
+            x,
+            y,
+            width,
+            height,
+        })
+    }
 }
 
 impl BenchmarkConfig {
@@ -62,10 +123,11 @@ impl BenchmarkConfig {
     pub(crate) fn from_env() -> Result<Self> {
         let waveform = optional_env(WAVEFORM_ENV)?;
         let frames = optional_env(FRAMES_ENV)?;
-        Self::parse(waveform.as_deref(), frames.as_deref())
+        let region = optional_env(REGION_ENV)?;
+        Self::parse(waveform.as_deref(), frames.as_deref(), region.as_deref())
     }
 
-    fn parse(waveform: Option<&str>, frames: Option<&str>) -> Result<Self> {
+    fn parse(waveform: Option<&str>, frames: Option<&str>, region: Option<&str>) -> Result<Self> {
         let waveform = match waveform {
             None => DEFAULT_WAVEFORM,
             Some(name) => MxcfbWaveform::from_name(name).with_context(|| {
@@ -82,7 +144,11 @@ impl BenchmarkConfig {
             (MIN_FRAMES..=MAX_FRAMES).contains(&frames),
             "{FRAMES_ENV} must be in {MIN_FRAMES}..={MAX_FRAMES}, got {frames}"
         );
-        Ok(Self { waveform, frames })
+        Ok(Self {
+            waveform,
+            frames,
+            region: BenchmarkRegion::parse(region)?,
+        })
     }
 }
 
@@ -100,6 +166,7 @@ pub(crate) struct MxcfbBenchmark {
     opened: OpenedFramebuffer,
     markers: UpdateMarkerSequence,
     config: BenchmarkConfig,
+    region: ScreenRect,
     initial_screen: Option<Vec<u8>>,
     screen_modified: bool,
 }
@@ -108,6 +175,10 @@ pub(crate) struct MxcfbBenchmark {
 impl MxcfbBenchmark {
     pub(crate) fn open(config: BenchmarkConfig) -> Result<Self> {
         let opened = OpenedFramebuffer::open().context("initialize MXCFB benchmark")?;
+        let region = config
+            .region
+            .resolve(opened.info.screen.remote_viewport)
+            .context("validate MXCFB benchmark region")?;
         let initial_screen = opened
             .mapping
             .snapshot_visible()
@@ -117,16 +188,19 @@ impl MxcfbBenchmark {
             initial_screen.len()
         );
         eprintln!(
-            "mxcfb benchmark configured waveform={} frames={} region={}x{} pattern=alternating-solid",
+            "mxcfb benchmark configured waveform={} frames={} region={}x{}+{}+{} pattern=alternating-solid",
             config.waveform.name(),
             config.frames,
-            opened.info.screen.remote_viewport.width,
-            opened.info.screen.remote_viewport.height
+            region.width,
+            region.height,
+            region.x,
+            region.y
         );
         Ok(Self {
             opened,
             markers: UpdateMarkerSequence::for_process(),
             config,
+            region,
             initial_screen: Some(initial_screen),
             screen_modified: false,
         })
@@ -161,23 +235,16 @@ impl MxcfbBenchmark {
             return Ok(BenchmarkOutcome::Stopped { completed: 0 });
         }
 
-        let viewport = self.opened.info.screen.remote_viewport;
-        let pixel_count = usize::from(viewport.width)
-            .checked_mul(usize::from(viewport.height))
-            .context("MXCFB benchmark frame size overflow")?;
-        let black = solid_frame(pixel_count, 0x00)?;
-        let white = solid_frame(pixel_count, 0xff)?;
-
         // Warm the controller and establish a known first transition. This
         // completion is logged separately and excluded from summary samples.
-        let warmup = self.present_frame(1, &white)?;
-        let Some(warmup_wait) = self.wait_for_marker(warmup.marker, &mut exit_requested)? else {
+        let warmup_marker = self.present_frame(0xff)?;
+        let Some(warmup_wait) = self.wait_for_marker(warmup_marker, &mut exit_requested)? else {
             eprintln!("mxcfb benchmark stopped by local Exit completed=0 phase=warmup");
             return Ok(BenchmarkOutcome::Stopped { completed: 0 });
         };
         eprintln!(
             "mxcfb benchmark warmup marker={} completion_wait_us={}",
-            warmup.marker,
+            warmup_marker,
             warmup_wait.as_micros()
         );
 
@@ -197,14 +264,12 @@ impl MxcfbBenchmark {
                 });
             }
 
-            let pixels = if index % 2 == 0 { &black } else { &white };
+            let value = if index % 2 == 0 { 0x00 } else { 0xff };
             let frame_started = Instant::now();
             let prepare_submit_started = Instant::now();
-            let submitted = self.present_frame(index as u64 + 2, pixels)?;
+            let marker = self.present_frame(value)?;
             let prepare_write_submit = prepare_submit_started.elapsed();
-            let Some(completion_wait) =
-                self.wait_for_marker(submitted.marker, &mut exit_requested)?
-            else {
+            let Some(completion_wait) = self.wait_for_marker(marker, &mut exit_requested)? else {
                 eprintln!(
                     "mxcfb benchmark stopped by local Exit completed={} phase=sample-wait",
                     samples.len()
@@ -223,7 +288,7 @@ impl MxcfbBenchmark {
                 "mxcfb benchmark sample={}/{} marker={} prepare_write_submit_us={} completion_wait_us={} total_us={} within_60fps_budget={}",
                 index + 1,
                 self.config.frames,
-                submitted.marker,
+                marker,
                 sample.prepare_write_submit.as_micros(),
                 sample.completion_wait.as_micros(),
                 sample.total.as_micros(),
@@ -234,8 +299,12 @@ impl MxcfbBenchmark {
 
         let summary = BenchmarkSummary::from_samples(&samples)?;
         eprintln!(
-            "mxcfb benchmark summary waveform={} completed={} total_us={} end_to_end_fps_milli={} total_p50_us={} total_p95_us={} total_max_us={} software_60fps_budget_met={} visual_60fps_verified=false",
+            "mxcfb benchmark summary waveform={} region={}x{}+{}+{} completed={} total_us={} end_to_end_fps_milli={} total_p50_us={} total_p95_us={} total_max_us={} software_60fps_budget_met={} visual_60fps_verified=false",
             self.config.waveform.name(),
+            self.region.width,
+            self.region.height,
+            self.region.x,
+            self.region.y,
             summary.completed,
             summary.total.as_micros(),
             summary.fps_milli,
@@ -247,30 +316,30 @@ impl MxcfbBenchmark {
         Ok(BenchmarkOutcome::Completed)
     }
 
-    fn present_frame(
-        &mut self,
-        frame_id: u64,
-        pixels: &[u8],
-    ) -> Result<super::present::SubmittedUpdate> {
-        let viewport = self.opened.info.screen.remote_viewport;
-        let frame = RemoteFrame::new(
-            frame_id,
-            viewport.width,
-            viewport.height,
-            PixelFormat::Gray8,
-            usize::from(viewport.width),
-            pixels,
-            0,
-        )
-        .context("construct MXCFB benchmark frame")?;
-        present_remote_with_waveform(
-            &mut self.opened,
+    fn present_frame(&mut self, value: u8) -> Result<u32> {
+        let info = &self.opened.info;
+        let mut request = next_benchmark_request(
+            info.screen,
+            self.region,
+            info.spec.visible_width,
+            info.spec.visible_height,
             &mut self.markers,
-            frame,
             self.config.waveform,
-            controller::submit_update,
         )
-        .context("present MXCFB benchmark frame")
+        .context("prepare MXCFB benchmark update")?;
+        self.opened
+            .mapping
+            .fill_solid_region(self.region, value, info.spec)
+            .context("write MXCFB benchmark region")?;
+        let marker = request.update_marker;
+        controller::submit_update(
+            &self.opened.file,
+            &mut request,
+            info.spec.visible_width,
+            info.spec.visible_height,
+        )
+        .context("submit MXCFB benchmark update")?;
+        Ok(marker)
     }
 
     pub(crate) fn restore_initial_screen(&mut self) -> Result<()> {
@@ -436,16 +505,6 @@ fn marker_wait_classification(elapsed: Duration) -> MarkerWaitClassification {
     }
 }
 
-#[cfg(target_os = "linux")]
-fn solid_frame(pixel_count: usize, value: u8) -> Result<Vec<u8>> {
-    let mut pixels = Vec::new();
-    pixels
-        .try_reserve_exact(pixel_count)
-        .context("allocate MXCFB benchmark pixels")?;
-    pixels.resize(pixel_count, value);
-    Ok(pixels)
-}
-
 #[derive(Clone, Copy, Debug)]
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 struct BenchmarkSample {
@@ -517,10 +576,11 @@ mod tests {
     #[test]
     fn config_defaults_are_bounded_and_conservative() {
         assert_eq!(
-            BenchmarkConfig::parse(None, None).unwrap(),
+            BenchmarkConfig::parse(None, None, None).unwrap(),
             BenchmarkConfig {
                 waveform: MxcfbWaveform::Gc16,
                 frames: 8,
+                region: BenchmarkRegion::Full,
             }
         );
     }
@@ -534,17 +594,57 @@ mod tests {
             ("du4", MxcfbWaveform::Du4),
         ] {
             assert_eq!(
-                BenchmarkConfig::parse(Some(name), Some("12")).unwrap(),
+                BenchmarkConfig::parse(Some(name), Some("12"), Some("256x128")).unwrap(),
                 BenchmarkConfig {
                     waveform: expected,
                     frames: 12,
+                    region: BenchmarkRegion::Size {
+                        width: 256,
+                        height: 128,
+                    },
                 }
             );
         }
-        assert!(BenchmarkConfig::parse(Some("auto"), Some("12")).is_err());
-        assert!(BenchmarkConfig::parse(Some("gc16"), Some("1")).is_err());
-        assert!(BenchmarkConfig::parse(Some("gc16"), Some("121")).is_err());
-        assert!(BenchmarkConfig::parse(Some("gc16"), Some("many")).is_err());
+        assert!(BenchmarkConfig::parse(Some("auto"), Some("12"), None).is_err());
+        assert!(BenchmarkConfig::parse(Some("gc16"), Some("1"), None).is_err());
+        assert!(BenchmarkConfig::parse(Some("gc16"), Some("121"), None).is_err());
+        assert!(BenchmarkConfig::parse(Some("gc16"), Some("many"), None).is_err());
+        for bad_region in ["", "0x1", "1x0", "1", "1x2x3", "65536x1"] {
+            assert!(BenchmarkConfig::parse(Some("a2"), Some("12"), Some(bad_region)).is_err());
+        }
+    }
+
+    #[test]
+    fn benchmark_region_is_centered_and_bounded_by_remote_viewport() {
+        let viewport = ScreenRect {
+            x: 0,
+            y: 0,
+            width: 1272,
+            height: 1624,
+        };
+        assert_eq!(BenchmarkRegion::Full.resolve(viewport).unwrap(), viewport);
+        assert_eq!(
+            BenchmarkRegion::Size {
+                width: 256,
+                height: 128,
+            }
+            .resolve(viewport)
+            .unwrap(),
+            ScreenRect {
+                x: 508,
+                y: 748,
+                width: 256,
+                height: 128,
+            }
+        );
+        assert!(
+            BenchmarkRegion::Size {
+                width: 1273,
+                height: 1,
+            }
+            .resolve(viewport)
+            .is_err()
+        );
     }
 
     #[test]

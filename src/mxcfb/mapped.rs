@@ -9,6 +9,7 @@ use anyhow::{Context, Result, bail, ensure};
 
 use super::layout::{FramebufferGeometry, visible_mapping_len};
 use super::pixels::{FramebufferSpec, PreparedRemote};
+use super::region::checked_visible_region;
 use super::system_pixels::SystemUiPixels;
 use crate::ui::screen::{SYSTEM_UI_HEIGHT, ScreenLayout, ScreenRect};
 
@@ -118,6 +119,63 @@ impl WritableFramebuffer {
             self.write_at(offset, row)?;
         }
         Ok(prepared.region())
+    }
+
+    /// Fill only an explicitly validated 8-bit benchmark rectangle. All row
+    /// ranges and the reusable source row are allocated before the first
+    /// framebuffer store, so validation and allocation failures change no
+    /// bytes.
+    pub(super) fn fill_solid_region(
+        &mut self,
+        region: ScreenRect,
+        value: u8,
+        spec: FramebufferSpec,
+    ) -> Result<ScreenRect> {
+        spec.validate_format()?;
+        ensure!(
+            self.matches_spec(spec),
+            "benchmark region and writable mapping geometry differ"
+        );
+        checked_visible_region(
+            u32::from(region.x),
+            u32::from(region.y),
+            u32::from(region.width),
+            u32::from(region.height),
+            spec.visible_width,
+            spec.visible_height,
+        )?;
+
+        let width = usize::from(region.width);
+        let height = usize::from(region.height);
+        let first_x = usize::try_from(spec.xoffset)?
+            .checked_add(usize::from(region.x))
+            .context("benchmark region horizontal offset overflow")?;
+        let first_y = usize::try_from(spec.yoffset)?
+            .checked_add(usize::from(region.y))
+            .context("benchmark region vertical offset overflow")?;
+        let mut offsets = Vec::new();
+        offsets
+            .try_reserve_exact(height)
+            .context("allocate benchmark region row offsets")?;
+        for row in 0..height {
+            let offset = first_y
+                .checked_add(row)
+                .and_then(|y| y.checked_mul(spec.line_length))
+                .and_then(|start| start.checked_add(first_x))
+                .context("benchmark region row offset overflow")?;
+            self.check_range(offset, width)?;
+            offsets.push(offset);
+        }
+
+        let mut pixels = Vec::new();
+        pixels
+            .try_reserve_exact(width)
+            .context("allocate benchmark region row")?;
+        pixels.resize(width, value);
+        for offset in offsets {
+            self.write_at(offset, &pixels)?;
+        }
+        Ok(region)
     }
 
     /// Write only the local system strip. Geometry, payload length, and every
@@ -339,6 +397,56 @@ mod tests {
             unsafe { std::ptr::read_volatile(mapping.address.as_ptr().add(7)) },
             0x56
         );
+    }
+
+    #[test]
+    fn solid_region_fill_writes_only_selected_rows() {
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/zero")
+            .unwrap();
+        // SAFETY: /dev/zero supports the validated eight-byte shared mapping.
+        let mut mapping = unsafe { WritableFramebuffer::map_visible(&file, geometry()) }.unwrap();
+        let spec = FramebufferSpec {
+            visible_width: 4,
+            visible_height: 2,
+            virtual_width: 4,
+            virtual_height: 2,
+            xoffset: 0,
+            yoffset: 0,
+            line_length: 4,
+            memory_len: 8,
+            kind: 0,
+            visual: 1,
+            bits_per_pixel: 8,
+            grayscale: 1,
+            nonstd: 0,
+        };
+        let region = ScreenRect {
+            x: 1,
+            y: 0,
+            width: 2,
+            height: 2,
+        };
+        assert_eq!(
+            mapping.fill_solid_region(region, 0x5a, spec).unwrap(),
+            region
+        );
+        assert_eq!(
+            mapping.snapshot_visible().unwrap(),
+            [0, 0x5a, 0x5a, 0, 0, 0x5a, 0x5a, 0]
+        );
+
+        let before = mapping.snapshot_visible().unwrap();
+        let invalid = ScreenRect {
+            x: 3,
+            y: 0,
+            width: 2,
+            height: 1,
+        };
+        assert!(mapping.fill_solid_region(invalid, 0xff, spec).is_err());
+        assert_eq!(mapping.snapshot_visible().unwrap(), before);
     }
 
     #[test]

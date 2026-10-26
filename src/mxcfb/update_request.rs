@@ -3,7 +3,7 @@
 
 use anyhow::{Result, ensure};
 
-use crate::ui::screen::ScreenLayout;
+use crate::ui::screen::{ScreenLayout, ScreenRect};
 
 use super::region::{checked_visible_region, remote_update_region, system_ui_update_region};
 use super::update_abi::{UpdateDataMtk, UpdateRegion};
@@ -94,6 +94,46 @@ pub(super) fn next_remote_request(
     waveform: MxcfbWaveform,
 ) -> Result<UpdateDataMtk> {
     let update_region = remote_update_region(screen, visible_width, visible_height)?;
+    request_for_region(update_region, markers.next_marker(), waveform)
+}
+
+/// Validate an explicit benchmark rectangle inside the remote viewport before
+/// advancing the process-local marker. Normal PaperPad presentation never uses
+/// this path.
+pub(super) fn next_benchmark_request(
+    screen: ScreenLayout,
+    region: ScreenRect,
+    visible_width: u32,
+    visible_height: u32,
+    markers: &mut UpdateMarkerSequence,
+    waveform: MxcfbWaveform,
+) -> Result<UpdateDataMtk> {
+    let (screen_width, screen_height) = screen.physical_size();
+    ensure!(
+        (u32::from(screen_width), u32::from(screen_height)) == (visible_width, visible_height),
+        "framebuffer visible dimensions do not match PaperPad screen"
+    );
+
+    let left = u32::from(region.x);
+    let top = u32::from(region.y);
+    let width = u32::from(region.width);
+    let height = u32::from(region.height);
+    let update_region =
+        checked_visible_region(left, top, width, height, visible_width, visible_height)?;
+
+    let remote = screen.remote_viewport;
+    let remote_left = u32::from(remote.x);
+    let remote_top = u32::from(remote.y);
+    let remote_right = remote_left + u32::from(remote.width);
+    let remote_bottom = remote_top + u32::from(remote.height);
+    ensure!(
+        left >= remote_left
+            && top >= remote_top
+            && left + width <= remote_right
+            && top + height <= remote_bottom,
+        "MXCFB benchmark region must remain inside remote viewport"
+    );
+
     request_for_region(update_region, markers.next_marker(), waveform)
 }
 
@@ -189,6 +229,39 @@ mod tests {
         );
         assert_eq!(local.waveform_mode, remote.waveform_mode);
         assert_eq!(local.update_mode, remote.update_mode);
+    }
+
+    #[test]
+    fn benchmark_request_is_bounded_by_remote_viewport_before_marker_advance() {
+        let screen = ScreenLayout::new(1272, 1696).unwrap();
+        let mut markers = UpdateMarkerSequence::for_process();
+        let invalid = ScreenRect {
+            x: 1200,
+            y: 1600,
+            width: 72,
+            height: 72,
+        };
+        assert!(
+            next_benchmark_request(screen, invalid, 1272, 1696, &mut markers, MxcfbWaveform::A2,)
+                .is_err()
+        );
+
+        let region = ScreenRect {
+            x: 508,
+            y: 684,
+            width: 256,
+            height: 256,
+        };
+        let request =
+            next_benchmark_request(screen, region, 1272, 1696, &mut markers, MxcfbWaveform::A2)
+                .unwrap();
+        assert_eq!(request.update_region.left, 508);
+        assert_eq!(request.update_region.top, 684);
+        assert_eq!(request.update_region.width, 256);
+        assert_eq!(request.update_region.height, 256);
+        assert_eq!(request.update_marker, std::process::id().max(1));
+        assert_eq!(request.waveform_mode, WAVEFORM_A2);
+        assert_eq!(request.flags, EPDC_FLAG_FORCE_MONOCHROME);
     }
 
     #[test]
