@@ -43,24 +43,35 @@ pub fn render_application(
 }
 
 fn draw_layout(canvas: &mut MonoCanvas, layout: &ApplicationLayout<'_>) {
-    draw_text(canvas, layout.title);
+    draw_text(canvas, layout.title, Mono1Pixel::Black);
     for button in &layout.buttons {
-        canvas.outline_rect(
-            button.bounds.x,
-            button.bounds.y,
-            button.bounds.width,
-            button.bounds.height,
-            Mono1Pixel::Black,
-        );
-        draw_text(canvas, button.label);
+        if button.pressed {
+            canvas.fill_rect(
+                button.bounds.x,
+                button.bounds.y,
+                button.bounds.width,
+                button.bounds.height,
+                Mono1Pixel::Black,
+            );
+            draw_text(canvas, button.label, Mono1Pixel::White);
+        } else {
+            canvas.outline_rect(
+                button.bounds.x,
+                button.bounds.y,
+                button.bounds.width,
+                button.bounds.height,
+                Mono1Pixel::Black,
+            );
+            draw_text(canvas, button.label, Mono1Pixel::Black);
+        }
     }
     if let Some(status) = layout.status {
-        draw_text(canvas, status);
+        draw_text(canvas, status, Mono1Pixel::Black);
     }
 }
 
-fn draw_text(canvas: &mut MonoCanvas, text: TextRun<'_>) {
-    canvas.draw_text(text.x, text.baseline_y, text.text, Mono1Pixel::Black);
+fn draw_text(canvas: &mut MonoCanvas, text: TextRun<'_>, color: Mono1Pixel) {
+    canvas.draw_text(text.x, text.baseline_y, text.text, color);
 }
 
 #[cfg(test)]
@@ -125,6 +136,19 @@ mod tests {
             (1584..HEIGHT)
                 .all(|y| { (0..WIDTH).all(|x| frame.pixel(x, y) == Some(Mono1Pixel::White)) })
         );
+    }
+
+    #[test]
+    fn pressed_button_is_filled_and_its_label_is_inverted() {
+        let mut ui = ApplicationUi::default();
+        assert!(ui.set_pressed_button(Some(1)));
+        let frame = render_application(&ui, WIDTH, HEIGHT).expect("pressed application frame");
+
+        assert_eq!(frame.pixel(21, 61), Some(Mono1Pixel::Black));
+        assert_eq!(frame.pixel(100, 100), Some(Mono1Pixel::Black));
+        assert_eq!(frame.pixel(209, 244), Some(Mono1Pixel::Black));
+        assert_eq!(frame.pixel(211, 244), Some(Mono1Pixel::White));
+        assert_eq!(frame.pixel(500, 500), Some(Mono1Pixel::White));
     }
 
     #[test]

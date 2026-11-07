@@ -514,35 +514,35 @@ impl FrameSender {
 
 fn replace_application_frame(
     frame_sender: &FrameSender,
-    ui: &ApplicationUi,
+    ui: &mut ApplicationUi,
     input: &mut ApplicationInput,
     rendered_viewport: &mut Option<(u16, u16)>,
     viewport: (u16, u16),
 ) -> Result<Option<SentFrame>, String> {
     *rendered_viewport = None;
-    input.set_viewport(None);
+    input.set_viewport(ui, None);
     let sent = frame_sender.send_application_for_viewport_change(ui, viewport)?;
     if sent.is_some() {
         *rendered_viewport = Some(viewport);
-        input.set_viewport(Some(viewport));
+        input.set_viewport(ui, Some(viewport));
     }
     Ok(sent)
 }
 
 fn replace_hello_frame(
     frame_sender: &FrameSender,
-    ui: &ApplicationUi,
+    ui: &mut ApplicationUi,
     input: &mut ApplicationInput,
     rendered_viewport: &mut Option<(u16, u16)>,
     viewport: (u16, u16),
     pixel_formats: V2PixelFormats,
 ) -> Result<Option<HelloFrame>, String> {
     *rendered_viewport = None;
-    input.set_viewport(None);
+    input.set_viewport(ui, None);
     let sent = frame_sender.send_for_hello(ui, viewport, pixel_formats)?;
     if let Some(ref hello_frame) = sent {
         *rendered_viewport = hello_frame.sent.application_viewport;
-        input.set_viewport(hello_frame.sent.application_viewport);
+        input.set_viewport(ui, hello_frame.sent.application_viewport);
     }
     Ok(sent)
 }
@@ -799,13 +799,13 @@ fn main() -> io::Result<()> {
                 continue;
             }
         };
-        let application_ui = ApplicationUi::default();
+        let mut application_ui = ApplicationUi::default();
         let mut reported_viewport = (hello.viewport_width(), hello.viewport_height());
         let mut application_input = ApplicationInput::default();
         let mut rendered_application_viewport = None;
         match replace_hello_frame(
             &frame_sender,
-            &application_ui,
+            &mut application_ui,
             &mut application_input,
             &mut rendered_application_viewport,
             reported_viewport,
@@ -874,7 +874,7 @@ fn main() -> io::Result<()> {
                     }
                     match replace_application_frame(
                         &frame_sender,
-                        &application_ui,
+                        &mut application_ui,
                         &mut application_input,
                         &mut rendered_application_viewport,
                         reported_viewport,
@@ -909,17 +909,50 @@ fn main() -> io::Result<()> {
                 SessionMessage::Pointer(pointer) => pointer,
             };
             if rendered_viewport_changed {
-                application_input.set_viewport(matching_application_viewport(
-                    reported_viewport,
-                    rendered_application_viewport,
-                ));
+                application_input.set_viewport(
+                    &mut application_ui,
+                    matching_application_viewport(reported_viewport, rendered_application_viewport),
+                );
             }
             let phase = match pointer.phase() {
                 V2PointerPhase::Down => "down",
                 V2PointerPhase::Up => "up",
             };
             let record = format!("pointer phase={phase} x={} y={}", pointer.x(), pointer.y());
-            let host_activation = application_input.handle_pointer(&application_ui, pointer);
+            let input_result = application_input.handle_pointer(&mut application_ui, pointer);
+            if input_result.visual_changed && application_input.is_active() {
+                let visual_state = input_result
+                    .pressed_button
+                    .map(|button_id| format!("pressed button={button_id}"))
+                    .unwrap_or_else(|| "released".to_string());
+                match frame_sender.send_application(&application_ui, reported_viewport) {
+                    Ok(ApplicationSend::Sent(sent)) => {
+                        let feedback_record = format!(
+                            "sent application frame id={} width={} height={} bytes={} encode_us={} socket_write_us={} source=pointer state={visual_state}",
+                            sent.frame_id,
+                            reported_viewport.0,
+                            reported_viewport.1,
+                            sent.encoded_len,
+                            sent.encode_elapsed.as_micros(),
+                            sent.socket_write_elapsed.as_micros()
+                        );
+                        println!("{feedback_record}");
+                        flush_stdout("after pointer feedback frame");
+                        if let Err(error) =
+                            write_log_record(&mut file, &peer.to_string(), &feedback_record)
+                        {
+                            eprintln!("frame log error: {error}");
+                        }
+                    }
+                    Ok(ApplicationSend::Unchanged) => {
+                        eprintln!("pointer feedback frame unchanged after {visual_state}");
+                    }
+                    Ok(ApplicationSend::NoConnection) => {
+                        eprintln!("pointer feedback frame not sent: no PaperPad connected");
+                    }
+                    Err(error) => eprintln!("pointer feedback frame error: {error}"),
+                }
+            }
             println!("received from {peer}: {record}");
             flush_stdout("after received line");
 
@@ -928,7 +961,7 @@ fn main() -> io::Result<()> {
                 eprintln!("log write error: {error}");
             }
 
-            if let Some(activation) = host_activation {
+            if let Some(activation) = input_result.activation {
                 let dispatch = if opts.forward_url {
                     match forward_url(activation.action_id) {
                         Ok(()) => "forwarded",
@@ -1127,11 +1160,12 @@ mod tests {
         assert!(current.clear_if_current(&first_token));
         let (_second_token, mut second_peer) =
             install_hello_connection(&listener, &current, formats, (12, 16));
+        let mut ui = ApplicationUi::default();
         let mut input = ApplicationInput::default();
         let mut rendered_viewport = Some((12, 16));
         let resent = replace_hello_frame(
             &frame_sender,
-            &ApplicationUi::default(),
+            &mut ui,
             &mut input,
             &mut rendered_viewport,
             (12, 16),
@@ -1329,7 +1363,7 @@ mod tests {
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind listener");
         let current = CurrentConnection::default();
         let frame_sender = FrameSender::new(current.clone());
-        let ui = ApplicationUi::default();
+        let mut ui = ApplicationUi::default();
         let (token, mut first_peer) = install_connection(&listener, &current);
         let border = diagnostic("frame border 9x9");
 
@@ -1372,7 +1406,7 @@ mod tests {
         let mut rendered_viewport = Some((9, 9));
         let resent = replace_hello_frame(
             &frame_sender,
-            &ui,
+            &mut ui,
             &mut input,
             &mut rendered_viewport,
             (9, 9),
@@ -1396,7 +1430,7 @@ mod tests {
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind listener");
         let current = CurrentConnection::default();
         let frame_sender = FrameSender::new(current.clone());
-        let ui = ApplicationUi::default();
+        let mut ui = ApplicationUi::default();
         let (token, mut first_peer) = install_connection(&listener, &current);
 
         let first_sent = frame_sender
@@ -1413,7 +1447,7 @@ mod tests {
         let mut rendered_viewport = None;
         let resent = replace_hello_frame(
             &frame_sender,
-            &ui,
+            &mut ui,
             &mut input,
             &mut rendered_viewport,
             (128, 128),
@@ -1437,7 +1471,7 @@ mod tests {
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind listener");
         let current = CurrentConnection::default();
         let frame_sender = FrameSender::new(current.clone());
-        let ui = ApplicationUi::default();
+        let mut ui = ApplicationUi::default();
         let (token, mut first_peer) = install_connection(&listener, &current);
 
         let first_sent = frame_sender
@@ -1452,7 +1486,7 @@ mod tests {
         let mut rendered_viewport = None;
         let replacement = replace_hello_frame(
             &frame_sender,
-            &ui,
+            &mut ui,
             &mut input,
             &mut rendered_viewport,
             (128, 128),
@@ -1479,12 +1513,13 @@ mod tests {
         let current = CurrentConnection::default();
         current.install(&client).expect("install connection");
         let frame_sender = FrameSender::new(current);
+        let mut ui = ApplicationUi::default();
         let mut input = ApplicationInput::default();
         let mut rendered_viewport = None;
 
         let sent = replace_application_frame(
             &frame_sender,
-            &ApplicationUi::default(),
+            &mut ui,
             &mut input,
             &mut rendered_viewport,
             (128, 128),
@@ -1509,7 +1544,7 @@ mod tests {
 
         replace_application_frame(
             &frame_sender,
-            &ApplicationUi::default(),
+            &mut ui,
             &mut input,
             &mut rendered_viewport,
             (0, 128),
@@ -1517,6 +1552,85 @@ mod tests {
         .expect_err("zero-width replacement must fail");
         assert!(!input.is_active());
         assert_eq!(rendered_viewport, None);
+    }
+
+    #[test]
+    fn pointer_visual_transitions_send_pressed_then_restored_frames() {
+        const VIEWPORT: (u16, u16) = (300, 500);
+        const POINTER: (u16, u16) = (30, 70);
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind listener");
+        let current = CurrentConnection::default();
+        let frame_sender = FrameSender::new(current.clone());
+        let (_token, mut peer) = install_connection(&listener, &current);
+        let mut ui = ApplicationUi::default();
+        let mut input = ApplicationInput::default();
+        assert!(!input.set_viewport(&mut ui, Some(VIEWPORT)));
+
+        let ApplicationSend::Sent(initial) = frame_sender
+            .send_application(&ui, VIEWPORT)
+            .expect("initial application frame")
+        else {
+            panic!("initial application frame must be sent");
+        };
+        let (initial_id, initial_frame) = read_sent_owned_frame(&mut peer, initial);
+        let Frame::Mono1(initial_frame) = initial_frame else {
+            panic!("Mono1 application frame expected");
+        };
+        assert_eq!(initial_id, 1);
+        assert_eq!(
+            initial_frame.pixel(POINTER.0, POINTER.1),
+            Some(paper_protocol::Mono1Pixel::White)
+        );
+
+        let pressed = input.handle_pointer(
+            &mut ui,
+            paper_protocol::V2Pointer::new(V2PointerPhase::Down, POINTER.0, POINTER.1),
+        );
+        assert_eq!(pressed.activation, None);
+        assert_eq!(pressed.pressed_button, Some(1));
+        assert!(pressed.visual_changed);
+        let ApplicationSend::Sent(pressed_send) = frame_sender
+            .send_application(&ui, VIEWPORT)
+            .expect("pressed application frame")
+        else {
+            panic!("pressed application frame must be sent");
+        };
+        let (pressed_id, pressed_frame) = read_sent_owned_frame(&mut peer, pressed_send);
+        let Frame::Mono1(pressed_frame) = pressed_frame else {
+            panic!("Mono1 pressed frame expected");
+        };
+        assert_eq!(pressed_id, 2);
+        assert_eq!(
+            pressed_frame.pixel(POINTER.0, POINTER.1),
+            Some(paper_protocol::Mono1Pixel::Black)
+        );
+
+        let released = input.handle_pointer(
+            &mut ui,
+            paper_protocol::V2Pointer::new(V2PointerPhase::Up, POINTER.0, POINTER.1),
+        );
+        assert_eq!(
+            released.activation,
+            Some(paperspoon::application_input::ApplicationActivation {
+                button_id: 1,
+                action_id: "media.play_pause",
+            })
+        );
+        assert_eq!(released.pressed_button, None);
+        assert!(released.visual_changed);
+        let ApplicationSend::Sent(restored_send) = frame_sender
+            .send_application(&ui, VIEWPORT)
+            .expect("restored application frame")
+        else {
+            panic!("restored application frame must be sent");
+        };
+        let (restored_id, restored_frame) = read_sent_owned_frame(&mut peer, restored_send);
+        let Frame::Mono1(restored_frame) = restored_frame else {
+            panic!("Mono1 restored frame expected");
+        };
+        assert_eq!(restored_id, 3);
+        assert_eq!(restored_frame.pixels(), initial_frame.pixels());
     }
 
     #[test]
@@ -1662,7 +1776,7 @@ mod tests {
         let mut rendered_viewport = None;
         let resent = replace_hello_frame(
             &frame_sender,
-            &ui,
+            &mut ui,
             &mut input,
             &mut rendered_viewport,
             (128, 128),

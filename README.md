@@ -264,10 +264,11 @@ evidence.
 ## Touch and Mac actions
 
 PaperPad forwards only primary core-X11 contacts (`detail=1`) inside the remote
-viewport. PaperSpoon activates a button only when a matching release remains
-inside the button that was pressed. Gaps, unmatched releases, viewport changes,
-and releases elsewhere cancel or do nothing. The local **Exit** control never
-sends an application action across the protocol.
+viewport. PaperSpoon fills a grid button while its contact is armed and restores
+it before dispatching the action. It activates a button only when a matching
+release remains inside the button that was pressed. Gaps, unmatched releases,
+viewport changes, and releases elsewhere cancel or do nothing. The local
+**Exit** control never sends an application action across the protocol.
 
 | Button | PaperSpoon action |
 | --- | --- |

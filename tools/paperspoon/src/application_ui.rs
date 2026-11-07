@@ -50,6 +50,7 @@ pub struct ButtonLayout {
     pub id: u8,
     pub bounds: Rect,
     pub label: TextRun<'static>,
+    pub pressed: bool,
 }
 
 /// Complete host application layout for one remote viewport.
@@ -67,9 +68,19 @@ pub struct ApplicationLayout<'a> {
 #[derive(Debug, Default, Eq, PartialEq)]
 pub struct ApplicationUi {
     status: Option<String>,
+    pressed_button: Option<u8>,
 }
 
 impl ApplicationUi {
+    /// Replace the host-owned pressed button and report whether rendering changed.
+    pub(crate) fn set_pressed_button(&mut self, pressed_button: Option<u8>) -> bool {
+        if self.pressed_button == pressed_button {
+            return false;
+        }
+        self.pressed_button = pressed_button;
+        true
+    }
+
     /// Replace the remote status text shown in subsequent layouts.
     pub fn set_status(&mut self, status: impl Into<String>) {
         self.status = Some(status.into());
@@ -109,14 +120,14 @@ impl ApplicationUi {
                 baseline_y: TITLE_BASELINE.min(height - 1),
                 text: TITLE_TEXT,
             },
-            buttons: button_grid(width, height),
+            buttons: button_grid(width, height, self.pressed_button),
             status_region,
             status,
         })
     }
 }
 
-fn button_grid(width: u16, height: u16) -> Vec<ButtonLayout> {
+fn button_grid(width: u16, height: u16, pressed_button: Option<u8>) -> Vec<ButtonLayout> {
     let Some(side) = grid_cell_side(width, height) else {
         return Vec::new();
     };
@@ -132,8 +143,9 @@ fn button_grid(width: u16, height: u16) -> Vec<ButtonLayout> {
             let center_x = x + u32::from(side) / 2;
             let center_y = u32::from(y) + u32::from(side) / 2;
             let index = usize::from(row * GRID_COLUMNS + column);
+            let id = index as u8 + 1;
             buttons.push(ButtonLayout {
-                id: index as u8 + 1,
+                id,
                 bounds: Rect {
                     x: x as u16,
                     y,
@@ -145,6 +157,7 @@ fn button_grid(width: u16, height: u16) -> Vec<ButtonLayout> {
                     baseline_y: (center_y + u32::from(LABEL_TEXT_Y_OFFSET)) as u16,
                     text: BUTTON_LABELS[index],
                 },
+                pressed: pressed_button == Some(id),
             });
         }
     }
@@ -201,6 +214,7 @@ mod tests {
             assert_eq!(button.label.text, BUTTON_LABELS[index]);
             assert_eq!(button.label.x, button.bounds.x + 192 - 3);
             assert_eq!(button.label.baseline_y, button.bounds.y + 192 + 5);
+            assert!(!button.pressed);
         }
         assert_eq!(
             layout.status_region,
@@ -239,6 +253,23 @@ mod tests {
                 .status,
             None
         );
+    }
+
+    #[test]
+    fn pressed_state_marks_only_the_matching_button_and_reports_changes() {
+        let mut ui = ApplicationUi::default();
+        assert!(ui.set_pressed_button(Some(5)));
+        assert!(!ui.set_pressed_button(Some(5)));
+
+        let layout = ui
+            .layout(PORTRAIT_WIDTH, PORTRAIT_HEIGHT)
+            .expect("portrait layout");
+        for button in layout.buttons {
+            assert_eq!(button.pressed, button.id == 5);
+        }
+
+        assert!(ui.set_pressed_button(None));
+        assert!(!ui.set_pressed_button(None));
     }
 
     #[test]

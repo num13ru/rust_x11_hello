@@ -10,6 +10,13 @@ pub struct ApplicationActivation {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ApplicationInputResult {
+    pub activation: Option<ApplicationActivation>,
+    pub pressed_button: Option<u8>,
+    pub visual_changed: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 enum ContactState {
     #[default]
     Idle,
@@ -30,20 +37,24 @@ impl ApplicationInput {
     }
 
     /// Replace the active application viewport and cancel any partial contact.
-    /// `None` means the displayed frame is not the application UI.
-    pub fn set_viewport(&mut self, viewport: Option<(u16, u16)>) {
+    /// `None` means the displayed frame is not application UI.
+    pub fn set_viewport(&mut self, ui: &mut ApplicationUi, viewport: Option<(u16, u16)>) -> bool {
         self.viewport = viewport.filter(|(width, height)| *width > 0 && *height > 0);
         self.contact = ContactState::Idle;
+        ui.set_pressed_button(None)
     }
 
     pub fn handle_pointer(
         &mut self,
-        ui: &ApplicationUi,
+        ui: &mut ApplicationUi,
         pointer: V2Pointer,
-    ) -> Option<ApplicationActivation> {
+    ) -> ApplicationInputResult {
         let Some((width, height)) = self.viewport else {
             self.contact = ContactState::Idle;
-            return None;
+            return ApplicationInputResult {
+                visual_changed: ui.set_pressed_button(None),
+                ..ApplicationInputResult::default()
+            };
         };
         let hit = ui
             .layout(width, height)
@@ -55,7 +66,7 @@ impl ApplicationInput {
             })
             .map(|button| button.id);
 
-        match pointer.phase() {
+        let activation = match pointer.phase() {
             V2PointerPhase::Down => {
                 self.contact = match self.contact {
                     ContactState::Idle => hit
@@ -80,6 +91,15 @@ impl ApplicationInput {
                 self.contact = ContactState::Idle;
                 activated
             }
+        };
+        let pressed_button = match self.contact {
+            ContactState::Armed(button_id) => Some(button_id),
+            ContactState::Idle | ContactState::Cancelled => None,
+        };
+        ApplicationInputResult {
+            activation,
+            pressed_button,
+            visual_changed: ui.set_pressed_button(pressed_button),
         }
     }
 }
@@ -109,15 +129,15 @@ mod tests {
         V2Pointer::new(phase, x, y)
     }
 
-    fn tracker() -> ApplicationInput {
+    fn tracker(ui: &mut ApplicationUi) -> ApplicationInput {
         let mut input = ApplicationInput::default();
-        input.set_viewport(Some(VIEWPORT));
+        assert!(!input.set_viewport(ui, Some(VIEWPORT)));
         input
     }
 
     #[test]
     fn every_button_resolves_to_its_host_owned_action() {
-        let ui = ApplicationUi::default();
+        let mut ui = ApplicationUi::default();
         let layout = ui
             .layout(VIEWPORT.0, VIEWPORT.1)
             .expect("application layout");
@@ -136,94 +156,112 @@ mod tests {
         for (button, action_id) in layout.buttons.into_iter().zip(expected) {
             let x = button.bounds.x + button.bounds.width / 2;
             let y = button.bounds.y + button.bounds.height / 2;
-            let mut input = tracker();
+            let mut input = tracker(&mut ui);
             assert_eq!(
-                input.handle_pointer(&ui, pointer(V2PointerPhase::Down, x, y)),
-                None
+                input.handle_pointer(&mut ui, pointer(V2PointerPhase::Down, x, y)),
+                ApplicationInputResult {
+                    activation: None,
+                    pressed_button: Some(button.id),
+                    visual_changed: true,
+                }
             );
             assert_eq!(
-                input.handle_pointer(&ui, pointer(V2PointerPhase::Up, x, y)),
-                Some(ApplicationActivation {
-                    button_id: button.id,
-                    action_id,
-                })
+                input.handle_pointer(&mut ui, pointer(V2PointerPhase::Up, x, y)),
+                ApplicationInputResult {
+                    activation: Some(ApplicationActivation {
+                        button_id: button.id,
+                        action_id,
+                    }),
+                    pressed_button: None,
+                    visual_changed: true,
+                }
             );
         }
     }
 
     #[test]
     fn gaps_cross_button_releases_and_out_of_bounds_cancel_without_activation() {
-        let ui = ApplicationUi::default();
-        let mut input = tracker();
+        let mut ui = ApplicationUi::default();
+        let mut input = tracker(&mut ui);
 
         assert_eq!(
-            input.handle_pointer(&ui, pointer(V2PointerPhase::Down, 10, 10)),
-            None
+            input.handle_pointer(&mut ui, pointer(V2PointerPhase::Down, 10, 10)),
+            ApplicationInputResult::default()
         );
         assert_eq!(
-            input.handle_pointer(&ui, pointer(V2PointerPhase::Up, 10, 10)),
-            None
-        );
-
-        assert_eq!(
-            input.handle_pointer(&ui, pointer(V2PointerPhase::Down, 100, 100)),
-            None
-        );
-        assert_eq!(
-            input.handle_pointer(&ui, pointer(V2PointerPhase::Up, 500, 500)),
-            None
+            input.handle_pointer(&mut ui, pointer(V2PointerPhase::Up, 10, 10)),
+            ApplicationInputResult::default()
         );
 
+        let pressed = input.handle_pointer(&mut ui, pointer(V2PointerPhase::Down, 100, 100));
+        assert_eq!(pressed.pressed_button, Some(1));
+        assert!(pressed.visual_changed);
         assert_eq!(
-            input.handle_pointer(&ui, pointer(V2PointerPhase::Down, 100, 100)),
-            None
+            input.handle_pointer(&mut ui, pointer(V2PointerPhase::Up, 500, 500)),
+            ApplicationInputResult {
+                visual_changed: true,
+                ..ApplicationInputResult::default()
+            }
+        );
+
+        assert!(
+            input
+                .handle_pointer(&mut ui, pointer(V2PointerPhase::Down, 100, 100))
+                .visual_changed
         );
         assert_eq!(
-            input.handle_pointer(&ui, pointer(V2PointerPhase::Up, VIEWPORT.0, VIEWPORT.1)),
-            None
+            input.handle_pointer(&mut ui, pointer(V2PointerPhase::Up, VIEWPORT.0, VIEWPORT.1),),
+            ApplicationInputResult {
+                visual_changed: true,
+                ..ApplicationInputResult::default()
+            }
         );
     }
 
     #[test]
-    fn unmatched_repeated_and_viewport_changes_reset_contact() {
-        let ui = ApplicationUi::default();
+    fn unmatched_repeated_and_viewport_changes_reset_contact_and_visual_state() {
+        let mut ui = ApplicationUi::default();
         let mut input = ApplicationInput::default();
-
         assert!(!input.is_active());
-
         assert_eq!(
-            input.handle_pointer(&ui, pointer(V2PointerPhase::Up, 100, 100)),
-            None
+            input.handle_pointer(&mut ui, pointer(V2PointerPhase::Up, 100, 100)),
+            ApplicationInputResult::default()
         );
-        input.set_viewport(Some(VIEWPORT));
+
+        assert!(!input.set_viewport(&mut ui, Some(VIEWPORT)));
         assert!(input.is_active());
-        assert_eq!(
-            input.handle_pointer(&ui, pointer(V2PointerPhase::Down, 100, 100)),
-            None
+        assert!(
+            input
+                .handle_pointer(&mut ui, pointer(V2PointerPhase::Down, 100, 100))
+                .visual_changed
         );
         assert_eq!(
-            input.handle_pointer(&ui, pointer(V2PointerPhase::Down, 100, 100)),
-            None
+            input.handle_pointer(&mut ui, pointer(V2PointerPhase::Down, 100, 100)),
+            ApplicationInputResult {
+                visual_changed: true,
+                ..ApplicationInputResult::default()
+            }
         );
         assert_eq!(
-            input.handle_pointer(&ui, pointer(V2PointerPhase::Up, 100, 100)),
-            None
+            input.handle_pointer(&mut ui, pointer(V2PointerPhase::Up, 100, 100)),
+            ApplicationInputResult::default()
         );
 
-        assert_eq!(
-            input.handle_pointer(&ui, pointer(V2PointerPhase::Down, 100, 100)),
-            None
+        assert!(
+            input
+                .handle_pointer(&mut ui, pointer(V2PointerPhase::Down, 100, 100))
+                .visual_changed
         );
-        input.set_viewport(Some((636, 776)));
+        assert!(input.set_viewport(&mut ui, Some((636, 776))));
         assert_eq!(
-            input.handle_pointer(&ui, pointer(V2PointerPhase::Up, 100, 100)),
-            None
+            input.handle_pointer(&mut ui, pointer(V2PointerPhase::Up, 100, 100)),
+            ApplicationInputResult::default()
         );
-        input.set_viewport(None);
+        assert!(!input.set_viewport(&mut ui, None));
         assert!(!input.is_active());
         assert_eq!(
-            input.handle_pointer(&ui, pointer(V2PointerPhase::Down, 100, 100)),
-            None
+            input.handle_pointer(&mut ui, pointer(V2PointerPhase::Down, 100, 100)),
+            ApplicationInputResult::default()
         );
     }
 }
