@@ -9,10 +9,15 @@ WATCHDOG_MARKER="$EXT_DIR/rust_x11_hello.watchdog"
 LOCK_DIR="$EXT_DIR/rust_x11_hello.lock"
 LOCK_OWNER_FILE="$LOCK_DIR/launcher.pid"
 WATCHDOG_SECONDS="${PAPERPAD_WATCHDOG_SECONDS:-90}"
-WATCHDOG_TERM_GRACE_SECONDS="${PAPERPAD_WATCHDOG_TERM_GRACE_SECONDS:-5}"
+WATCHDOG_TERM_GRACE_SECONDS="${PAPERPAD_WATCHDOG_TERM_GRACE_SECONDS:-15}"
 # The normal KUAL action leaves this unset for UDP discovery. An explicit host
 # remains available as a manual diagnostic override.
 COMPANION_HOST="${PAPERPAD_COMPANION:-}"
+MODE_ARG="${1:-}"
+NEEDS_DISCOVERY=1
+if [ "$MODE_ARG" = "--benchmark-mxcfb" ]; then
+    NEEDS_DISCOVERY=0
+fi
 
 CHILD_PID=""
 WATCHDOG_PID=""
@@ -24,7 +29,7 @@ case "$WATCHDOG_SECONDS" in
     ''|0|*[!0-9]*) WATCHDOG_SECONDS=90 ;;
 esac
 case "$WATCHDOG_TERM_GRACE_SECONDS" in
-    ''|0|*[!0-9]*) WATCHDOG_TERM_GRACE_SECONDS=5 ;;
+    ''|0|*[!0-9]*) WATCHDOG_TERM_GRACE_SECONDS=15 ;;
 esac
 
 read_pid_file() {
@@ -166,6 +171,7 @@ trap 'forward_signal TERM' TERM
     echo "PWD: $(pwd)"
     echo "UID/GID: $(id 2>/dev/null || echo 'id unavailable')"
     echo "BIN: $BIN"
+    echo "Mode: ${MODE_ARG:-paperpad}"
     echo "Watchdog: ${WATCHDOG_SECONDS}s plus ${WATCHDOG_TERM_GRACE_SECONDS}s TERM grace"
 } >> "$LOG" 2>&1
 
@@ -229,20 +235,25 @@ fi
 
 rm -f "$WATCHDOG_MARKER"
 
-# Discovery permission: remove a stale rule from a previous failed run,
-# then install the fresh one before starting PaperPad.
+# Discovery permission is needed only by normal PaperPad. The local MXCFB
+# benchmark deliberately performs no network activity.
 remove_discovery_rule
-install_discovery_rule
+if [ "$NEEDS_DISCOVERY" = "1" ]; then
+    install_discovery_rule
+fi
 
 if ! chmod +x "$BIN" 2>> "$LOG"; then
     echo "WARNING: chmod +x failed; attempting launch with existing mode" >> "$LOG"
 fi
-if [ -n "$COMPANION_HOST" ]; then
+if [ "$MODE_ARG" = "--benchmark-mxcfb" ]; then
+    echo "PaperSpoon host: (benchmark is local; transport disabled)" >> "$LOG"
+    "$BIN" "$@" >> "$LOG" 2>&1 &
+elif [ -n "$COMPANION_HOST" ]; then
     echo "PaperSpoon host: $COMPANION_HOST" >> "$LOG"
-    PAPERPAD_COMPANION="$COMPANION_HOST" "$BIN" >> "$LOG" 2>&1 &
+    PAPERPAD_COMPANION="$COMPANION_HOST" "$BIN" "$@" >> "$LOG" 2>&1 &
 else
     echo "PaperSpoon host: (unset, discovery)" >> "$LOG"
-    "$BIN" >> "$LOG" 2>&1 &
+    "$BIN" "$@" >> "$LOG" 2>&1 &
 fi
 CHILD_PID=$!
 
@@ -317,7 +328,9 @@ rm -f "$WATCHDOG_MARKER"
 } >> "$LOG" 2>&1
 
 write_status "STOPPED status=$CHILD_STATUS reason=$END_REASON"
-remove_discovery_rule
+if [ "$NEEDS_DISCOVERY" = "1" ]; then
+    remove_discovery_rule
+fi
 show_status "Stopped: $CHILD_STATUS ($END_REASON)"
 release_lock
 exit 0

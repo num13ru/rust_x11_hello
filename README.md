@@ -91,11 +91,16 @@ mtp-rs rm /extensions/rust_x11_hello/bin/rust_x11_hello.previous --yes
 
 ### 4. Run from KUAL
 
-KUAL provides three actions:
+KUAL provides normal run, explicit benchmark, and diagnostic actions:
 
 - **Run Paperpad (5m)** — reference X11 display backend with a five-minute watchdog.
 - **Run Paperpad MXCFB (5m, experimental)** — direct framebuffer display with
   a five-minute watchdog and X11 still providing touch and lifecycle events.
+- **Benchmark MXCFB GC16/DU/A2/DU4** — separate, explicit 12-frame local
+  completion benchmarks with a one-minute watchdog. They do not connect to
+  PaperSpoon; DU, A2, and DU4 are experimental fidelity/ghosting tradeoffs.
+- **Benchmark A2 512px/256px/64px** — centered dirty-region completion tests
+  for measuring how update area affects the fastest full-screen waveform.
 - **Inspect framebuffer metadata** — read-only diagnostics; it does not draw or
   submit an e-ink refresh.
 
@@ -135,9 +140,12 @@ Other runtime overrides are:
 | --- | --- |
 | `PAPERPAD_DISPLAY_BACKEND=x11` | Default X11 display path |
 | `PAPERPAD_DISPLAY_BACKEND=mxcfb` | Experimental direct framebuffer path |
+| `PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=gc16\|du\|a2\|du4` | Explicit benchmark waveform; defaults to GC16 |
+| `PAPERPAD_MXCFB_BENCHMARK_FRAMES=2..120` | Completed benchmark samples; defaults to 8 |
+| `PAPERPAD_MXCFB_BENCHMARK_REGION=full\|WIDTHxHEIGHT` | Centered benchmark region inside the remote viewport; defaults to full |
 | `PAPERPAD_EXT_DIR` | KUAL extension directory |
 | `PAPERPAD_WATCHDOG_SECONDS` | Maximum run duration |
-| `PAPERPAD_WATCHDOG_TERM_GRACE_SECONDS` | Grace period before forced stop |
+| `PAPERPAD_WATCHDOG_TERM_GRACE_SECONDS` | Grace period before forced stop; defaults to 15 seconds |
 
 Legacy environment variable names are not read.
 
@@ -146,18 +154,34 @@ Legacy environment variable names are not read.
 | Backend | Mono1 | Gray8 and JPEG | Notes |
 | --- | --- | --- | --- |
 | X11 | Yes | No | Reference display path |
-| MXCFB | Yes | Yes | Experimental; uses X11 for input |
+| MXCFB | Yes | Yes | Experimental; uses an X11 InputOnly window for input |
 
 MXCFB startup requires the tested framebuffer layout and HWTCON capabilities;
 it fails rather than silently falling back to X11. Both formats currently use
-the GC16 update path. Direct framebuffer output, X11 touch, local Exit, Gray8,
-JPEG, and Apple Music Now Playing have been observed on the documented
-Paperwhite 6. Update-completion timing, exact pixel fidelity, sleep/wake
-interaction, and every failure fallback have not all been physically verified.
+the GC16 update path. The MXCFB input window has no X11 background, Expose
+subscription, or graphics context, so PaperPad itself does not ask X11 to
+paint over direct framebuffer output. Direct framebuffer output, X11 touch,
+local Exit, Gray8, JPEG, and Apple Music Now Playing have been observed on the
+documented Paperwhite 6. A device run confirmed that the InputOnly window
+retains touch and local Exit without the earlier X11/event flicker. Subsequent
+device runs completed marker-specific waits and visibly restored the original
+screen after every benchmark. Exact pixel fidelity, sleep/wake interaction,
+and every failure fallback have not all been physically verified.
 
 See [MXCFB device evidence](docs/archive/mxcfb-device-evidence.md) for recorded
 claims and [the manual validation sequence](docs/archive/mxcfb-manual-validation.md)
 for repeatable device checks.
+
+### MXCFB completion benchmark
+
+The four opt-in KUAL actions measure serialized, full-viewport update
+completion. On the tested Paperwhite 6, none approached the 60 updates/s
+software budget; A2 was the fastest at about 9 updates/s. These are
+kernel-timed completion results, not camera-verified visual FPS.
+
+See [MXCFB benchmarks](docs/mxcfb-benchmarks.md) for the current results,
+methodology, commands, operating conditions, cleanup behavior, and waveform
+limitations.
 
 ## PaperSpoon frame commands
 

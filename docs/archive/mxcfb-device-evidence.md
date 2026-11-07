@@ -1,5 +1,97 @@
 # Paperwhite 6 framebuffer evidence
 
+## Marker-specific completion and restoration trial (2026-10-26)
+
+The deployed ARM binary was independently read back over MTP and matched the
+host artifact at SHA-256
+`01a8593f9b76e837ea13812d8615bbd4cfdf1b4e71454038a0d3a27d698c552c`.
+The retrieved cumulative log has SHA-256
+`4d054cf9e936542fd92e0f739fe413551e927f6b70d88d7f873c659658285c4a`;
+the final status file has SHA-256
+`2fead5455234aee9d2909f8525bc5dab7bc5190893b73ddc8681f97309cc15b1`
+and reports `STOPPED status=0 reason=process_exit`.
+
+All nine marker-specific launches completed all 12 measured samples, for 108
+of 108 samples. No launch reported a missing or foreign marker, immediate
+return, timeout-range wait, or cleanup failure. Every launch restored the
+2,157,312-byte framebuffer snapshot and submitted a full-screen GC16 cleanup
+refresh whose marker-specific wait took approximately 251 ms. The operator
+confirmed that the original screen visibly returned after every benchmark.
+
+The latest completed run for each requested waveform was:
+
+| Requested waveform | Kernel-timed throughput | p50 | p95 / max |
+| --- | ---: | ---: | ---: |
+| A2 | 9.006 updates/s | 106.337 ms | 121.368 ms |
+| DU4 | 6.836 updates/s | 144.166 ms | 153.626 ms |
+| DU | 6.707 updates/s | 151.797 ms | 158.576 ms |
+| GC16 | 3.718 updates/s | 271.397 ms | 275.620 ms |
+
+Every sample exceeded the 16.667 ms software budget for 60 updates/s. These
+figures time serialized full-viewport submissions and marker-specific kernel
+waits; they are not camera-verified visual FPS. The waveform names describe
+PaperPad's requests, not independently observed panel state. In particular,
+the matching driver may substitute full GLR16 for a sufficiently large DU
+request. The maintained interpretation and current compact results are in
+[`docs/mxcfb-benchmarks.md`](../mxcfb-benchmarks.md).
+
+## InputOnly marker-contention trial (2026-10-25)
+
+The deployed ARM binary read back over MTP matched the host artifact at
+SHA-256 `54571e4922115e50f575ee46fbcaf6d1c13c229974867aa92a0bca9869553107`.
+The retrieved cumulative log has SHA-256
+`b312a6f02063a8b51fa7a9a0b2fa7602a7913f6d59fd742d4e0c864aeee4ecf0`;
+the status file has SHA-256
+`a1a81a1df41da6d7e608a414e63dc894191e4ac0eae0a49532d35aaf125f7ddd`
+and reports `STOPPED status=1 reason=process_exit`.
+
+Every new run logged `class=input-only`. Operator observation found that the
+earlier X11/event flicker disappeared, while the log retained core-X11
+`ButtonPress`/`ButtonRelease` events and a local Exit at `(719,1667)`. The
+benchmarks did not complete: each stopped after zero to two samples because
+the global wait-any completion store returned foreign markers or omitted the
+submitted marker across its bounded retries. This confirms global marker
+contention, not a zero-FPS result. After exit, the final direct-framebuffer
+image remained visible because destroying an InputOnly window creates no X11
+damage that would repaint the underlying screen. The marker-specific wait and
+snapshot restoration implemented in the following iteration were not yet
+deployed when this evidence was recorded.
+
+## Four-mode completion benchmark trial (2026-10-25)
+
+The deployed benchmark binary was read back over MTP and matched the host ARM
+artifact at SHA-256
+`280b0c9bb2e51ae02c77ae93118023e6f6f2f2afcb73e6ff466193c3483cc3a6`.
+The retrieved cumulative Kindle log is saved as
+`rust_x11_hello.device.log` with SHA-256
+`aa768f3b0c5ceeb6f00f94a223d95156eacc8e8b252e362cd190233a45fdddc1`;
+the final status file hashes to
+`a1a81a1df41da6d7e608a414e63dc894191e4ac0eae0a49532d35aaf125f7ddd`.
+
+The operator launched all four 12-frame KUAL actions. A2, DU, DU4, and GC16
+each passed the wait-any feature query and configured the expected 1272 x 1624
+remote region. Only DU4 completed: 12 samples in 1,724,235 microseconds,
+6.959 updates/s end to end, 139,444-microsecond p50, and
+157,400-microsecond p95 and maximum. Every DU4 sample exceeded the 16,667
+microsecond 60 FPS budget, so `software_60fps_budget_met=false`; no camera
+evidence exists, so `visual_60fps_verified=false`.
+
+A2, DU, and GC16 each drained an unrelated completion marker while waiting for
+the local system-strip marker, then received zero markers on the first wait for
+their warmup frame and exited with status 1 before recording a sample. GC16
+was the final action, so the retrieved KUAL status was
+`STOPPED status=1 reason=process_exit`. These are incomplete benchmarks, not
+zero-FPS measurements.
+
+Amazon's matching `Kindle_src_5.17.1.0.4_4351970007` GPL archive confirms in
+`hwtcon_extra_feature.c` that wait-any blocks for at most 2,000 ms and returns
+zero bytes when no markers are stored by then. It also confirms that large DU
+requests are automatically changed to full GLR16 unless global fast mode is
+enabled, while fast mode bypasses completion-marker storage. The benchmark was
+subsequently changed to retry zero-byte waits up to a total eight-second bound,
+polling local Exit between waits and continuing to require the exact submitted
+marker. That retry change has host tests but no physical-device result yet.
+
 ## Read-only mapping check (2026-09-26)
 
 The deployed probe binary was read back over MTP and matched the host artifact

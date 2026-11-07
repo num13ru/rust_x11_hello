@@ -16,7 +16,7 @@ use super::pixels::prepare_remote;
 use super::system_pixels::rasterize_system_ui;
 use super::update_abi::UpdateDataMtk;
 use super::update_marker::UpdateMarkerSequence;
-use super::update_request::{next_full_gc16_remote_request, next_full_gc16_system_ui_request};
+use super::update_request::{MxcfbWaveform, next_full_gc16_system_ui_request, next_remote_request};
 
 pub(super) struct SubmittedUpdate {
     pub marker: u32,
@@ -36,6 +36,16 @@ pub(super) fn present_remote_with(
     opened: &mut OpenedFramebuffer,
     markers: &mut UpdateMarkerSequence,
     frame: RemoteFrame<'_>,
+    submit: impl FnMut(&File, &mut UpdateDataMtk, u32, u32) -> Result<()>,
+) -> Result<SubmittedUpdate> {
+    present_remote_with_waveform(opened, markers, frame, MxcfbWaveform::Gc16, submit)
+}
+
+pub(super) fn present_remote_with_waveform(
+    opened: &mut OpenedFramebuffer,
+    markers: &mut UpdateMarkerSequence,
+    frame: RemoteFrame<'_>,
+    waveform: MxcfbWaveform,
     mut submit: impl FnMut(&File, &mut UpdateDataMtk, u32, u32) -> Result<()>,
 ) -> Result<SubmittedUpdate> {
     let info = &opened.info;
@@ -43,11 +53,12 @@ pub(super) fn present_remote_with(
     // store. The update request is also validated before writing pixels.
     let prepared = prepare_remote(frame, info.screen, info.spec, info.mapping_len)
         .context("MXCFB prepare remote frame")?;
-    let mut request = next_full_gc16_remote_request(
+    let mut request = next_remote_request(
         info.screen,
         info.spec.visible_width,
         info.spec.visible_height,
         markers,
+        waveform,
     )
     .context("MXCFB prepare remote update")?;
     let region = prepared.region();

@@ -6,7 +6,10 @@ BIN_NAME="rust_x11_hello"
 EXT_DIR="kindle-extension/rust_x11_hello"
 OUT_BIN="target/${TARGET}/release/${BIN_NAME}"
 
-rustup target add "${TARGET}"
+if ! rustup target list --installed | grep -qx "${TARGET}"; then
+    echo "Missing Rust target ${TARGET}; rebuild the Docker image." >&2
+    exit 1
+fi
 
 cargo build --release --target "${TARGET}" --package "${BIN_NAME}"
 
