@@ -6,6 +6,7 @@
 
 use crate::app::{Activation, AppState, GeometryUpdate, Redraw, RemotePointerEvent};
 use crate::display::{DisplayBackend, RedrawCause, RemoteFrame};
+use crate::latency;
 use crate::net::Paperspoon;
 use crate::ui::button::{PointerEvent, PointerEventKind};
 use crate::ui::screen::{PhysicalPoint, ScreenLayout};
@@ -134,7 +135,20 @@ pub(crate) fn event_loop(
                 frame.pixels(),
                 frame.receive_decode_us(),
             ) {
-                Ok(frame) => display.display_remote_frame(frame),
+                Ok(frame) => {
+                    let frame_id = frame.frame_id();
+                    latency::record(
+                        "frame_present_start",
+                        None,
+                        &format!(",\"frame_id\":{frame_id}"),
+                    );
+                    display.display_remote_frame(frame);
+                    latency::record(
+                        "frame_present_return",
+                        None,
+                        &format!(",\"frame_id\":{frame_id}"),
+                    );
+                }
                 Err(error) => eprintln!(
                     "frame validation error id={} width={} height={}: {error}",
                     frame.frame_id(),
@@ -195,6 +209,7 @@ pub(crate) fn event_loop(
             }
             Event::ConfigureNotify(_) => {}
             Event::ButtonPress(event) if event.event == win => {
+                let input_stamp = latency::stamp();
                 eprintln!("{}", format_pointer_event("ButtonPress", &event));
                 let outcome = app.handle_pointer(PointerEvent {
                     kind: PointerEventKind::Press,
@@ -205,7 +220,17 @@ pub(crate) fn event_loop(
                     },
                 });
                 if let Some(pointer) = outcome.remote() {
-                    forward_remote_pointer(pointer, paperspoon);
+                    let trace = latency::new_trace(input_stamp);
+                    latency::record_at(
+                        input_stamp,
+                        "x11_received",
+                        Some(trace),
+                        &format!(
+                            ",\"x11_phase\":\"down\",\"x11_time\":{},\"event_x\":{},\"event_y\":{}",
+                            event.time, event.event_x, event.event_y
+                        ),
+                    );
+                    forward_remote_pointer(pointer, paperspoon, trace);
                 }
                 let Some(activation) = outcome.activation() else {
                     continue;
@@ -219,6 +244,7 @@ pub(crate) fn event_loop(
             }
             Event::ButtonPress(_) => {}
             Event::ButtonRelease(event) if event.event == win => {
+                let input_stamp = latency::stamp();
                 eprintln!("{}", format_pointer_event("ButtonRelease", &event));
                 let outcome = app.handle_pointer(PointerEvent {
                     kind: PointerEventKind::Release,
@@ -229,7 +255,17 @@ pub(crate) fn event_loop(
                     },
                 });
                 if let Some(pointer) = outcome.remote() {
-                    forward_remote_pointer(pointer, paperspoon);
+                    let trace = latency::new_trace(input_stamp);
+                    latency::record_at(
+                        input_stamp,
+                        "x11_received",
+                        Some(trace),
+                        &format!(
+                            ",\"x11_phase\":\"up\",\"x11_time\":{},\"event_x\":{},\"event_y\":{}",
+                            event.time, event.event_x, event.event_y
+                        ),
+                    );
+                    forward_remote_pointer(pointer, paperspoon, trace);
                 }
                 let Some(activation) = outcome.activation() else {
                     continue;
@@ -323,22 +359,58 @@ fn dispatch_activation(activation: Activation) -> bool {
     }
 }
 
-fn forward_remote_pointer(pointer: RemotePointerEvent, paperspoon: &mut Paperspoon) {
+fn forward_remote_pointer(
+    pointer: RemotePointerEvent,
+    paperspoon: &mut Paperspoon,
+    trace: paper_protocol::V2PointerTrace,
+) {
     let phase = match pointer.kind() {
         PointerEventKind::Press => V2PointerPhase::Down,
         PointerEventKind::Release => V2PointerPhase::Up,
     };
     let point = pointer.point();
-    if let Err(error) = paperspoon.send_pointer(phase, point.x, point.y) {
+    // Capture this before handing the message to the writer thread. The writer
+    // can consume a successful try_send before this thread resumes, so taking
+    // the stamp afterward would make the measured queue delay negative.
+    let queued = latency::stamp();
+    if let Err(error) = paperspoon.send_traced_pointer(phase, point.x, point.y, trace) {
+        latency::record(
+            "pointer_queue_error",
+            Some(trace),
+            &format!(
+                ",\"phase\":\"{}\",\"x\":{},\"y\":{}",
+                phase_label(phase),
+                point.x,
+                point.y
+            ),
+        );
         eprintln!(
             "pointer transport error phase={phase:?} x={} y={}: {error:#}",
             point.x, point.y
         );
     } else {
+        latency::record_at(
+            queued,
+            "pointer_queued",
+            Some(trace),
+            &format!(
+                ",\"phase\":\"{}\",\"x\":{},\"y\":{}",
+                phase_label(phase),
+                point.x,
+                point.y
+            ),
+        );
         eprintln!(
             "remote pointer queued phase={phase:?} x={} y={}",
             point.x, point.y
         );
+    }
+}
+
+fn phase_label(phase: V2PointerPhase) -> &'static str {
+    match phase {
+        V2PointerPhase::Down => "down",
+        V2PointerPhase::Up => "up",
     }
 }
 #[cfg(test)]

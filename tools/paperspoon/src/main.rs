@@ -41,6 +41,7 @@ mod diagnostic;
 mod discovery;
 mod image_frame;
 mod inbound;
+mod latency;
 mod server;
 
 use diagnostic::{DiagnosticFrame, StdinCommand, parse_stdin_command};
@@ -52,6 +53,7 @@ use server::{CurrentConnection, FrameForward, FrameTarget, FrameTargetError};
 const DEFAULT_PORT: u16 = paper_protocol::DEFAULT_TCP_PORT;
 /// Default log file name for received activation lines.
 const DEFAULT_LOG_FILE: &str = "paperspoon.log";
+const DEFAULT_LATENCY_LOG_FILE: &str = "paperspoon.latency.jsonl";
 /// Whether to forward actions to Hammerspoon via `open -g hammerspoon://`.
 const FORWARD_TO_HAMMERSPOON: bool = true;
 
@@ -59,6 +61,7 @@ const FORWARD_TO_HAMMERSPOON: bool = true;
 struct Options {
     port: u16,
     log_path: String,
+    latency_log_path: String,
     /// None means URL forwarding is disabled.
     forward_url: bool,
 }
@@ -66,12 +69,20 @@ struct Options {
 fn parse_options(args: &[String]) -> Options {
     let mut port = DEFAULT_PORT;
     let mut log_path = DEFAULT_LOG_FILE.to_string();
+    let mut latency_log_path = DEFAULT_LATENCY_LOG_FILE.to_string();
     let mut forward_url = FORWARD_TO_HAMMERSPOON;
     let positional = args.iter().skip(1);
     for arg in positional {
         match arg.as_str() {
             "--no-forward-url" => {
                 forward_url = false;
+            }
+            value if value.starts_with("--latency-log=") => {
+                if let Some(path) = value.strip_prefix("--latency-log=")
+                    && !path.is_empty()
+                {
+                    latency_log_path = path.to_string();
+                }
             }
             _ => {
                 // Positional: try port first, then log file.
@@ -91,6 +102,7 @@ fn parse_options(args: &[String]) -> Options {
     Options {
         port,
         log_path,
+        latency_log_path,
         forward_url,
     }
 }
@@ -99,10 +111,22 @@ fn parse_options(args: &[String]) -> Options {
 /// The action id is passed as a query parameter (`?action=<id>`); Hammerspoon's
 /// urlevent handler receives it in the params table. No sockets, no ports,
 /// no file polling.
-fn forward_url(action_id: &str) -> io::Result<()> {
+fn forward_url(action_id: &str, trace: Option<paper_protocol::V2PointerTrace>) -> io::Result<()> {
+    let trace_query = trace
+        .map(|trace| {
+            format!(
+                "&session={}&trace={}&origin_mono_us={}",
+                trace.session_id(),
+                trace.trace_id(),
+                trace.origin_mono_us()
+            )
+        })
+        .unwrap_or_default();
     std::process::Command::new("open")
         .arg("-g")
-        .arg(format!("hammerspoon://paperpad?action={}", action_id))
+        .arg(format!(
+            "hammerspoon://paperpad?action={action_id}{trace_query}"
+        ))
         .status()?;
     Ok(())
 }
@@ -114,11 +138,15 @@ fn flush_stdout(context: &str) {
 }
 
 fn write_log_record(file: &mut impl Write, origin: &str, record: &str) -> io::Result<()> {
-    let timestamp = SystemTime::now()
+    let timestamp_us = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
+        .map(|duration| duration.as_micros())
         .unwrap_or(0);
-    let line = format!("{timestamp} {origin} {record}\n");
+    let line = format!(
+        "{}.{:06} {origin} {record}\n",
+        timestamp_us / 1_000_000,
+        timestamp_us % 1_000_000
+    );
     file.write_all(line.as_bytes())?;
     file.flush()
 }
@@ -573,6 +601,7 @@ fn main() -> io::Result<()> {
         paperspoon::now_playing::run_helper(width, height);
     }
     let opts = parse_options(&args);
+    latency::init(&opts.latency_log_path);
 
     let listener = TcpListener::bind(("0.0.0.0", opts.port))?;
     let tcp_port = listener.local_addr()?.port();
@@ -918,8 +947,34 @@ fn main() -> io::Result<()> {
                 V2PointerPhase::Down => "down",
                 V2PointerPhase::Up => "up",
             };
-            let record = format!("pointer phase={phase} x={} y={}", pointer.x(), pointer.y());
+            let trace = pointer.trace();
+            let correlation = trace
+                .map(|trace| format!("session={} trace={}", trace.session_id(), trace.trace_id()))
+                .unwrap_or_else(|| "session=legacy trace=legacy".to_string());
+            latency::record(
+                "pointer_received",
+                trace,
+                &format!(
+                    ",\"phase\":\"{phase}\",\"x\":{},\"y\":{}",
+                    pointer.x(),
+                    pointer.y()
+                ),
+            );
+            let record = format!(
+                "pointer {correlation} phase={phase} x={} y={}",
+                pointer.x(),
+                pointer.y()
+            );
             let input_result = application_input.handle_pointer(&mut application_ui, pointer);
+            latency::record(
+                "input_processed",
+                trace,
+                &format!(
+                    ",\"phase\":\"{phase}\",\"visual_changed\":{},\"activation\":{}",
+                    input_result.visual_changed,
+                    input_result.activation.is_some()
+                ),
+            );
             if input_result.visual_changed && application_input.is_active() {
                 let visual_state = input_result
                     .pressed_button
@@ -927,8 +982,18 @@ fn main() -> io::Result<()> {
                     .unwrap_or_else(|| "released".to_string());
                 match frame_sender.send_application(&application_ui, reported_viewport) {
                     Ok(ApplicationSend::Sent(sent)) => {
+                        latency::record(
+                            "feedback_frame_sent",
+                            trace,
+                            &format!(
+                                ",\"frame_id\":{},\"encode_us\":{},\"socket_write_us\":{}",
+                                sent.frame_id,
+                                sent.encode_elapsed.as_micros(),
+                                sent.socket_write_elapsed.as_micros()
+                            ),
+                        );
                         let feedback_record = format!(
-                            "sent application frame id={} width={} height={} bytes={} encode_us={} socket_write_us={} source=pointer state={visual_state}",
+                            "sent application frame id={} width={} height={} bytes={} encode_us={} socket_write_us={} source=pointer {correlation} state={visual_state}",
                             sent.frame_id,
                             reported_viewport.0,
                             reported_viewport.1,
@@ -962,10 +1027,53 @@ fn main() -> io::Result<()> {
             }
 
             if let Some(activation) = input_result.activation {
+                latency::record(
+                    "action_resolved",
+                    trace,
+                    &format!(
+                        ",\"button\":{},\"action\":\"{}\"",
+                        activation.button_id, activation.action_id
+                    ),
+                );
                 let dispatch = if opts.forward_url {
-                    match forward_url(activation.action_id) {
-                        Ok(()) => "forwarded",
+                    let invoke_started = latency::stamp();
+                    latency::record_at(
+                        invoke_started,
+                        "action_invoke_start",
+                        trace,
+                        &format!(",\"action\":\"{}\"", activation.action_id),
+                    );
+                    match forward_url(activation.action_id, trace) {
+                        Ok(()) => {
+                            let invoke_finished = latency::stamp();
+                            latency::record_at(
+                                invoke_finished,
+                                "action_invoke_return",
+                                trace,
+                                &format!(
+                                    ",\"action\":\"{}\",\"ok\":true,\"duration_us\":{}",
+                                    activation.action_id,
+                                    invoke_finished
+                                        .mono_us
+                                        .saturating_sub(invoke_started.mono_us)
+                                ),
+                            );
+                            "forwarded"
+                        }
                         Err(error) => {
+                            let invoke_finished = latency::stamp();
+                            latency::record_at(
+                                invoke_finished,
+                                "action_invoke_return",
+                                trace,
+                                &format!(
+                                    ",\"action\":\"{}\",\"ok\":false,\"duration_us\":{}",
+                                    activation.action_id,
+                                    invoke_finished
+                                        .mono_us
+                                        .saturating_sub(invoke_started.mono_us)
+                                ),
+                            );
                             eprintln!("forward error to Hammerspoon: {error}");
                             "failed"
                         }
@@ -974,7 +1082,7 @@ fn main() -> io::Result<()> {
                     "disabled"
                 };
                 let host_record = format!(
-                    "host action button={} semantic={} dispatch={dispatch}",
+                    "host action {correlation} button={} semantic={} dispatch={dispatch}",
                     activation.button_id, activation.action_id
                 );
                 println!("resolved for {peer}: {host_record}");
@@ -1877,6 +1985,7 @@ mod tests {
         ]);
         assert_eq!(opts.port, 5581);
         assert_eq!(opts.log_path, "/tmp/paperspoon.log");
+        assert_eq!(opts.latency_log_path, DEFAULT_LATENCY_LOG_FILE);
         assert!(opts.forward_url);
     }
 
@@ -1903,5 +2012,14 @@ mod tests {
         assert_eq!(opts.port, 5582);
         assert_eq!(opts.log_path, "/tmp/x.log");
         assert!(!opts.forward_url);
+    }
+
+    #[test]
+    fn parse_options_accepts_explicit_latency_log() {
+        let opts = parse_options(&[
+            "paperspoon".to_string(),
+            "--latency-log=/tmp/paperspoon-trace.jsonl".to_string(),
+        ]);
+        assert_eq!(opts.latency_log_path, "/tmp/paperspoon-trace.jsonl");
     }
 }

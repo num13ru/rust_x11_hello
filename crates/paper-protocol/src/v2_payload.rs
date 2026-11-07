@@ -11,7 +11,10 @@ use super::v2::{
 };
 
 pub const V2_HELLO_PAYLOAD_LEN: usize = 8;
+/// Legacy untraced pointer payload retained for decoder compatibility.
 pub const V2_POINTER_PAYLOAD_LEN: usize = 4;
+/// Session, trace, origin monotonic timestamp, and viewport coordinates.
+pub const V2_TRACED_POINTER_PAYLOAD_LEN: usize = 28;
 pub const V2_VIEWPORT_PAYLOAD_LEN: usize = 4;
 pub const V2_FRAME_PREFIX_LEN: usize = 16;
 
@@ -175,15 +178,59 @@ impl V2PointerPhase {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct V2PointerTrace {
+    session_id: u64,
+    trace_id: u64,
+    origin_mono_us: u64,
+}
+
+impl V2PointerTrace {
+    pub fn new(session_id: u64, trace_id: u64, origin_mono_us: u64) -> Self {
+        Self {
+            session_id,
+            trace_id,
+            origin_mono_us,
+        }
+    }
+
+    pub fn session_id(self) -> u64 {
+        self.session_id
+    }
+
+    pub fn trace_id(self) -> u64 {
+        self.trace_id
+    }
+
+    pub fn origin_mono_us(self) -> u64 {
+        self.origin_mono_us
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct V2Pointer {
     phase: V2PointerPhase,
     x: u16,
     y: u16,
+    trace: Option<V2PointerTrace>,
 }
 
 impl V2Pointer {
     pub fn new(phase: V2PointerPhase, x: u16, y: u16) -> Self {
-        Self { phase, x, y }
+        Self {
+            phase,
+            x,
+            y,
+            trace: None,
+        }
+    }
+
+    pub fn new_traced(phase: V2PointerPhase, x: u16, y: u16, trace: V2PointerTrace) -> Self {
+        Self {
+            phase,
+            x,
+            y,
+            trace: Some(trace),
+        }
     }
 
     pub fn phase(self) -> V2PointerPhase {
@@ -198,10 +245,24 @@ impl V2Pointer {
         self.y
     }
 
+    pub fn trace(self) -> Option<V2PointerTrace> {
+        self.trace
+    }
+
     pub fn encode_message(self) -> Result<Vec<u8>, V2EncodeError> {
-        let mut payload = [0; V2_POINTER_PAYLOAD_LEN];
-        payload[0..2].copy_from_slice(&self.x.to_be_bytes());
-        payload[2..4].copy_from_slice(&self.y.to_be_bytes());
+        let Some(trace) = self.trace else {
+            let mut payload = [0; V2_POINTER_PAYLOAD_LEN];
+            payload[0..2].copy_from_slice(&self.x.to_be_bytes());
+            payload[2..4].copy_from_slice(&self.y.to_be_bytes());
+            return encode_v2_message(self.phase.message_type(), &payload);
+        };
+
+        let mut payload = [0; V2_TRACED_POINTER_PAYLOAD_LEN];
+        payload[0..8].copy_from_slice(&trace.session_id.to_be_bytes());
+        payload[8..16].copy_from_slice(&trace.trace_id.to_be_bytes());
+        payload[16..24].copy_from_slice(&trace.origin_mono_us.to_be_bytes());
+        payload[24..26].copy_from_slice(&self.x.to_be_bytes());
+        payload[26..28].copy_from_slice(&self.y.to_be_bytes());
         encode_v2_message(self.phase.message_type(), &payload)
     }
 }
@@ -468,12 +529,32 @@ fn decode_hello(payload: &[u8]) -> Result<V2Hello, V2PayloadError> {
 }
 
 fn decode_pointer(phase: V2PointerPhase, payload: &[u8]) -> Result<V2Pointer, V2PayloadError> {
-    require_exact_length(phase.message_type(), payload, V2_POINTER_PAYLOAD_LEN)?;
-    Ok(V2Pointer::new(
-        phase,
-        u16::from_be_bytes(payload[0..2].try_into().expect("two-byte payload slice")),
-        u16::from_be_bytes(payload[2..4].try_into().expect("two-byte payload slice")),
-    ))
+    match payload.len() {
+        V2_POINTER_PAYLOAD_LEN => Ok(V2Pointer::new(
+            phase,
+            u16::from_be_bytes(payload[0..2].try_into().expect("two-byte payload slice")),
+            u16::from_be_bytes(payload[2..4].try_into().expect("two-byte payload slice")),
+        )),
+        V2_TRACED_POINTER_PAYLOAD_LEN => Ok(V2Pointer::new_traced(
+            phase,
+            u16::from_be_bytes(payload[24..26].try_into().expect("two-byte payload slice")),
+            u16::from_be_bytes(payload[26..28].try_into().expect("two-byte payload slice")),
+            V2PointerTrace::new(
+                u64::from_be_bytes(payload[0..8].try_into().expect("eight-byte payload slice")),
+                u64::from_be_bytes(payload[8..16].try_into().expect("eight-byte payload slice")),
+                u64::from_be_bytes(
+                    payload[16..24]
+                        .try_into()
+                        .expect("eight-byte payload slice"),
+                ),
+            ),
+        )),
+        _ => Err(V2PayloadError::InvalidLength {
+            message_type: phase.message_type(),
+            expected: V2_POINTER_PAYLOAD_LEN,
+            actual: payload.len(),
+        }),
+    }
 }
 
 fn decode_viewport(payload: &[u8]) -> Result<V2Viewport, V2PayloadError> {
@@ -619,6 +700,39 @@ mod tests {
             );
             assert_eq!(typed_payload(&encoded), Ok(V2Payload::Pointer(pointer)));
         }
+    }
+
+    #[test]
+    fn traced_pointer_roundtrip_preserves_correlation_and_legacy_decode() {
+        let trace = V2PointerTrace::new(
+            0x0102_0304_0506_0708,
+            0x1112_1314_1516_1718,
+            0x2122_2324_2526_2728,
+        );
+        let pointer = V2Pointer::new_traced(V2PointerPhase::Down, 0x1234, 0xabcd, trace);
+        let encoded = pointer.encode_message().expect("encode traced pointer");
+
+        assert_eq!(encoded.len(), V2_HEADER_LEN + V2_TRACED_POINTER_PAYLOAD_LEN);
+        assert_eq!(
+            &encoded[V2_HEADER_LEN..V2_HEADER_LEN + 8],
+            &trace.session_id().to_be_bytes()
+        );
+        assert_eq!(
+            &encoded[V2_HEADER_LEN + 8..V2_HEADER_LEN + 16],
+            &trace.trace_id().to_be_bytes()
+        );
+        assert_eq!(
+            &encoded[V2_HEADER_LEN + 16..V2_HEADER_LEN + 24],
+            &trace.origin_mono_us().to_be_bytes()
+        );
+        assert_eq!(&encoded[V2_HEADER_LEN + 24..], &[0x12, 0x34, 0xab, 0xcd]);
+        assert_eq!(typed_payload(&encoded), Ok(V2Payload::Pointer(pointer)));
+
+        let legacy = V2Pointer::new(V2PointerPhase::Up, 7, 8);
+        assert_eq!(
+            typed_payload(&legacy.encode_message().expect("encode legacy pointer")),
+            Ok(V2Payload::Pointer(legacy))
+        );
     }
 
     #[test]

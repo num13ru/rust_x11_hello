@@ -14,9 +14,10 @@ pub use v2::{
     V2EncodeError, V2Header, V2Message, V2MessageType, decode_v2_message, encode_v2_message,
 };
 pub use v2_payload::{
-    V2_FRAME_PREFIX_LEN, V2_HELLO_PAYLOAD_LEN, V2_POINTER_PAYLOAD_LEN, V2_VIEWPORT_PAYLOAD_LEN,
-    V2FramePayload, V2FrameRef, V2Hello, V2Payload, V2PayloadError, V2PixelFormat, V2PixelFormats,
-    V2Pointer, V2PointerPhase, V2Viewport, decode_v2_payload, encode_v2_frame,
+    V2_FRAME_PREFIX_LEN, V2_HELLO_PAYLOAD_LEN, V2_POINTER_PAYLOAD_LEN,
+    V2_TRACED_POINTER_PAYLOAD_LEN, V2_VIEWPORT_PAYLOAD_LEN, V2FramePayload, V2FrameRef, V2Hello,
+    V2Payload, V2PayloadError, V2PixelFormat, V2PixelFormats, V2Pointer, V2PointerPhase,
+    V2PointerTrace, V2Viewport, decode_v2_payload, encode_v2_frame,
 };
 
 /// Default PaperSpoon TCP listener port.

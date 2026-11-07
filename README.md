@@ -290,6 +290,44 @@ Use `--no-forward-url` to disable forwarding. A sample Hammerspoon handler is
 available at `tools/hammerspoon/init.example.lua`. Dispatch success does not
 prove that the target Mac application accepted the action.
 
+## Latency traces
+
+Normal KUAL runs create a fresh
+`/extensions/rust_x11_hello/paperpad.latency.jsonl`. Start PaperSpoon with a
+separate host trace:
+
+```sh
+./target/release/paperspoon 5581 /tmp/paperspoon.log \
+  --latency-log=/tmp/paperspoon.latency.jsonl
+```
+
+Each forwarded pointer carries a run-scoped session ID, trace ID, and PaperPad
+monotonic origin. The receiver still accepts legacy untraced pointers, but an
+older PaperSpoon cannot decode the traced payload, so deploy PaperPad and run
+PaperSpoon from the same build for measurements.
+
+After the run stops, retrieve and analyze the device trace:
+
+```sh
+mtp-rs get /extensions/rust_x11_hello/paperpad.latency.jsonl \
+  paperpad.latency.jsonl --replace
+python3 scripts/analyze-latency.py \
+  paperpad.latency.jsonl /tmp/paperspoon.latency.jsonl \
+  /tmp/paperpad-hammerspoon-latency.jsonl > latency.csv
+```
+
+The Hammerspoon trace is optional and requires installing the updated sample
+handler. The analyzer reports PaperPad input/queue time, feedback transport
+round trip, a symmetry-based one-way estimate, PaperSpoon processing and
+`open` duration, frame presentation return and backend submission duration,
+Hammerspoon receipt, handler dispatch duration, and
+release/down-to-dispatch-return latency. Frame
+presentation return is not camera-verified e-ink completion, and Hammerspoon
+dispatch return does not prove that the target application changed state. An
+action-specific watcher can call `paperpadRecordObservedEffect(actionId)` after
+observing the real state change; the analyzer then reports
+release/down-to-effect latency.
+
 ## Logs and device evidence
 
 Retrieve the device log after PaperPad stops:

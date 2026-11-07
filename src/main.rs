@@ -25,6 +25,7 @@ mod app;
 mod config;
 mod discovery;
 mod display;
+mod latency;
 mod mxcfb;
 mod net;
 mod ui;
@@ -34,6 +35,7 @@ mod x11;
 static BENCHMARK_SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 fn main() -> Result<()> {
+    latency::init_from_env();
     print_environment();
     run()
 }
