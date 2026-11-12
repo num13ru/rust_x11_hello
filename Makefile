@@ -1,7 +1,7 @@
 -include .env
 
 CONTAINER_CLI ?= docker
-CONTAINER_RUN_ARGS ?= --cpus 8 --memory 8g
+CONTAINER_RUN_ARGS ?= --cpus 8 --memory 2g
 CONTAINER_BUILD_ARGS ?=
 CONTAINER_PROXY ?=
 APPLE_CONTAINER_NETWORK ?= default

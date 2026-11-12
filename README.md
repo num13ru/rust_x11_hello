@@ -78,7 +78,7 @@ those dependency caches without removing build outputs.
 
 Apple Container runs the builder natively as AArch64 while Rust still targets
 the Kindle's `armv7-unknown-linux-musleabihf`. Both backends limit build and
-verification containers to 8 CPUs and 8 GiB by default; override or clear
+verification containers to 8 CPUs and 2 GiB by default; override or clear
 `CONTAINER_RUN_ARGS` if the host has fewer resources or different limits. The
 Apple Container path requires macOS 26 on Apple silicon, a running Container
 system service, host network access to Debian and crates.io, and a CLI version
