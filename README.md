@@ -49,7 +49,44 @@ git diff --check
 ```
 
 `make check` needs Rust, Bash, `jq`, and local loopback socket access. The ARM
-build and static verification use Docker. The resulting untracked binary is:
+build and static verification use Docker by default. On an Apple-silicon Mac
+with [Apple Container](https://github.com/apple/container) installed, start its
+service once per login and select it in the local, ignored `.env` file:
+
+```sh
+container system start
+```
+
+```dotenv
+# .env
+CONTAINER_CLI=container
+```
+
+```sh
+make build
+make verify
+```
+
+The Makefile loads `.env` when present and otherwise defaults to Docker. A
+command-line assignment still takes precedence, for example
+`make verify CONTAINER_CLI=docker`.
+
+`make build` creates the builder image when it is missing or `Dockerfile` has
+changed; use `make image` to force a rebuild. Cargo dependencies persist in the
+ignored, backend-specific `.cache/cargo/` directory. `make clean-cache` removes
+those dependency caches without removing build outputs.
+
+Apple Container runs the builder natively as AArch64 while Rust still targets
+the Kindle's `armv7-unknown-linux-musleabihf`. Both backends limit build and
+verification containers to 8 CPUs and 2 GiB by default; override or clear
+`CONTAINER_RUN_ARGS` if the host has fewer resources or different limits. The
+Apple Container path requires macOS 26 on Apple silicon, a running Container
+system service, host network access to Debian and crates.io, and a CLI version
+that provides both `build` and `run`. Docker remains the portable fallback.
+For guest connectivity failures caused by a host VPN, see
+[Apple Container network issues](#apple-container-network-issues).
+
+The resulting untracked binary is:
 
 ```text
 kindle-extension/rust_x11_hello/bin/rust_x11_hello
@@ -273,6 +310,27 @@ run. A successful host build or accepted framebuffer ioctl is not evidence of
 visible panel output. Likewise, missing `ButtonPress`/`ButtonRelease` records
 after checksum, event-mask, window, and geometry checks means touch remains
 unverified on that configuration; it does not mean the Rust build failed.
+
+## Apple Container network issues
+
+If the host can reach Debian and crates.io but Apple Container times out, the
+host VPN may not forward the guest's `vmnet` traffic. Enable the local workaround
+in the ignored `.env` file:
+
+```dotenv
+PROXY=true
+```
+
+With this opt-in, `make image`, `make build`, and `make shell` query `container
+network list --format json`, start a restricted host proxy on the discovered
+gateway and an ephemeral port, and inject its URL only into the child build
+environment. No address is persisted. The proxy accepts only the discovered
+private subnet, permits only public destinations on ports 80 and 443, and stops
+with the command. It requires Python 3.
+
+Remove `PROXY` or set it to `false` to use direct guest networking. `PROXY`
+accepts only `true` or `false`. Set `APPLE_CONTAINER_NETWORK` only when using a
+network other than `default`.
 
 ## Repository map
 
