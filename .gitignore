@@ -1,4 +1,5 @@
 *.log
+.cache/
 .env
 .DS_Store
 /kindle-extension/rust_x11_hello/bin/rust_x11_hello

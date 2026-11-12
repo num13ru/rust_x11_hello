@@ -71,6 +71,11 @@ The Makefile loads `.env` when present and otherwise defaults to Docker. A
 command-line assignment still takes precedence, for example
 `make verify CONTAINER_CLI=docker`.
 
+`make build` creates the builder image when it is missing or `Dockerfile` has
+changed; use `make image` to force a rebuild. Cargo dependencies persist in the
+ignored, backend-specific `.cache/cargo/` directory. `make clean-cache` removes
+those dependency caches without removing build outputs.
+
 Apple Container runs the builder natively as AArch64 while Rust still targets
 the Kindle's `armv7-unknown-linux-musleabihf`. Both backends limit build and
 verification containers to 8 CPUs and 8 GiB by default; override or clear
