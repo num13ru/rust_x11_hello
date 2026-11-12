@@ -139,6 +139,16 @@ pub(crate) trait DisplayBackend {
     fn redraw_cached_frame(&mut self, cause: RedrawCause);
 
     fn draw_system_ui(&mut self, connected: bool) -> Result<()>;
+
+    /// Perform backend-owned periodic work from the shared event loop.
+    fn maintain(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    /// Restore backend-owned display state before platform window teardown.
+    fn shutdown(&mut self) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

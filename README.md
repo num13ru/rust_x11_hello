@@ -191,16 +191,16 @@ Legacy environment variable names are not read.
 | Backend | Mono1 | Gray8 and JPEG | Notes |
 | --- | --- | --- | --- |
 | X11 | Yes | No | Reference display path |
-| MXCFB | Yes | Yes | Experimental; uses an X11 InputOnly window for input |
+| MXCFB | Yes | Yes | Experimental; uses a backgroundless X11 InputOutput window for input and clipping |
 
 MXCFB startup requires the tested framebuffer layout and HWTCON capabilities;
 it fails rather than silently falling back to X11. Both formats currently use
-the GC16 update path. The MXCFB input window has no X11 background, Expose
-subscription, or graphics context, so PaperPad itself does not ask X11 to
-paint over direct framebuffer output. Direct framebuffer output, X11 touch,
-local Exit, Gray8, JPEG, and Apple Music Now Playing have been observed on the
-documented Paperwhite 6. A device run confirmed that the InputOnly window
-retains touch and local Exit without the earlier X11/event flicker. Subsequent
+the GC16 update path. The MXCFB window is a full-screen X11 InputOutput window
+but requests no X11 background pixel or pixmap and creates no graphics context.
+Its mapped stacking footprint clips lower Kindle/KUAL X11 windows, while
+Expose events ask the MXCFB backend to redraw cached content. Direct framebuffer
+output, X11 touch, local Exit, Gray8, JPEG, and Apple Music Now Playing have
+been observed on the documented Paperwhite 6. Subsequent
 device runs completed marker-specific waits and visibly restored the original
 screen after every benchmark. Exact pixel fidelity, sleep/wake interaction,
 and every failure fallback have not all been physically verified.

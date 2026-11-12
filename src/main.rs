@@ -103,7 +103,7 @@ fn run() -> Result<()> {
     x11_display::print_screen_info(&conn, screen_num);
     let window_mode = match display_kind {
         config::DisplayBackendKind::X11 => WindowMode::Drawable,
-        config::DisplayBackendKind::Mxcfb => WindowMode::InputOnly,
+        config::DisplayBackendKind::Mxcfb => WindowMode::DirectFramebuffer,
     };
     let mapped = x11_display::setup_window(&conn, screen_num, window_mode)?;
     let win = mapped.window;
@@ -135,6 +135,7 @@ fn run() -> Result<()> {
         display_backend.pixel_formats(),
     );
     let event_result = event_loop(&conn, win, display_backend.as_mut(), &mut paperspoon);
+    let display_cleanup_result = display_backend.shutdown();
     drop(display_backend);
 
     let destroy_window = match &event_result {
@@ -143,14 +144,29 @@ fn run() -> Result<()> {
     };
     let cleanup_result = x11_display::cleanup(&conn, mapped, destroy_window);
 
-    match (event_result, cleanup_result) {
-        (Err(primary), Err(cleanup_error)) => {
-            eprintln!("cleanup after event-loop failure also failed: {cleanup_error:#}");
+    match event_result {
+        Err(primary) => {
+            if let Err(cleanup_error) = display_cleanup_result {
+                eprintln!(
+                    "display cleanup after event-loop failure also failed: {cleanup_error:#}"
+                );
+            }
+            if let Err(cleanup_error) = cleanup_result {
+                eprintln!("X11 cleanup after event-loop failure also failed: {cleanup_error:#}");
+            }
             Err(primary)
         }
-        (Err(primary), Ok(())) => Err(primary),
-        (Ok(_), Err(cleanup_error)) => Err(cleanup_error),
-        (Ok(_), Ok(())) => Ok(()),
+        Ok(_) => match (display_cleanup_result, cleanup_result) {
+            (Err(primary), Err(cleanup_error)) => {
+                eprintln!(
+                    "X11 cleanup after display cleanup failure also failed: {cleanup_error:#}"
+                );
+                Err(primary)
+            }
+            (Err(primary), Ok(())) => Err(primary),
+            (Ok(()), Err(cleanup_error)) => Err(cleanup_error),
+            (Ok(()), Ok(())) => Ok(()),
+        },
     }
 }
 
@@ -161,7 +177,7 @@ fn run_mxcfb_benchmark() -> Result<()> {
     let (conn, screen_num) = RustConnection::connect(None)
         .context("failed to connect to X11 display; check DISPLAY and /tmp/.X11-unix/X0")?;
     x11_display::print_screen_info(&conn, screen_num);
-    let mapped = x11_display::setup_window(&conn, screen_num, WindowMode::InputOnly)?;
+    let mapped = x11_display::setup_window(&conn, screen_num, WindowMode::DirectFramebuffer)?;
     let win = mapped.window;
     let size = mapped.size;
     eprintln!(
@@ -245,8 +261,8 @@ fn create_display_backend<'a>(
             #[cfg(target_os = "linux")]
             {
                 anyhow::ensure!(
-                    mapped.mode == WindowMode::InputOnly && mapped.gc.is_none(),
-                    "MXCFB input window must be InputOnly without a graphics context"
+                    mapped.mode == WindowMode::DirectFramebuffer && mapped.gc.is_none(),
+                    "MXCFB window must occlude lower X11 windows without a graphics context"
                 );
                 let backend = MxcfbDisplayBackend::open()?;
                 anyhow::ensure!(

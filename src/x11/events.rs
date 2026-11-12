@@ -157,6 +157,9 @@ pub(crate) fn event_loop(
                 ),
             }
         }
+        display
+            .maintain()
+            .context("failed to maintain display backend")?;
         let Some(event) = conn
             .poll_for_event()
             .context("X11 connection failed while waiting for an event")?

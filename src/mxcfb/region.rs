@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result, ensure};
 
-use crate::ui::screen::{SYSTEM_UI_HEIGHT, ScreenLayout};
+use crate::ui::screen::{SYSTEM_UI_HEIGHT, ScreenLayout, ScreenRect};
 
 use super::update_abi::UpdateRegion;
 
@@ -68,6 +68,65 @@ pub(super) fn remote_update_region(
     )
 }
 
+/// Translate a non-empty remote-frame rectangle into visible-screen
+/// coordinates while proving it cannot overlap PaperPad's local system strip.
+pub(super) fn remote_frame_region(
+    screen: ScreenLayout,
+    region: ScreenRect,
+    visible_width: u32,
+    visible_height: u32,
+) -> Result<ScreenRect> {
+    let full_remote = remote_update_region(screen, visible_width, visible_height)?;
+    ensure!(
+        region.width > 0 && region.height > 0,
+        "empty remote frame region"
+    );
+    let right = region
+        .x
+        .checked_add(region.width)
+        .context("remote frame region x overflow")?;
+    let bottom = region
+        .y
+        .checked_add(region.height)
+        .context("remote frame region y overflow")?;
+    ensure!(
+        right <= screen.remote_viewport.width && bottom <= screen.remote_viewport.height,
+        "remote frame region exceeds remote viewport"
+    );
+    let translated = ScreenRect {
+        x: screen
+            .remote_viewport
+            .x
+            .checked_add(region.x)
+            .context("remote frame screen x overflow")?,
+        y: screen
+            .remote_viewport
+            .y
+            .checked_add(region.y)
+            .context("remote frame screen y overflow")?,
+        width: region.width,
+        height: region.height,
+    };
+    checked_visible_region(
+        u32::from(translated.x),
+        u32::from(translated.y),
+        u32::from(translated.width),
+        u32::from(translated.height),
+        visible_width,
+        visible_height,
+    )?;
+    ensure!(
+        u32::from(translated.x) >= full_remote.left
+            && u32::from(translated.y) >= full_remote.top
+            && u32::from(translated.x) + u32::from(translated.width)
+                <= full_remote.left + full_remote.width
+            && u32::from(translated.y) + u32::from(translated.height)
+                <= full_remote.top + full_remote.height,
+        "translated remote frame region exceeds remote update region"
+    );
+    Ok(translated)
+}
+
 /// Refresh exactly the PaperPad-owned bottom strip, never remote content.
 pub(super) fn system_ui_update_region(
     screen: ScreenLayout,
@@ -130,6 +189,45 @@ mod tests {
             }
         );
         assert_eq!(screen.system_ui_region.y, 1624);
+    }
+
+    #[test]
+    fn remote_frame_region_translates_and_rejects_local_strip_overlap() {
+        let screen = ScreenLayout::new(1272, 1696).unwrap();
+        assert_eq!(
+            remote_frame_region(
+                screen,
+                ScreenRect {
+                    x: 100,
+                    y: 200,
+                    width: 300,
+                    height: 400,
+                },
+                1272,
+                1696,
+            )
+            .unwrap(),
+            ScreenRect {
+                x: 100,
+                y: 200,
+                width: 300,
+                height: 400,
+            }
+        );
+        assert!(
+            remote_frame_region(
+                screen,
+                ScreenRect {
+                    x: 0,
+                    y: 1624,
+                    width: 1,
+                    height: 1,
+                },
+                1272,
+                1696,
+            )
+            .is_err()
+        );
     }
 
     #[test]

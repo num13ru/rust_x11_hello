@@ -97,10 +97,9 @@ pub(super) fn next_remote_request(
     request_for_region(update_region, markers.next_marker(), waveform)
 }
 
-/// Validate an explicit benchmark rectangle inside the remote viewport before
-/// advancing the process-local marker. Normal PaperPad presentation never uses
-/// this path.
-pub(super) fn next_benchmark_request(
+/// Validate an explicit screen-coordinate rectangle inside the remote
+/// viewport before advancing the process-local marker.
+pub(super) fn next_remote_region_request(
     screen: ScreenLayout,
     region: ScreenRect,
     visible_width: u32,
@@ -135,6 +134,25 @@ pub(super) fn next_benchmark_request(
     );
 
     request_for_region(update_region, markers.next_marker(), waveform)
+}
+
+/// Benchmark-facing name for the same bounded remote-region policy.
+pub(super) fn next_benchmark_request(
+    screen: ScreenLayout,
+    region: ScreenRect,
+    visible_width: u32,
+    visible_height: u32,
+    markers: &mut UpdateMarkerSequence,
+    waveform: MxcfbWaveform,
+) -> Result<UpdateDataMtk> {
+    next_remote_region_request(
+        screen,
+        region,
+        visible_width,
+        visible_height,
+        markers,
+        waveform,
+    )
 }
 
 /// Preserve the established conservative policy for normal PaperPad frames.
