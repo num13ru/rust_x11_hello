@@ -140,6 +140,8 @@ KUAL provides normal run, explicit benchmark, and diagnostic actions:
   for measuring how update area affects the fastest full-screen waveform.
 - **Inspect framebuffer metadata** — read-only diagnostics; it does not draw or
   submit an e-ink refresh.
+- **Inspect input devices** — read-only evdev capability and absolute-axis
+  metadata; it does not consume events or request an exclusive grab.
 
 The full-screen window covers KUAL. Stop it with PaperPad's **Exit** button or
 wait for the watchdog. The launcher serializes runs and escalates from `TERM`

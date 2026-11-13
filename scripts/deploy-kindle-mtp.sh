@@ -59,6 +59,7 @@ trap cleanup_local_temp EXIT
 upload_support_files() {
     mtp put "${LOCAL_EXT}/bin/run.sh" "${REMOTE_BIN_DIR}/run.sh" --replace --verify
     mtp put "${LOCAL_EXT}/bin/probe-fb.sh" "${REMOTE_BIN_DIR}/probe-fb.sh" --replace --verify
+    mtp put "${LOCAL_EXT}/bin/probe-input.sh" "${REMOTE_BIN_DIR}/probe-input.sh" --replace --verify
     mtp put "${LOCAL_EXT}/config.xml" "${REMOTE_EXT}/config.xml" --replace --verify
 }
 
@@ -103,6 +104,7 @@ for required_file in \
     "$LOCAL_BIN" \
     "${LOCAL_EXT}/bin/run.sh" \
     "${LOCAL_EXT}/bin/probe-fb.sh" \
+    "${LOCAL_EXT}/bin/probe-input.sh" \
     "${LOCAL_EXT}/config.xml" \
     "${LOCAL_EXT}/menu.json"
 do

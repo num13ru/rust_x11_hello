@@ -21,6 +21,7 @@ mkdir -p "${LOCAL_PACKAGE}/bin"
 printf 'new-binary' >"${LOCAL_PACKAGE}/bin/rust_x11_hello"
 printf 'run' >"${LOCAL_PACKAGE}/bin/run.sh"
 printf 'probe' >"${LOCAL_PACKAGE}/bin/probe-fb.sh"
+printf 'input-probe' >"${LOCAL_PACKAGE}/bin/probe-input.sh"
 printf 'config' >"${LOCAL_PACKAGE}/config.xml"
 printf 'menu' >"${LOCAL_PACKAGE}/menu.json"
 
@@ -56,6 +57,8 @@ cmp "${LOCAL_PACKAGE}/bin/rust_x11_hello" \
     "${SUCCESS_ROOT}/extensions/rust_x11_hello/bin/rust_x11_hello"
 cmp "${LOCAL_PACKAGE}/bin/probe-fb.sh" \
     "${SUCCESS_ROOT}/extensions/rust_x11_hello/bin/probe-fb.sh"
+cmp "${LOCAL_PACKAGE}/bin/probe-input.sh" \
+    "${SUCCESS_ROOT}/extensions/rust_x11_hello/bin/probe-input.sh"
 cmp "${LOCAL_PACKAGE}/menu.json" \
     "${SUCCESS_ROOT}/extensions/rust_x11_hello/menu.json"
 activation_line="$(awk '$1 == "put" && $3 == "/extensions/rust_x11_hello/bin/rust_x11_hello" { print NR; exit }' "$SUCCESS_LOG")"

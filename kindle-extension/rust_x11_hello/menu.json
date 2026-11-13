@@ -39,6 +39,10 @@
     {
       "name": "Inspect framebuffer metadata",
       "action": "sh bin/probe-fb.sh"
+    },
+    {
+      "name": "Inspect input devices",
+      "action": "sh bin/probe-input.sh"
     }
   ]
 }

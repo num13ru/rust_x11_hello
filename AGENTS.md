@@ -20,6 +20,9 @@ steps an agent should follow, especially around physical-device work.
   `docs/archive/mxcfb-device-evidence.md`.
 - **Inspect framebuffer metadata** is a read-only KUAL diagnostic. It logs
   `/dev/fb0` metadata without using the normal launcher or drawing.
+- **Inspect input devices** is a read-only KUAL diagnostic. It logs evdev names,
+  capabilities, properties, and absolute-axis ranges without consuming events
+  or requesting `EVIOCGRAB`.
 - The four **Benchmark MXCFB** KUAL actions are bounded, local completion tests
   for GC16, DU, A2, and DU4. They bypass PaperSpoon, retain X11 for local Exit,
   and must not be described as visual FPS without camera/operator evidence.
@@ -95,7 +98,7 @@ Rules the deploy script enforces:
 
 After a successful deploy, `mtp-rs ls /extensions/rust_x11_hello --recursive` shows:
 `rust_x11_hello.log`, `rust_x11_hello.status`,
-`bin/{rust_x11_hello, run.sh, probe-fb.sh}`,
+`bin/{rust_x11_hello, run.sh, probe-fb.sh, probe-input.sh}`,
 `config.xml`, `menu.json`, plus `bin/rust_x11_hello.previous` retained from the update.
 
 ## Log handling

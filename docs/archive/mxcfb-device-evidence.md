@@ -1,5 +1,48 @@
 # Paperwhite 6 framebuffer evidence
 
+## Read-only evdev capability probe (2026-11-13)
+
+The deployed ARM binary was independently read back before the run and matched
+the host artifact at SHA-256
+`733ba1d2808391db4e8d8a1e093c82e82711ddb6f0fb8dffb7a79add7f54eea0`.
+The operator ran **Inspect input devices** through KUAL. The latest block in the
+retrieved cumulative log is dated `Fri Nov 13 18:43:30 GMT+3:0100 2026`, reports
+`event reads=false eviocgrab=false`, and ended with probe exit status 0. The
+retrieved log SHA-256 is
+`9c591b88826cfe78478c856949725e38493f9e336b30af76934382d7878a99d5`.
+
+The probe found two readable event nodes:
+
+- `/dev/input/event0`, `bd71828-pwrkey`, exposes `EV_SYN` and `EV_KEY` and is
+  not a touch candidate.
+- `/dev/input/event1`, `pt_mt`, has the direct-input property and exposes
+  `EV_SYN`, `EV_KEY`, `EV_REL`, and `EV_ABS`. It exposes no `BTN_TOUCH` or
+  `BTN_TOOL_FINGER`, but it has a complete multitouch capability set.
+
+`pt_mt` reported these absolute axes; every reported fuzz, flat, and resolution
+value was zero:
+
+| Axis | Range |
+| --- | --- |
+| `ABS_MT_SLOT` | 0..1 |
+| `ABS_MT_TOUCH_MAJOR` (`0x30`) | 0..255 |
+| `ABS_MT_POSITION_X` | 0..1271 |
+| `ABS_MT_POSITION_Y` | 0..1695 |
+| `ABS_MT_TOOL_TYPE` (`0x37`) | 0..2 |
+| `ABS_MT_TRACKING_ID` | 0..65535 |
+
+The position ranges numerically match the validated 1272×1696 framebuffer.
+Capability metadata alone does not establish axis orientation, inversion,
+rotation, touch/release encoding, `SYN_REPORT` grouping, slot transition order,
+secondary-contact behavior, or whether `EVIOCGRAB` is safe. No event records
+were read and no exclusive grab was requested in this run.
+
+The separately retrieved `rust_x11_hello.status` SHA-256 is
+`86d5c79e6082ec9b83e0e795f4daba78ebca99a5a16087dab2cc19fec8fd6336`,
+but its `STOPPED status=143 reason=watchdog` value belongs to the preceding
+normal PaperPad launch. The standalone capability probe does not update that
+status file, so it is not probe-result evidence.
+
 ## Backgroundless InputOutput occlusion trial (2026-11-13)
 
 The deployed ARM binary was independently read back over MTP before the run and

@@ -25,6 +25,7 @@ mod app;
 mod config;
 mod discovery;
 mod display;
+mod input;
 mod latency;
 mod mxcfb;
 mod net;
@@ -84,10 +85,15 @@ fn run() -> Result<()> {
         (Some(arg), None) if arg == "--inspect-framebuffer" => {
             return mxcfb::inspect_framebuffer();
         }
+        (Some(arg), None) if arg == "--inspect-input" => {
+            return input::inspect_input();
+        }
         (Some(arg), None) if arg == "--benchmark-mxcfb" => {
             return run_mxcfb_benchmark();
         }
-        _ => bail!("usage: rust_x11_hello [--inspect-framebuffer|--benchmark-mxcfb]"),
+        _ => {
+            bail!("usage: rust_x11_hello [--inspect-framebuffer|--inspect-input|--benchmark-mxcfb]")
+        }
     }
 
     let display_kind = config::DisplayBackendKind::from_env()?;
