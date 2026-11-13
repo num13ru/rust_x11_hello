@@ -23,6 +23,9 @@ steps an agent should follow, especially around physical-device work.
 - **Inspect input devices** is a read-only KUAL diagnostic. It logs evdev names,
   capabilities, properties, and absolute-axis ranges without consuming events
   or requesting `EVIOCGRAB`.
+- **Trace input events (15s; tap)** is a bounded, nonexclusive KUAL diagnostic.
+  It logs raw touchscreen records for protocol analysis and does not request
+  `EVIOCGRAB`.
 - The four **Benchmark MXCFB** KUAL actions are bounded, local completion tests
   for GC16, DU, A2, and DU4. They bypass PaperSpoon, retain X11 for local Exit,
   and must not be described as visual FPS without camera/operator evidence.
@@ -75,6 +78,26 @@ Prerequisites:
 - App stopped: in-window **Exit** used or watchdog ended the run, and window
   confirmed gone.
   MTP cannot prove process state; `--confirm-stopped` is an operator assertion.
+
+### Agent deployment authorization
+
+When the user explicitly asks to deploy and exactly one accessible Kindle is
+connected, do not ask for a separate stopped-process or backup-replacement
+confirmation. Treat that deploy request as the operator's assertion that
+PaperPad is stopped and as authorization to:
+
+- pass `update --confirm-stopped` when the canonical extension already exists;
+- remove only
+  `/extensions/rust_x11_hello/bin/rust_x11_hello.previous` when that retained
+  backup blocks the requested update; and
+- replace it with the newly retained pre-update binary through the normal
+  verified deployment workflow.
+
+Still resolve install versus update with read-only MTP checks, run the required
+build verification, use the canonical deploy script, and verify the deployed
+binary by independent readback. Do not deploy without an explicit user request.
+Ask for direction only when no Kindle is accessible, more than one target is
+ambiguous, or a materially different destructive action would be required.
 
 Fresh install (only when `/extensions/rust_x11_hello` does not exist):
 

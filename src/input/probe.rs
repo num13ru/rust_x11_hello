@@ -9,8 +9,14 @@
 use anyhow::{Context, Result, bail};
 use std::fs::{self, File};
 use std::io;
+#[cfg(target_os = "linux")]
+use std::io::Read;
 use std::os::fd::AsRawFd;
+#[cfg(target_os = "linux")]
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
+#[cfg(target_os = "linux")]
+use std::time::{Duration, Instant};
 
 const EVDEV_IOCTL_TYPE: u32 = b'E' as u32;
 const IOC_READ: u32 = 2;
@@ -26,6 +32,11 @@ const EV_MSC: u16 = 0x04;
 const EV_SW: u16 = 0x05;
 const EV_MAX: u16 = 0x1f;
 
+const SYN_REPORT: u16 = 0x00;
+const SYN_CONFIG: u16 = 0x01;
+const SYN_MT_REPORT: u16 = 0x02;
+const SYN_DROPPED: u16 = 0x03;
+
 const BTN_TOOL_FINGER: u16 = 0x145;
 const BTN_TOUCH: u16 = 0x14a;
 const KEY_MAX: u16 = 0x2ff;
@@ -40,6 +51,11 @@ const ABS_MAX: u16 = 0x3f;
 
 const INPUT_PROP_DIRECT: u16 = 0x01;
 const INPUT_PROP_MAX: u16 = 0x1f;
+
+#[cfg(target_os = "linux")]
+const TRACE_DURATION: Duration = Duration::from_secs(15);
+#[cfg(target_os = "linux")]
+const MAX_TRACE_EVENTS: usize = 4096;
 
 // libc follows each target C ABI: musl's ioctl request is a signed int,
 // while Darwin and glibc expose an unsigned long request.
@@ -77,6 +93,13 @@ const _: () = {
 struct TouchProtocols {
     legacy: bool,
     multitouch: bool,
+}
+
+struct CapabilityBits {
+    event_types: Vec<u8>,
+    keys: Vec<u8>,
+    absolute: Vec<u8>,
+    direct: bool,
 }
 
 impl TouchProtocols {
@@ -169,40 +192,12 @@ fn inspect_device(path: &Path) -> Result<TouchProtocols> {
     let file = File::open(path).with_context(|| format!("open {} read-only", path.display()))?;
     let name = read_string(&file, eviocgname(256), 256).context("EVIOCGNAME")?;
     let id = read_value::<InputId>(&file, eviocgid()).context("EVIOCGID")?;
-    let event_types = read_bitmap(&file, eviocgbit(0, bitmap_len(EV_MAX)), EV_MAX)
-        .context("EVIOCGBIT event types")?;
-
-    let keys = if bit_is_set(&event_types, EV_KEY) {
-        read_bitmap(&file, eviocgbit(EV_KEY, bitmap_len(KEY_MAX)), KEY_MAX)
-            .context("EVIOCGBIT keys")?
-    } else {
-        vec![0; bitmap_len(KEY_MAX)]
-    };
-    let absolute = if bit_is_set(&event_types, EV_ABS) {
-        read_bitmap(&file, eviocgbit(EV_ABS, bitmap_len(ABS_MAX)), ABS_MAX)
-            .context("EVIOCGBIT absolute axes")?
-    } else {
-        vec![0; bitmap_len(ABS_MAX)]
-    };
-    let properties = match read_bitmap(
-        &file,
-        eviocgprop(bitmap_len(INPUT_PROP_MAX)),
-        INPUT_PROP_MAX,
-    ) {
-        Ok(properties) => Some(properties),
-        Err(error) => {
-            eprintln!(
-                "input probe: device path={} property_error={error}",
-                path.display()
-            );
-            None
-        }
-    };
-
-    let protocols = touch_protocols(&event_types, &keys, &absolute);
-    let direct = properties
-        .as_deref()
-        .is_some_and(|bits| bit_is_set(bits, INPUT_PROP_DIRECT));
+    let capabilities = read_capabilities(&file, path)?;
+    let protocols = touch_protocols(
+        &capabilities.event_types,
+        &capabilities.keys,
+        &capabilities.absolute,
+    );
     eprintln!(
         "input probe: device path={} name={name:?} id={:04x}:{:04x}:{:04x}:{:04x} event_types={} properties={} btn_touch={} btn_tool_finger={} touch_candidate={} protocol={}",
         path.display(),
@@ -210,20 +205,20 @@ fn inspect_device(path: &Path) -> Result<TouchProtocols> {
         id.vendor,
         id.product,
         id.version,
-        format_event_types(&event_types),
-        if direct {
+        format_event_types(&capabilities.event_types),
+        if capabilities.direct {
             "direct"
         } else {
             "not-direct-or-unknown"
         },
-        bit_is_set(&keys, BTN_TOUCH),
-        bit_is_set(&keys, BTN_TOOL_FINGER),
+        bit_is_set(&capabilities.keys, BTN_TOUCH),
+        bit_is_set(&capabilities.keys, BTN_TOOL_FINGER),
         protocols.is_candidate(),
         protocols.label()
     );
 
     for code in 0..=ABS_MAX {
-        if bit_is_set(&absolute, code) {
+        if bit_is_set(&capabilities.absolute, code) {
             let info = read_value::<InputAbsInfo>(&file, eviocgabs(code))
                 .with_context(|| format!("EVIOCGABS code=0x{code:02x}"))?;
             eprintln!(
@@ -241,6 +236,190 @@ fn inspect_device(path: &Path) -> Result<TouchProtocols> {
     }
 
     Ok(protocols)
+}
+
+fn read_capabilities(file: &File, path: &Path) -> Result<CapabilityBits> {
+    let event_types = read_bitmap(file, eviocgbit(0, bitmap_len(EV_MAX)), EV_MAX)
+        .context("EVIOCGBIT event types")?;
+    let keys = if bit_is_set(&event_types, EV_KEY) {
+        read_bitmap(file, eviocgbit(EV_KEY, bitmap_len(KEY_MAX)), KEY_MAX)
+            .context("EVIOCGBIT keys")?
+    } else {
+        vec![0; bitmap_len(KEY_MAX)]
+    };
+    let absolute = if bit_is_set(&event_types, EV_ABS) {
+        read_bitmap(file, eviocgbit(EV_ABS, bitmap_len(ABS_MAX)), ABS_MAX)
+            .context("EVIOCGBIT absolute axes")?
+    } else {
+        vec![0; bitmap_len(ABS_MAX)]
+    };
+    let direct = match read_bitmap(file, eviocgprop(bitmap_len(INPUT_PROP_MAX)), INPUT_PROP_MAX) {
+        Ok(properties) => bit_is_set(&properties, INPUT_PROP_DIRECT),
+        Err(error) => {
+            eprintln!(
+                "input probe: device path={} property_error={error}",
+                path.display()
+            );
+            false
+        }
+    };
+    Ok(CapabilityBits {
+        event_types,
+        keys,
+        absolute,
+        direct,
+    })
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn trace_input() -> Result<()> {
+    let (path, name) = select_touch_device()?;
+    eprintln!(
+        "input trace: start path={} name={name:?} duration_ms={} max_events={} eviocgrab=false",
+        path.display(),
+        TRACE_DURATION.as_millis(),
+        MAX_TRACE_EVENTS
+    );
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC)
+        .open(&path)
+        .with_context(|| format!("open {} for nonblocking event trace", path.display()))?;
+    let event_size = std::mem::size_of::<libc::input_event>();
+    let mut bytes = vec![0u8; event_size * 64];
+    let started = Instant::now();
+    let deadline = started + TRACE_DURATION;
+    let mut sequence = 0usize;
+
+    while Instant::now() < deadline {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let timeout_ms = remaining.as_millis().clamp(1, 250) as libc::c_int;
+        let mut descriptor = libc::pollfd {
+            fd: file.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // SAFETY: `descriptor` is a valid writable pollfd for one open file.
+        let poll_result = unsafe { libc::poll(&mut descriptor, 1, timeout_ms) };
+        if poll_result < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(error).context("poll touchscreen event device");
+        }
+        if descriptor.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0 {
+            bail!(
+                "input trace: device poll failed revents=0x{:x}",
+                descriptor.revents
+            );
+        }
+        if descriptor.revents & libc::POLLIN == 0 {
+            continue;
+        }
+
+        let read = match file.read(&mut bytes) {
+            Ok(0) => bail!("input trace: event device reached EOF or disappeared"),
+            Ok(read) => read,
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => continue,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error).context("read touchscreen event records"),
+        };
+        if read % event_size != 0 {
+            bail!("input trace: read {read} bytes not divisible by input_event size {event_size}");
+        }
+        for chunk in bytes[..read].chunks_exact(event_size) {
+            if sequence == MAX_TRACE_EVENTS {
+                bail!("input trace: event limit reached; trace is incomplete");
+            }
+            // SAFETY: `chunk` has exactly `size_of::<input_event>()` readable
+            // bytes. `read_unaligned` avoids assuming the byte buffer alignment.
+            let event: libc::input_event =
+                unsafe { std::ptr::read_unaligned(chunk.as_ptr().cast()) };
+            eprintln!(
+                "input trace: seq={sequence} elapsed_us={} type={} code={} value={}",
+                started.elapsed().as_micros(),
+                event_type_name(event.type_),
+                event_code_name(event.type_, event.code),
+                event.value
+            );
+            sequence += 1;
+        }
+    }
+
+    if sequence == 0 {
+        bail!("input trace: no event records observed during bounded trace");
+    }
+    eprintln!(
+        "input trace: complete events={sequence} duration_ms={} eviocgrab=false",
+        TRACE_DURATION.as_millis()
+    );
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn select_touch_device() -> Result<(PathBuf, String)> {
+    let mut paths = event_paths()?;
+    paths.sort_by_key(|path| event_number(path).unwrap_or(u32::MAX));
+    let mut candidates = Vec::new();
+    for path in paths {
+        let file = File::open(&path)
+            .with_context(|| format!("open {} while selecting touchscreen", path.display()))?;
+        let name = read_string(&file, eviocgname(256), 256)
+            .with_context(|| format!("EVIOCGNAME {}", path.display()))?;
+        let capabilities = read_capabilities(&file, &path)?;
+        let protocols = touch_protocols(
+            &capabilities.event_types,
+            &capabilities.keys,
+            &capabilities.absolute,
+        );
+        if protocols.is_candidate() && capabilities.direct {
+            candidates.push((path, name));
+        }
+    }
+    match candidates.len() {
+        1 => Ok(candidates.pop().expect("one candidate")),
+        0 => bail!("input trace: no readable direct touchscreen candidate found"),
+        count => bail!("input trace: {count} direct touchscreen candidates are ambiguous"),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn event_type_name(event_type: u16) -> String {
+    match event_type {
+        EV_SYN => "EV_SYN".to_owned(),
+        EV_KEY => "EV_KEY".to_owned(),
+        EV_REL => "EV_REL".to_owned(),
+        EV_ABS => "EV_ABS".to_owned(),
+        EV_MSC => "EV_MSC".to_owned(),
+        EV_SW => "EV_SW".to_owned(),
+        _ => format!("0x{event_type:04x}"),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn event_code_name(event_type: u16, code: u16) -> String {
+    let name = match (event_type, code) {
+        (EV_SYN, SYN_REPORT) => Some("SYN_REPORT"),
+        (EV_SYN, SYN_CONFIG) => Some("SYN_CONFIG"),
+        (EV_SYN, SYN_MT_REPORT) => Some("SYN_MT_REPORT"),
+        (EV_SYN, SYN_DROPPED) => Some("SYN_DROPPED"),
+        (EV_KEY, BTN_TOOL_FINGER) => Some("BTN_TOOL_FINGER"),
+        (EV_KEY, BTN_TOUCH) => Some("BTN_TOUCH"),
+        (EV_ABS, ABS_X) => Some("ABS_X"),
+        (EV_ABS, ABS_Y) => Some("ABS_Y"),
+        (EV_ABS, ABS_MT_SLOT) => Some("ABS_MT_SLOT"),
+        (EV_ABS, 0x30) => Some("ABS_MT_TOUCH_MAJOR"),
+        (EV_ABS, ABS_MT_POSITION_X) => Some("ABS_MT_POSITION_X"),
+        (EV_ABS, ABS_MT_POSITION_Y) => Some("ABS_MT_POSITION_Y"),
+        (EV_ABS, 0x37) => Some("ABS_MT_TOOL_TYPE"),
+        (EV_ABS, ABS_MT_TRACKING_ID) => Some("ABS_MT_TRACKING_ID"),
+        _ => None,
+    };
+    match name {
+        Some(name) => format!("{name}(0x{code:04x})"),
+        None => format!("0x{code:04x}"),
+    }
 }
 
 fn touch_protocols(event_types: &[u8], keys: &[u8], absolute: &[u8]) -> TouchProtocols {

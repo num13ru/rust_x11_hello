@@ -142,6 +142,8 @@ KUAL provides normal run, explicit benchmark, and diagnostic actions:
   submit an e-ink refresh.
 - **Inspect input devices** — read-only evdev capability and absolute-axis
   metadata; it does not consume events or request an exclusive grab.
+- **Trace input events (15s; tap)** — bounded raw evdev record capture for
+  controlled touch diagnostics; it does not request an exclusive grab.
 
 The full-screen window covers KUAL. Stop it with PaperPad's **Exit** button or
 wait for the watchdog. The launcher serializes runs and escalates from `TERM`

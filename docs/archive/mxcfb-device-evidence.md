@@ -1,5 +1,46 @@
 # Paperwhite 6 framebuffer evidence
 
+## Nonexclusive evdev event trace (2026-11-13)
+
+The deployed trace binary independently matched the host artifact at SHA-256
+`86d4f053ff475b148969c2d3a96360cef95b8be94b6d849b0ec67d6d118b1608`.
+The operator launched **Trace input events (15s; tap)** and made ordered
+single-finger taps near top-left, center, and bottom-right. The diagnostic
+opened the capability-selected `pt_mt` device without `EVIOCGRAB`.
+
+The retrieved cumulative log SHA-256 is
+`275fcd92ec4fe6ac64dd1b652f7411c49d58b02cd01567039524086928aa1fb9`.
+Its second trace block, dated `Fri Nov 13 18:57:22 GMT+3:0100 2026`, captured
+three complete primary contacts centered approximately at `(215,180)`,
+`(639,810)`, and `(1149,1480)`. This ordering establishes that raw X increases
+left-to-right and raw Y increases top-to-bottom in the tested portrait
+orientation. The evdev ranges therefore map one-to-one to the 1272×1696
+physical coordinate space for this orientation; no swap or inversion was
+observed.
+
+Each observed contact used the type-B multitouch sequence below:
+
+1. `ABS_MT_TRACKING_ID=0`, followed by X/Y and sometimes
+   `ABS_MT_TOUCH_MAJOR`, then `SYN_REPORT`;
+2. zero or more position/touch-major changes, each committed by `SYN_REPORT`;
+3. `ABS_MT_TRACKING_ID=-1`, then `SYN_REPORT` for release.
+
+The device reused tracking ID 0 for later contacts. It emitted no `BTN_TOUCH`,
+`BTN_TOOL_FINGER`, `SYN_MT_REPORT`, or `ABS_MT_SLOT` record in these
+single-contact traces; slot 0 is the implicit initial slot. The capability
+probe still establishes support for slots 0 and 1. No `SYN_DROPPED` or
+secondary-contact sequence was exercised.
+
+Because the trace was deliberately nonexclusive and created no X11 window, the
+operator saw the original Kindle UI and the same taps invoked that UI. Neither
+of two trace blocks contains the normal completion/footer line, and a later MTP
+size check showed the log stable at 133,386 bytes. Do not describe this as a
+successfully bounded KUAL completion: the raw contacts were captured, but the
+underlying UI interaction terminated or detached the diagnostic lifecycle.
+This result confirms shared delivery without a grab and shows that a future
+interactive trace needs lifecycle isolation if its completion itself matters.
+It does not establish `EVIOCGRAB` safety.
+
 ## Read-only evdev capability probe (2026-11-13)
 
 The deployed ARM binary was independently read back before the run and matched

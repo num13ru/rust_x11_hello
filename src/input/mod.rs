@@ -4,9 +4,14 @@
 mod probe;
 
 #[cfg(target_os = "linux")]
-pub(crate) use probe::inspect_input;
+pub(crate) use probe::{inspect_input, trace_input};
 
 #[cfg(not(target_os = "linux"))]
 pub(crate) fn inspect_input() -> anyhow::Result<()> {
     anyhow::bail!("input inspection requires Linux and /dev/input/event*")
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn trace_input() -> anyhow::Result<()> {
+    anyhow::bail!("input event tracing requires Linux and /dev/input/event*")
 }

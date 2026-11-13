@@ -69,10 +69,16 @@ firmware 5.17.1.0.4:
 The read-only capability probe later identified `/dev/input/event1` (`pt_mt`)
 as a direct multitouch device. It exposes two slots, tracking IDs, and X/Y
 ranges of 0..1271 and 0..1695, numerically matching the 1272×1696 framebuffer.
-The device exposes no `BTN_TOUCH` or `BTN_TOOL_FINGER`. These results establish
-device selection and coordinate extents, but not input report sequencing,
-rotation/inversion, release encoding, secondary-contact behavior, or
-`EVIOCGRAB` safety.
+The device exposes no `BTN_TOUCH` or `BTN_TOOL_FINGER`.
+
+A subsequent nonexclusive trace established type-B primary-contact sequencing:
+tracking ID 0 starts a contact, X/Y and optional touch-major updates are grouped
+by `SYN_REPORT`, and tracking ID -1 followed by `SYN_REPORT` releases it. Ordered
+top-left, center, and bottom-right taps established identity portrait mapping:
+X increases left-to-right and Y increases top-to-bottom. Slot 0 remained
+implicit. Secondary-slot behavior, `SYN_DROPPED` recovery, and `EVIOCGRAB`
+safety remain unverified. The same nonexclusive touches reached the underlying
+Kindle UI, and the trace did not retain its normal KUAL completion lifecycle.
 
 The repository still contains no bounded physical trial showing that PaperPad
 can keep the display exclusively while no X11 window is mapped. Native input
@@ -115,11 +121,10 @@ action passed host checks, the ARMv7 musl build, static verification, deployed
 binary readback verification, and a physical PW6 capability run. The compact
 result is recorded in `docs/archive/mxcfb-device-evidence.md`.
 
-1. Deploy the bounded, non-grabbing event-trace diagnostic and record controlled
-   single-contact taps to establish report ordering, `SYN_REPORT` grouping,
-   release encoding, slot behavior, and physical orientation.
-2. Use the observed protocol and ranges to implement synthetic evdev decoder
+1. Use the observed protocol and ranges to implement synthetic evdev decoder
    tests before opening a live input descriptor in the normal runtime.
+2. Exercise secondary-contact and `SYN_DROPPED` handling synthetically; do not
+   require another live trace to define safe cancellation behavior.
 3. Design a separately bounded no-X11 ownership trial with signal cleanup and a
    documented operator recovery path. Do not combine its first device run with
    normal-launch cutover.

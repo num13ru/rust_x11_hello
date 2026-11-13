@@ -88,11 +88,16 @@ fn run() -> Result<()> {
         (Some(arg), None) if arg == "--inspect-input" => {
             return input::inspect_input();
         }
+        (Some(arg), None) if arg == "--trace-input" => {
+            return input::trace_input();
+        }
         (Some(arg), None) if arg == "--benchmark-mxcfb" => {
             return run_mxcfb_benchmark();
         }
         _ => {
-            bail!("usage: rust_x11_hello [--inspect-framebuffer|--inspect-input|--benchmark-mxcfb]")
+            bail!(
+                "usage: rust_x11_hello [--inspect-framebuffer|--inspect-input|--trace-input|--benchmark-mxcfb]"
+            )
         }
     }
 

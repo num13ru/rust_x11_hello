@@ -43,6 +43,10 @@
     {
       "name": "Inspect input devices",
       "action": "sh bin/probe-input.sh"
+    },
+    {
+      "name": "Trace input events (15s; tap)",
+      "action": "sh bin/probe-input.sh trace"
     }
   ]
 }
