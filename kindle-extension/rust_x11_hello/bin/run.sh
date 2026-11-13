@@ -3,6 +3,7 @@
 EXT_DIR="${PAPERPAD_EXT_DIR:-/mnt/us/extensions/rust_x11_hello}"
 BIN="$EXT_DIR/bin/rust_x11_hello"
 LOG="$EXT_DIR/rust_x11_hello.log"
+LATENCY_LOG="$EXT_DIR/paperpad.latency.jsonl"
 PID_FILE="$EXT_DIR/rust_x11_hello.pid"
 STATUS_FILE="$EXT_DIR/rust_x11_hello.status"
 WATCHDOG_MARKER="$EXT_DIR/rust_x11_hello.watchdog"
@@ -250,10 +251,11 @@ if [ "$MODE_ARG" = "--benchmark-mxcfb" ]; then
     "$BIN" "$@" >> "$LOG" 2>&1 &
 elif [ -n "$COMPANION_HOST" ]; then
     echo "PaperSpoon host: $COMPANION_HOST" >> "$LOG"
-    PAPERPAD_COMPANION="$COMPANION_HOST" "$BIN" "$@" >> "$LOG" 2>&1 &
+    PAPERPAD_COMPANION="$COMPANION_HOST" PAPERPAD_LATENCY_LOG="$LATENCY_LOG" \
+        "$BIN" "$@" >> "$LOG" 2>&1 &
 else
     echo "PaperSpoon host: (unset, discovery)" >> "$LOG"
-    "$BIN" "$@" >> "$LOG" 2>&1 &
+    PAPERPAD_LATENCY_LOG="$LATENCY_LOG" "$BIN" "$@" >> "$LOG" 2>&1 &
 fi
 CHILD_PID=$!
 

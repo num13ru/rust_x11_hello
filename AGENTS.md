@@ -11,7 +11,8 @@ steps an agent should follow, especially around physical-device work.
 - Device extension root: `/extensions/rust_x11_hello` (MTP) = `/mnt/us/extensions/rust_x11_hello` (runtime).
 - KUAL actions: **Run Paperpad (5m)** uses the X11 default; **Run Paperpad
   MXCFB (5m, experimental)** selects direct framebuffer output while retaining
-  an X11 InputOnly window for input without an X11 background or GC. Stop from
+  a backgroundless X11 InputOutput window for input and clipping, without an
+  X11 GC. Stop from
   the in-window **Exit** button or let the
   watchdog end the run; the full-screen window covers KUAL. A first MXCFB
   trial on the Paperwhite 6 exercised direct display, X11 touch, and local Exit;

@@ -15,13 +15,15 @@
 
 use paper_protocol::{
     V2_HEADER_LEN, V2DecodeResult, V2Hello, V2MessageType, V2Payload, V2PixelFormat,
-    V2PixelFormats, V2Pointer, V2PointerPhase, V2Viewport, decode_v2_message, decode_v2_payload,
+    V2PixelFormats, V2Pointer, V2PointerPhase, V2PointerTrace, V2Viewport, decode_v2_message,
+    decode_v2_payload,
 };
 
 mod connection;
 pub mod discover;
 
 use crate::config::PaperpadConfig;
+use crate::latency;
 use anyhow::{Context, Result};
 use connection::{ConnectionState, ConnectionToken};
 use std::io::{self, BufRead, BufReader, Read, Write};
@@ -213,6 +215,7 @@ struct QueuedOutbound {
     connection: ConnectionToken,
     bytes: Vec<u8>,
     description: &'static str,
+    trace: Option<V2PointerTrace>,
 }
 
 fn write_outbound(
@@ -223,13 +226,23 @@ fn write_outbound(
         let guard = connection.lock().expect("shared stream lock");
         guard.clone_stream_for(&outbound.connection)?
     };
+    let write_started = latency::stamp();
+    if let Some(trace) = outbound.trace {
+        latency::record_at(write_started, "socket_write_start", Some(trace), "");
+    }
     if let Err(error) = write_stream.stream_mut().write_all(&outbound.bytes) {
+        if let Some(trace) = outbound.trace {
+            latency::record("socket_write_error", Some(trace), "");
+        }
         connection
             .lock()
             .expect("shared stream lock")
             .disconnect_if_current(&write_stream);
         return Err(error)
             .with_context(|| format!("failed to write {} to PaperSpoon", outbound.description));
+    }
+    if let Some(trace) = outbound.trace {
+        latency::record("socket_write_done", Some(trace), "");
     }
     Ok(())
 }
@@ -338,6 +351,16 @@ fn read_v2_frame<R: Read>(reader: &mut R) -> io::Result<ReceivedFrame> {
             "PaperSpoon message type and typed payload disagreed",
         ));
     };
+    let receive_decode_elapsed = receive_decode_started.elapsed();
+    latency::record(
+        "frame_received",
+        None,
+        &format!(
+            ",\"frame_id\":{},\"receive_decode_us\":{}",
+            frame.frame_id(),
+            receive_decode_elapsed.as_micros()
+        ),
+    );
     Ok(ReceivedFrame {
         frame_id: frame.frame_id(),
         width: frame.width(),
@@ -345,7 +368,7 @@ fn read_v2_frame<R: Read>(reader: &mut R) -> io::Result<ReceivedFrame> {
         pixel_format: frame.pixel_format(),
         stride: frame.stride(),
         encoded,
-        receive_decode_elapsed: receive_decode_started.elapsed(),
+        receive_decode_elapsed,
     })
 }
 
@@ -660,9 +683,22 @@ impl Paperspoon {
     ///
     /// Disconnected, full-queue, and stopped-worker states fail immediately.
     /// Accepted pointer events are not retried after reconnect.
+    #[cfg(test)]
     pub fn send_pointer(&mut self, phase: V2PointerPhase, x: u16, y: u16) -> Result<()> {
         let encoded = V2Pointer::new(phase, x, y).encode_message()?;
-        self.enqueue_bytes(encoded, "pointer event")
+        self.enqueue_bytes(encoded, "pointer event", None)
+    }
+
+    /// Queue one traced viewport-relative pointer for latency correlation.
+    pub fn send_traced_pointer(
+        &mut self,
+        phase: V2PointerPhase,
+        x: u16,
+        y: u16,
+        trace: V2PointerTrace,
+    ) -> Result<()> {
+        let encoded = V2Pointer::new_traced(phase, x, y, trace).encode_message()?;
+        self.enqueue_bytes(encoded, "traced pointer event", Some(trace))
     }
 
     /// Retain a changed remote viewport and queue it ahead of later pointers.
@@ -702,6 +738,7 @@ impl Paperspoon {
                         connection,
                         bytes: encoded,
                         description: "viewport change",
+                        trace: None,
                     },
                 )
             });
@@ -714,7 +751,12 @@ impl Paperspoon {
         result
     }
 
-    fn enqueue_bytes(&mut self, bytes: Vec<u8>, description: &'static str) -> Result<()> {
+    fn enqueue_bytes(
+        &mut self,
+        bytes: Vec<u8>,
+        description: &'static str,
+        trace: Option<V2PointerTrace>,
+    ) -> Result<()> {
         self.promote_startup();
         let connection = {
             let guard = self.connection.lock().expect("shared stream lock");
@@ -730,6 +772,7 @@ impl Paperspoon {
                 connection,
                 bytes,
                 description,
+                trace,
             },
         )
     }
@@ -1132,6 +1175,37 @@ mod tests {
             assert_eq!(consumed, message_len);
             assert_eq!(decode_v2_payload(message), Ok(V2Payload::Pointer(pointer)));
         }
+    }
+
+    #[test]
+    fn writer_delivers_traced_pointer_correlation() {
+        use std::io::Read as _;
+
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind");
+        let mut paperspoon =
+            Paperspoon::connect_to(listener.local_addr().expect("addr"), TEST_VIEWPORT)
+                .expect("connect");
+        let mut peer = accept_before(&listener, Duration::from_secs(2));
+        peer.set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("set peer timeout");
+        read_expected_hello(&mut peer, TEST_VIEWPORT);
+
+        let trace = V2PointerTrace::new(17, 23, 42);
+        let expected = V2Pointer::new_traced(V2PointerPhase::Down, 123, 456, trace);
+        paperspoon
+            .send_traced_pointer(expected.phase(), expected.x(), expected.y(), trace)
+            .expect("queue traced pointer");
+
+        let message_len = V2_HEADER_LEN + paper_protocol::V2_TRACED_POINTER_PAYLOAD_LEN;
+        let mut encoded = vec![0; message_len];
+        peer.read_exact(&mut encoded).expect("read traced pointer");
+        let V2DecodeResult::Complete { message, consumed } =
+            decode_v2_message(&encoded).expect("decode traced pointer")
+        else {
+            panic!("complete traced pointer expected");
+        };
+        assert_eq!(consumed, message_len);
+        assert_eq!(decode_v2_payload(message), Ok(V2Payload::Pointer(expected)));
     }
 
     #[test]

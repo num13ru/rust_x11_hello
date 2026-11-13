@@ -49,8 +49,9 @@ out-of-viewport region fails before framebuffer bytes are changed.
 The benchmark:
 
 1. validates and snapshots the readable and writable visible framebuffer;
-2. opens an X11 InputOnly window for touch and local Exit without requesting
-   X11 background or Expose painting;
+2. opens a full-screen X11 InputOutput window for touch, local Exit, and
+   clipping of lower Kindle windows, without requesting an X11 background or
+   creating a graphics context;
 3. draws and waits for the local system strip;
 4. performs one uncounted warmup update;
 5. alternates solid black and white over the remote viewport;

@@ -18,14 +18,40 @@ pub const VISUAL_COPY_FROM_PARENT: u32 = 0;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WindowMode {
     Drawable,
-    InputOnly,
+    DirectFramebuffer,
 }
 
 impl WindowMode {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Drawable => "input-output",
-            Self::InputOnly => "input-only",
+            Self::DirectFramebuffer => "input-output-direct-framebuffer",
+        }
+    }
+
+    const fn window_class(self) -> WindowClass {
+        WindowClass::INPUT_OUTPUT
+    }
+
+    const fn creates_gc(self) -> bool {
+        matches!(self, Self::Drawable)
+    }
+
+    fn create_attributes(
+        self,
+        black_pixel: u32,
+        white_pixel: u32,
+        event_mask: EventMask,
+    ) -> CreateWindowAux {
+        match self {
+            Self::Drawable => CreateWindowAux::new()
+                .background_pixel(white_pixel)
+                .border_pixel(black_pixel)
+                .override_redirect(1)
+                .event_mask(event_mask),
+            Self::DirectFramebuffer => CreateWindowAux::new()
+                .override_redirect(1)
+                .event_mask(event_mask),
         }
     }
 }
@@ -38,17 +64,13 @@ pub struct MappedWindow {
     pub mode: WindowMode,
 }
 
-/// Events that do not require a drawable X11 surface.
-pub fn input_event_mask() -> EventMask {
-    EventMask::STRUCTURE_NOTIFY
+/// Event mask selecting the core events Paperpad consumes.
+pub fn touch_event_mask() -> EventMask {
+    EventMask::EXPOSURE
+        | EventMask::STRUCTURE_NOTIFY
         | EventMask::BUTTON_PRESS
         | EventMask::BUTTON_RELEASE
         | EventMask::POINTER_MOTION
-}
-
-/// Event mask selecting the core events Paperpad consumes.
-pub fn touch_event_mask() -> EventMask {
-    EventMask::EXPOSURE | input_event_mask()
 }
 /// Connect to the X server and create, map, and publish the test window.
 ///
@@ -67,26 +89,9 @@ pub fn setup_window(
     anyhow::ensure!(size.0 > 0 && size.1 > 0, "X11 screen has zero dimensions");
 
     let win = conn.generate_id().context("failed to generate window id")?;
-    let event_mask = match mode {
-        WindowMode::Drawable => touch_event_mask(),
-        WindowMode::InputOnly => input_event_mask(),
-    };
-    let (class, attributes) = match mode {
-        WindowMode::Drawable => (
-            WindowClass::INPUT_OUTPUT,
-            CreateWindowAux::new()
-                .background_pixel(screen.white_pixel)
-                .border_pixel(screen.black_pixel)
-                .override_redirect(1)
-                .event_mask(event_mask),
-        ),
-        WindowMode::InputOnly => (
-            WindowClass::INPUT_ONLY,
-            CreateWindowAux::new()
-                .override_redirect(1)
-                .event_mask(event_mask),
-        ),
-    };
+    let event_mask = touch_event_mask();
+    let class = mode.window_class();
+    let attributes = mode.create_attributes(screen.black_pixel, screen.white_pixel, event_mask);
 
     conn.create_window(
         COPY_DEPTH_FROM_PARENT,
@@ -105,22 +110,21 @@ pub fn setup_window(
     .check()
     .context("X11 server rejected create-window request")?;
 
-    let gc = match mode {
-        WindowMode::Drawable => {
-            let gc = conn.generate_id().context("failed to generate GC id")?;
-            conn.create_gc(
-                gc,
-                win,
-                &CreateGCAux::new()
-                    .foreground(screen.black_pixel)
-                    .background(screen.white_pixel),
-            )
-            .context("failed to send create-GC request")?
-            .check()
-            .context("X11 server rejected create-GC request")?;
-            Some(gc)
-        }
-        WindowMode::InputOnly => None,
+    let gc = if mode.creates_gc() {
+        let gc = conn.generate_id().context("failed to generate GC id")?;
+        conn.create_gc(
+            gc,
+            win,
+            &CreateGCAux::new()
+                .foreground(screen.black_pixel)
+                .background(screen.white_pixel),
+        )
+        .context("failed to send create-GC request")?
+        .check()
+        .context("X11 server rejected create-GC request")?;
+        Some(gc)
+    } else {
+        None
     };
 
     conn.map_window(win)
@@ -220,16 +224,17 @@ mod tests {
     }
 
     #[test]
-    fn input_only_mask_excludes_exposure_but_preserves_input_and_lifecycle() {
-        let mask = u32::from(input_event_mask());
-        assert_eq!(mask & u32::from(EventMask::EXPOSURE), 0);
-        for required in [
-            EventMask::STRUCTURE_NOTIFY,
-            EventMask::BUTTON_PRESS,
-            EventMask::BUTTON_RELEASE,
-            EventMask::POINTER_MOTION,
-        ] {
-            assert_eq!(mask & u32::from(required), u32::from(required));
-        }
+    fn direct_framebuffer_mode_is_occluding_without_x11_paint_state() {
+        let mode = WindowMode::DirectFramebuffer;
+        let attributes = mode.create_attributes(0, 1, touch_event_mask());
+
+        assert_eq!(mode.label(), "input-output-direct-framebuffer");
+        assert_eq!(mode.window_class(), WindowClass::INPUT_OUTPUT);
+        assert!(!mode.creates_gc());
+        assert!(attributes.background_pixmap.is_none());
+        assert!(attributes.background_pixel.is_none());
+        assert!(attributes.border_pixmap.is_none());
+        assert!(attributes.border_pixel.is_none());
+        assert_eq!(attributes.event_mask, Some(touch_event_mask()));
     }
 }

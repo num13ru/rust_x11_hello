@@ -1,5 +1,26 @@
 # Paperwhite 6 framebuffer evidence
 
+## Backgroundless InputOutput occlusion trial (2026-11-13)
+
+The deployed ARM binary was independently read back over MTP before the run and
+matched the host artifact at SHA-256
+`a4530f3a069f69d41ce32c3a824ac2d445b0bc750c41efa845b63511b2da3779`.
+The preceding InputOnly build allowed the Kindle shelf to repaint sharply over
+an already rendered PaperSpoon grid after the one-shot startup reassertion.
+
+This build replaced that input window with a full-screen X11 InputOutput window
+that requests no background pixel or pixmap and creates no graphics context.
+PaperSpoon still owns application pixels and PaperPad still presents them only
+through MXCFB; the X11 window owns stacking, clipping, touch, and Expose
+notification. The operator reported the requested physical validation sequence
+passed: PaperSpoon grid interaction remained usable, the delayed Kindle shelf
+did not reappear over it, and local Exit completed normally.
+
+MTP was unavailable after the run, so no post-run Kindle log or status snapshot
+was retrieved. The visual result is operator evidence tied to the pre-run
+readback checksum; this entry does not claim log-confirmed window class, dirty
+update rectangles, or timing.
+
 ## Marker-specific completion and restoration trial (2026-10-26)
 
 The deployed ARM binary was independently read back over MTP and matched the

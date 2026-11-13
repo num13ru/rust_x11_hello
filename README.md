@@ -191,16 +191,16 @@ Legacy environment variable names are not read.
 | Backend | Mono1 | Gray8 and JPEG | Notes |
 | --- | --- | --- | --- |
 | X11 | Yes | No | Reference display path |
-| MXCFB | Yes | Yes | Experimental; uses an X11 InputOnly window for input |
+| MXCFB | Yes | Yes | Experimental; uses a backgroundless X11 InputOutput window for input and clipping |
 
 MXCFB startup requires the tested framebuffer layout and HWTCON capabilities;
 it fails rather than silently falling back to X11. Both formats currently use
-the GC16 update path. The MXCFB input window has no X11 background, Expose
-subscription, or graphics context, so PaperPad itself does not ask X11 to
-paint over direct framebuffer output. Direct framebuffer output, X11 touch,
-local Exit, Gray8, JPEG, and Apple Music Now Playing have been observed on the
-documented Paperwhite 6. A device run confirmed that the InputOnly window
-retains touch and local Exit without the earlier X11/event flicker. Subsequent
+the GC16 update path. The MXCFB window is a full-screen X11 InputOutput window
+but requests no X11 background pixel or pixmap and creates no graphics context.
+Its mapped stacking footprint clips lower Kindle/KUAL X11 windows, while
+Expose events ask the MXCFB backend to redraw cached content. Direct framebuffer
+output, X11 touch, local Exit, Gray8, JPEG, and Apple Music Now Playing have
+been observed on the documented Paperwhite 6. Subsequent
 device runs completed marker-specific waits and visibly restored the original
 screen after every benchmark. Exact pixel fidelity, sleep/wake interaction,
 and every failure fallback have not all been physically verified.
@@ -264,10 +264,11 @@ evidence.
 ## Touch and Mac actions
 
 PaperPad forwards only primary core-X11 contacts (`detail=1`) inside the remote
-viewport. PaperSpoon activates a button only when a matching release remains
-inside the button that was pressed. Gaps, unmatched releases, viewport changes,
-and releases elsewhere cancel or do nothing. The local **Exit** control never
-sends an application action across the protocol.
+viewport. PaperSpoon fills a grid button while its contact is armed and restores
+it before dispatching the action. It activates a button only when a matching
+release remains inside the button that was pressed. Gaps, unmatched releases,
+viewport changes, and releases elsewhere cancel or do nothing. The local
+**Exit** control never sends an application action across the protocol.
 
 | Button | PaperSpoon action |
 | --- | --- |
@@ -288,6 +289,44 @@ open -g hammerspoon://paperpad?action=<id>
 Use `--no-forward-url` to disable forwarding. A sample Hammerspoon handler is
 available at `tools/hammerspoon/init.example.lua`. Dispatch success does not
 prove that the target Mac application accepted the action.
+
+## Latency traces
+
+Normal KUAL runs create a fresh
+`/extensions/rust_x11_hello/paperpad.latency.jsonl`. Start PaperSpoon with a
+separate host trace:
+
+```sh
+./target/release/paperspoon 5581 /tmp/paperspoon.log \
+  --latency-log=/tmp/paperspoon.latency.jsonl
+```
+
+Each forwarded pointer carries a run-scoped session ID, trace ID, and PaperPad
+monotonic origin. The receiver still accepts legacy untraced pointers, but an
+older PaperSpoon cannot decode the traced payload, so deploy PaperPad and run
+PaperSpoon from the same build for measurements.
+
+After the run stops, retrieve and analyze the device trace:
+
+```sh
+mtp-rs get /extensions/rust_x11_hello/paperpad.latency.jsonl \
+  paperpad.latency.jsonl --replace
+python3 scripts/analyze-latency.py \
+  paperpad.latency.jsonl /tmp/paperspoon.latency.jsonl \
+  /tmp/paperpad-hammerspoon-latency.jsonl > latency.csv
+```
+
+The Hammerspoon trace is optional and requires installing the updated sample
+handler. The analyzer reports PaperPad input/queue time, feedback transport
+round trip, a symmetry-based one-way estimate, PaperSpoon processing and
+`open` duration, frame presentation return and backend submission duration,
+Hammerspoon receipt, handler dispatch duration, and
+release/down-to-dispatch-return latency. Frame
+presentation return is not camera-verified e-ink completion, and Hammerspoon
+dispatch return does not prove that the target application changed state. An
+action-specific watcher can call `paperpadRecordObservedEffect(actionId)` after
+observing the real state change; the analyzer then reports
+release/down-to-effect latency.
 
 ## Logs and device evidence
 

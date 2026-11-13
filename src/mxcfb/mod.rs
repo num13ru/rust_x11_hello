@@ -12,6 +12,8 @@ pub(crate) use backend::MxcfbDisplayBackend;
 mod benchmark;
 #[cfg(target_os = "linux")]
 mod controller;
+#[cfg(any(target_os = "linux", test))]
+mod dirty;
 #[cfg(target_os = "linux")]
 mod hwtcon;
 #[cfg(any(target_os = "linux", test))]

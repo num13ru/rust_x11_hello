@@ -13,10 +13,13 @@ use crate::ui::screen::ScreenRect;
 use super::controller;
 use super::opened::OpenedFramebuffer;
 use super::pixels::prepare_remote;
+use super::region::remote_frame_region;
 use super::system_pixels::rasterize_system_ui;
 use super::update_abi::UpdateDataMtk;
 use super::update_marker::UpdateMarkerSequence;
-use super::update_request::{MxcfbWaveform, next_full_gc16_system_ui_request, next_remote_request};
+use super::update_request::{
+    MxcfbWaveform, next_full_gc16_system_ui_request, next_remote_region_request,
+};
 
 pub(super) struct SubmittedUpdate {
     pub marker: u32,
@@ -38,13 +41,30 @@ pub(super) fn present_remote_with(
     frame: RemoteFrame<'_>,
     submit: impl FnMut(&File, &mut UpdateDataMtk, u32, u32) -> Result<()>,
 ) -> Result<SubmittedUpdate> {
-    present_remote_with_waveform(opened, markers, frame, MxcfbWaveform::Gc16, submit)
+    let region = ScreenRect {
+        x: 0,
+        y: 0,
+        width: frame.width(),
+        height: frame.height(),
+    };
+    present_remote_region_with_waveform(opened, markers, frame, region, MxcfbWaveform::Gc16, submit)
 }
 
-pub(super) fn present_remote_with_waveform(
+pub(super) fn present_remote_region_with(
     opened: &mut OpenedFramebuffer,
     markers: &mut UpdateMarkerSequence,
     frame: RemoteFrame<'_>,
+    region: ScreenRect,
+    submit: impl FnMut(&File, &mut UpdateDataMtk, u32, u32) -> Result<()>,
+) -> Result<SubmittedUpdate> {
+    present_remote_region_with_waveform(opened, markers, frame, region, MxcfbWaveform::Gc16, submit)
+}
+
+fn present_remote_region_with_waveform(
+    opened: &mut OpenedFramebuffer,
+    markers: &mut UpdateMarkerSequence,
+    frame: RemoteFrame<'_>,
+    region: ScreenRect,
     waveform: MxcfbWaveform,
     mut submit: impl FnMut(&File, &mut UpdateDataMtk, u32, u32) -> Result<()>,
 ) -> Result<SubmittedUpdate> {
@@ -53,16 +73,23 @@ pub(super) fn present_remote_with_waveform(
     // store. The update request is also validated before writing pixels.
     let prepared = prepare_remote(frame, info.screen, info.spec, info.mapping_len)
         .context("MXCFB prepare remote frame")?;
-    let mut request = next_remote_request(
+    let region = remote_frame_region(
         info.screen,
+        region,
+        info.spec.visible_width,
+        info.spec.visible_height,
+    )
+    .context("MXCFB translate remote frame update region")?;
+    let mut request = next_remote_region_request(
+        info.screen,
+        region,
         info.spec.visible_width,
         info.spec.visible_height,
         markers,
         waveform,
     )
     .context("MXCFB prepare remote update")?;
-    let region = prepared.region();
-    ensure_matching_update_region(region, &request)?;
+    ensure_update_region_within_prepared(prepared.region(), &request)?;
 
     opened
         .mapping
@@ -77,6 +104,23 @@ pub(super) fn present_remote_with_waveform(
     )
     .context("MXCFB submit remote update")?;
     Ok(SubmittedUpdate { marker, region })
+}
+
+fn ensure_update_region_within_prepared(
+    prepared: ScreenRect,
+    request: &UpdateDataMtk,
+) -> Result<()> {
+    let prepared_right = u32::from(prepared.x) + u32::from(prepared.width);
+    let prepared_bottom = u32::from(prepared.y) + u32::from(prepared.height);
+    let update = request.update_region;
+    ensure!(
+        update.left >= u32::from(prepared.x)
+            && update.top >= u32::from(prepared.y)
+            && update.left + update.width <= prepared_right
+            && update.top + update.height <= prepared_bottom,
+        "MXCFB update region exceeds prepared remote pixels"
+    );
+    Ok(())
 }
 
 #[cfg(test)]
@@ -233,6 +277,36 @@ mod tests {
             .is_err()
         );
         assert!(!called.get());
+    }
+
+    #[test]
+    fn remote_dirty_region_limits_the_update_request() {
+        let mut opened = fake_framebuffer(64, 68);
+        let mut markers = UpdateMarkerSequence::for_process();
+        let pixels = [0x80; 8];
+        let frame =
+            RemoteFrame::new(7, 64, 1, paper_protocol::PixelFormat::Mono1, 8, &pixels, 0).unwrap();
+        let dirty = ScreenRect {
+            x: 16,
+            y: 0,
+            width: 24,
+            height: 1,
+        };
+        let submitted = present_remote_region_with(
+            &mut opened,
+            &mut markers,
+            frame,
+            dirty,
+            |_, request, _, _| {
+                assert_eq!(request.update_region.left, 16);
+                assert_eq!(request.update_region.top, 0);
+                assert_eq!(request.update_region.width, 24);
+                assert_eq!(request.update_region.height, 1);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(submitted.region, dirty);
     }
 
     #[test]

@@ -118,9 +118,79 @@ end
 -- React to `hammerspoon://paperpad?action=<id>` URL events from paperspoon.
 -- paperspoon runs `open -g hammerspoon://paperpad?action=media.next` per action.
 -- hs.urlevent fires exactly once per URL open; native, no sockets, no polling.
+local PAPERPAD_LATENCY_LOG = "/tmp/paperpad-hammerspoon-latency.jsonl"
+local PAPERPAD_PENDING_EFFECTS = {}
+
+local function latencyStamp()
+    return math.floor(hs.timer.secondsSinceEpoch() * 1000000),
+        math.floor(hs.timer.absoluteTime() / 1000)
+end
+
+local function appendLatency(stage, wallUs, monoUs, sessionId, traceId, actionId)
+    local file = io.open(PAPERPAD_LATENCY_LOG, "a")
+    if not file then
+        return
+    end
+    file:write(string.format(
+        '{"wall_us":%.0f,"mono_us":%.0f,"component":"hammerspoon","stage":"%s","session":"%s","trace":%d,"action":"%s"}\n',
+        wallUs,
+        monoUs,
+        stage,
+        sessionId,
+        traceId,
+        actionId
+    ))
+    file:close()
+end
+
+-- Call this from an action-specific observer only after the target application
+-- exposes the requested state change. Dispatch return alone is not proof.
+function paperpadRecordObservedEffect(actionId)
+    local pending = PAPERPAD_PENDING_EFFECTS[actionId]
+    if not pending or #pending == 0 then
+        return
+    end
+    local trace = table.remove(pending, 1)
+    local wallUs, monoUs = latencyStamp()
+    appendLatency(
+        "target_effect",
+        wallUs,
+        monoUs,
+        trace.sessionId,
+        trace.traceId,
+        actionId
+    )
+end
+
 hs.urlevent.bind("paperpad", function(eventName, params)
     local actionId = params and params.action or ""
+    local sessionId = params and params.session or "0"
+    local traceId = tonumber(params and params.trace or "0") or 0
     if actionId ~= "" then
+        local receivedWallUs, receivedMonoUs = latencyStamp()
+        PAPERPAD_PENDING_EFFECTS[actionId] = PAPERPAD_PENDING_EFFECTS[actionId] or {}
+        table.insert(PAPERPAD_PENDING_EFFECTS[actionId], {
+            sessionId = sessionId,
+            traceId = traceId,
+        })
         dispatchAction(actionId)
+        local returnedWallUs, returnedMonoUs = latencyStamp()
+        -- Write after dispatch so tracing does not delay the action itself.
+        appendLatency(
+            "handler_received",
+            receivedWallUs,
+            receivedMonoUs,
+            sessionId,
+            traceId,
+            actionId
+        )
+        appendLatency(
+            "dispatch_return",
+            returnedWallUs,
+            returnedMonoUs,
+            sessionId,
+            traceId,
+            actionId
+        )
     end
 end)
