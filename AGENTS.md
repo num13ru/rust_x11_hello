@@ -31,6 +31,14 @@ steps an agent should follow, especially around physical-device work.
   UI, wait for the watchdog, then use sleep/wake to request a stock UI redraw;
   restart the Kindle only if that recovery fails. This recovery sequence still
   requires device evidence.
+- **Trial exclusive input without X11 (15s)** is a separate opt-in input-
+  ownership experiment. It requests `EVIOCGRAB`, performs no transport, and
+  retains the same local Exit, internal deadline, framebuffer restoration, and
+  30-second launcher watchdog. Normal and benchmark readers remain
+  nonexclusive. During the trial, tap the blank remote area before using local
+  Exit; after restoration, confirm that the underlying Kindle UI did not react
+  and that normal Kindle touch works again. If it does not, wait for the
+  watchdog before using sleep/wake and then restart only as a last resort.
 - **Inspect framebuffer metadata** is a read-only KUAL diagnostic. It logs
   `/dev/fb0` metadata without using the normal launcher or drawing.
 - **Inspect input devices** is a read-only KUAL diagnostic. It logs evdev names,

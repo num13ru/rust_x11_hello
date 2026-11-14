@@ -13,6 +13,10 @@
       "action": "PAPERPAD_WATCHDOG_SECONDS=15 PAPERPAD_DISPLAY_BACKEND=mxcfb sh bin/run.sh"
     },
     {
+      "name": "Trial exclusive input without X11 (15s)",
+      "action": "PAPERPAD_WATCHDOG_SECONDS=30 sh bin/run.sh --trial-mxcfb-grab-no-x11"
+    },
+    {
       "name": "Trial MXCFB without X11 (15s)",
       "action": "PAPERPAD_WATCHDOG_SECONDS=30 sh bin/run.sh --trial-mxcfb-no-x11"
     },

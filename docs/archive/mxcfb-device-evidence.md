@@ -535,3 +535,31 @@ without X11, transport, or an input grab on the tested device. It does not yet
 establish a connected normal-runtime session, a longer ownership interval,
 local-Exit cleanup on the no-X11 path, or recovery after `SIGKILL`, kernel
 hang, or power loss.
+
+## Bounded no-X11 exclusive-input trial (2026-11-14)
+
+The exclusive-input trial build passed the full host suite, ARMv7 musl build,
+and static verification. Independent MTP readback matched the host artifact at
+SHA-256
+`9cacae4b635169485855368aff33f7e01c1ac06c1c1718ab0c78af39fca98c7d`.
+The retrieved cumulative log has SHA-256
+`85b98df991cb498aaf4d01c97b5d3f33e947a0eea1cde5f026b7fea9bbec8696`;
+the status snapshot has SHA-256
+`2fead5455234aee9d2909f8525bc5dab7bc5190893b73ddc8681f97309cc15b1`
+and reports `STOPPED status=0`.
+
+The operator ran **Trial exclusive input without X11 (15s)**, gestured in the
+remote area, then used local Exit. The operator confirmed that the underlying
+Kindle/KUAL UI did not react, the original screen visibly restored, and normal
+Kindle touch worked afterward. The launcher session ran from
+`Sat Nov 14 19:52:55 GMT+3:0100 2026` through `19:53:03`. It records local mode
+with transport disabled, `eviocgrab=true`, `/dev/input/event1` opening with the
+grab active, remote-area and system-strip Press/Release records, local Exit,
+explicit `EVIOCGRAB` release, restoration of the 2,157,312-byte snapshot,
+binary status 0, and process-exit end reason. No `connected to X11` record
+occurs within that launcher session.
+
+This establishes exclusive input during a bounded no-X11 run and orderly
+release on local Exit on the tested device. It does not establish release at
+the internal deadline, after a signal, after an input/read failure, or solely
+through descriptor close after abnormal control flow.

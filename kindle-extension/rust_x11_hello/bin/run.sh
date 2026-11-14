@@ -17,7 +17,7 @@ COMPANION_HOST="${PAPERPAD_COMPANION:-}"
 MODE_ARG="${1:-}"
 NEEDS_DISCOVERY=1
 case "$MODE_ARG" in
-    --benchmark-mxcfb|--trial-mxcfb-no-x11) NEEDS_DISCOVERY=0 ;;
+    --benchmark-mxcfb|--trial-mxcfb-no-x11|--trial-mxcfb-grab-no-x11) NEEDS_DISCOVERY=0 ;;
 esac
 
 CHILD_PID=""

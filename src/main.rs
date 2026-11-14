@@ -103,9 +103,12 @@ fn run() -> Result<()> {
         (Some(arg), None) if arg == "--trial-mxcfb-no-x11" => {
             return run_mxcfb_no_x11_trial();
         }
+        (Some(arg), None) if arg == "--trial-mxcfb-grab-no-x11" => {
+            return run_mxcfb_grab_no_x11_trial();
+        }
         _ => {
             bail!(
-                "usage: rust_x11_hello [--inspect-framebuffer|--inspect-input|--trace-input|--benchmark-mxcfb|--trial-mxcfb-no-x11]"
+                "usage: rust_x11_hello [--inspect-framebuffer|--inspect-input|--trace-input|--benchmark-mxcfb|--trial-mxcfb-no-x11|--trial-mxcfb-grab-no-x11]"
             )
         }
     }
@@ -319,9 +322,20 @@ fn run_mxcfb_no_x11_trial() -> Result<()> {
     native_trial::run(|| SHUTDOWN_REQUESTED.load(Ordering::Relaxed))
 }
 
+#[cfg(target_os = "linux")]
+fn run_mxcfb_grab_no_x11_trial() -> Result<()> {
+    install_signal_handlers()?;
+    native_trial::run_exclusive(|| SHUTDOWN_REQUESTED.load(Ordering::Relaxed))
+}
+
 #[cfg(not(target_os = "linux"))]
 fn run_mxcfb_no_x11_trial() -> Result<()> {
     bail!("no-X11 MXCFB ownership trial requires Linux and /dev/fb0")
+}
+
+#[cfg(not(target_os = "linux"))]
+fn run_mxcfb_grab_no_x11_trial() -> Result<()> {
+    bail!("no-X11 MXCFB exclusive-input trial requires Linux and /dev/fb0")
 }
 
 #[cfg(not(target_os = "linux"))]

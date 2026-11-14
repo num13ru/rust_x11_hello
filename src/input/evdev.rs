@@ -16,6 +16,8 @@ use std::io;
 #[cfg(target_os = "linux")]
 use std::io::Read;
 #[cfg(target_os = "linux")]
+use std::os::fd::AsRawFd;
+#[cfg(target_os = "linux")]
 use std::os::unix::fs::OpenOptionsExt;
 #[cfg(target_os = "linux")]
 use std::path::{Path, PathBuf};
@@ -262,9 +264,12 @@ impl TypeBDecoder {
 
 /// Nonblocking owner of the capability-selected Type-B touchscreen.
 ///
-/// This reader never requests `EVIOCGRAB`. Callers must process every returned
-/// decoder outcome in order and honor `EvdevReadError::cancel_contact` before
-/// handling or reporting a terminal read failure.
+/// Normal readers remain nonexclusive. The separately bounded no-X11 input
+/// trial may request `EVIOCGRAB`; its caller must release the grab during
+/// orderly cleanup. Closing the descriptor remains the kernel fallback.
+/// Callers must process every returned decoder outcome in order and honor
+/// `EvdevReadError::cancel_contact` before handling or reporting a terminal
+/// read failure.
 #[cfg(target_os = "linux")]
 pub(crate) struct EvdevReader {
     file: File,
@@ -272,11 +277,20 @@ pub(crate) struct EvdevReader {
     name: String,
     decoder: TypeBDecoder,
     bytes: Vec<u8>,
+    grabbed: bool,
 }
 
 #[cfg(target_os = "linux")]
 impl EvdevReader {
     pub(crate) fn open(screen_size: (u16, u16)) -> Result<Self> {
+        Self::open_with_grab(screen_size, false)
+    }
+
+    pub(crate) fn open_exclusive_trial(screen_size: (u16, u16)) -> Result<Self> {
+        Self::open_with_grab(screen_size, true)
+    }
+
+    fn open_with_grab(screen_size: (u16, u16), grab: bool) -> Result<Self> {
         let selected = select_touch_device()?;
         let (x, y) = selected.multitouch_axes.with_context(|| {
             format!(
@@ -300,9 +314,17 @@ impl EvdevReader {
                     selected.path.display()
                 )
             })?;
+        if grab {
+            set_exclusive_grab(&file, true).with_context(|| {
+                format!(
+                    "request EVIOCGRAB for selected touchscreen {}",
+                    selected.path.display()
+                )
+            })?;
+        }
         let event_size = std::mem::size_of::<libc::input_event>();
         eprintln!(
-            "input reader: opened path={} name={:?} axes_x={}..{} axes_y={}..{} screen={}x{} eviocgrab=false",
+            "input reader: opened path={} name={:?} axes_x={}..{} axes_y={}..{} screen={}x{} eviocgrab={grab}",
             selected.path.display(),
             selected.name,
             x.minimum,
@@ -318,6 +340,7 @@ impl EvdevReader {
             name: selected.name,
             decoder: TypeBDecoder::new(geometry),
             bytes: vec![0; event_size * EVENTS_PER_READ],
+            grabbed: grab,
         })
     }
 
@@ -373,6 +396,20 @@ impl EvdevReader {
         self.decoder.disconnect()
     }
 
+    pub(crate) fn release_exclusive_grab(&mut self) -> Result<()> {
+        if !self.grabbed {
+            return Ok(());
+        }
+        set_exclusive_grab(&self.file, false)
+            .with_context(|| format!("release EVIOCGRAB for {}", self.path.display()))?;
+        self.grabbed = false;
+        eprintln!(
+            "input reader: EVIOCGRAB released path={}",
+            self.path.display()
+        );
+        Ok(())
+    }
+
     fn fail(&mut self, source: io::Error) -> EvdevReadError {
         // A terminal failure discards this drain's decoded batch. Even if the
         // decoder just observed a release, its caller has not received that
@@ -383,6 +420,49 @@ impl EvdevReader {
             source,
             cancel_contact: true,
         }
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for EvdevReader {
+    fn drop(&mut self) {
+        if self.grabbed {
+            if let Err(error) = set_exclusive_grab(&self.file, false) {
+                eprintln!(
+                    "input reader: EVIOCGRAB release failed path={} error={error}; descriptor close is fallback",
+                    self.path.display()
+                );
+            } else {
+                eprintln!(
+                    "input reader: EVIOCGRAB released during drop path={}",
+                    self.path.display()
+                );
+            }
+            self.grabbed = false;
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[cfg(target_env = "musl")]
+type EvdevIoctlRequest = libc::c_int;
+
+#[cfg(target_os = "linux")]
+#[cfg(not(target_env = "musl"))]
+type EvdevIoctlRequest = libc::c_ulong;
+
+#[cfg(target_os = "linux")]
+fn set_exclusive_grab(file: &File, enabled: bool) -> io::Result<()> {
+    const EVIOCGRAB: EvdevIoctlRequest = 0x4004_4590_u32 as EvdevIoctlRequest;
+    let value: libc::c_int = if enabled { 1 } else { 0 };
+    // SAFETY: `file` is an open evdev descriptor selected by capability
+    // inspection. EVIOCGRAB takes an integer boolean and does not retain a
+    // userspace pointer. The descriptor is closed if this call fails.
+    let result = unsafe { libc::ioctl(file.as_raw_fd(), EVIOCGRAB, value) };
+    if result == -1 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
     }
 }
 

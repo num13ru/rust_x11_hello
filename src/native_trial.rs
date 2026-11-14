@@ -11,14 +11,32 @@ const TRIAL_DURATION: Duration = Duration::from_secs(15);
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 pub(crate) fn run(shutdown_requested: impl Fn() -> bool) -> Result<()> {
+    run_with_input_grab(false, shutdown_requested)
+}
+
+pub(crate) fn run_exclusive(shutdown_requested: impl Fn() -> bool) -> Result<()> {
+    run_with_input_grab(true, shutdown_requested)
+}
+
+fn run_with_input_grab(grab: bool, shutdown_requested: impl Fn() -> bool) -> Result<()> {
+    let trial_name = if grab {
+        "no-X11 exclusive-input trial"
+    } else {
+        "no-X11 ownership trial"
+    };
     eprintln!(
-        "no-X11 ownership trial starting duration_s={} transport=false eviocgrab=false",
-        TRIAL_DURATION.as_secs()
+        "{trial_name} starting duration_s={} transport=false eviocgrab={grab}",
+        TRIAL_DURATION.as_secs(),
     );
 
     let mut display = MxcfbDisplayBackend::open()?;
     let size = display.dimensions();
-    let mut input_reader = match EvdevReader::open(size) {
+    let input_result = if grab {
+        EvdevReader::open_exclusive_trial(size)
+    } else {
+        EvdevReader::open(size)
+    };
+    let mut input_reader = match input_result {
         Ok(reader) => reader,
         Err(primary) => {
             if let Err(cleanup_error) = display.shutdown() {
@@ -31,13 +49,13 @@ pub(crate) fn run(shutdown_requested: impl Fn() -> bool) -> Result<()> {
     };
     let mut app = AppState::new(size);
 
-    let trial_result = (|| -> Result<()> {
+    let mut trial_result = (|| -> Result<()> {
         display
             .draw_system_ui(false)
             .context("draw no-X11 trial system UI")?;
         let deadline = Instant::now() + TRIAL_DURATION;
         eprintln!(
-            "no-X11 ownership trial ready width={} height={} exit=local deadline_s={}",
+            "{trial_name} ready width={} height={} exit=local deadline_s={}",
             size.0,
             size.1,
             TRIAL_DURATION.as_secs()
@@ -46,12 +64,12 @@ pub(crate) fn run(shutdown_requested: impl Fn() -> bool) -> Result<()> {
         loop {
             if shutdown_requested() {
                 app.cancel_contact();
-                eprintln!("no-X11 ownership trial stopped reason=signal");
+                eprintln!("{trial_name} stopped reason=signal");
                 return Ok(());
             }
             if Instant::now() >= deadline {
                 app.cancel_contact();
-                eprintln!("no-X11 ownership trial stopped reason=deadline");
+                eprintln!("{trial_name} stopped reason=deadline");
                 return Ok(());
             }
 
@@ -80,7 +98,7 @@ pub(crate) fn run(shutdown_requested: impl Fn() -> bool) -> Result<()> {
                         );
                         if app.handle_pointer(event).activation() == Some(Activation::Exit) {
                             eprintln!("ui action=activate system=exit");
-                            eprintln!("no-X11 ownership trial stopped reason=local_exit");
+                            eprintln!("{trial_name} stopped reason=local_exit");
                             return Ok(());
                         }
                     }
@@ -98,6 +116,15 @@ pub(crate) fn run(shutdown_requested: impl Fn() -> bool) -> Result<()> {
     if input_reader.shutdown().is_some() {
         app.cancel_contact();
         eprintln!("input source=evdev action=cancel reason=trial_shutdown");
+    }
+    if let Err(release_error) = input_reader.release_exclusive_grab() {
+        if trial_result.is_err() {
+            eprintln!(
+                "EVIOCGRAB release after no-X11 trial failure also failed: {release_error:#}"
+            );
+        } else {
+            trial_result = Err(release_error);
+        }
     }
     drop(input_reader);
 

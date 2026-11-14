@@ -141,6 +141,10 @@ KUAL provides normal run, explicit benchmark, and diagnostic actions:
 - **Trial MXCFB without X11 (15s)** — bounded, transport-free ownership trial
   using MXCFB and native evdev without opening X11. It restores automatically
   after 15 seconds; a 30-second launcher watchdog remains as fallback.
+- **Trial exclusive input without X11 (15s)** — bounded, transport-free
+  `EVIOCGRAB` trial for checking that touches do not reach the underlying
+  Kindle UI and that exclusive input is released on local Exit or timeout.
+  Normal and benchmark runs remain nonexclusive.
 - **Benchmark MXCFB GC16/DU/A2/DU4** — separate, explicit 12-frame local
   completion benchmarks with a one-minute watchdog. They use native evdev for
   local Exit and retain X11 for ownership and lifecycle, but do not connect to
