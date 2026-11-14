@@ -138,6 +138,9 @@ KUAL provides normal run, explicit benchmark, and diagnostic actions:
 - **Test MXCFB TERM cleanup (15s)** — normal MXCFB runtime with a short
   watchdog for verifying graceful `TERM`, framebuffer restoration, and clean
   process exit; it is not a benchmark.
+- **Trial MXCFB without X11 (15s)** — bounded, transport-free ownership trial
+  using MXCFB and native evdev without opening X11. It restores automatically
+  after 15 seconds; a 30-second launcher watchdog remains as fallback.
 - **Benchmark MXCFB GC16/DU/A2/DU4** — separate, explicit 12-frame local
   completion benchmarks with a one-minute watchdog. They use native evdev for
   local Exit and retain X11 for ownership and lifecycle, but do not connect to

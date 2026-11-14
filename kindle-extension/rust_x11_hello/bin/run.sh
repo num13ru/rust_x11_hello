@@ -16,9 +16,9 @@ WATCHDOG_TERM_GRACE_SECONDS="${PAPERPAD_WATCHDOG_TERM_GRACE_SECONDS:-15}"
 COMPANION_HOST="${PAPERPAD_COMPANION:-}"
 MODE_ARG="${1:-}"
 NEEDS_DISCOVERY=1
-if [ "$MODE_ARG" = "--benchmark-mxcfb" ]; then
-    NEEDS_DISCOVERY=0
-fi
+case "$MODE_ARG" in
+    --benchmark-mxcfb|--trial-mxcfb-no-x11) NEEDS_DISCOVERY=0 ;;
+esac
 
 CHILD_PID=""
 WATCHDOG_PID=""
@@ -236,8 +236,8 @@ fi
 
 rm -f "$WATCHDOG_MARKER"
 
-# Discovery permission is needed only by normal PaperPad. The local MXCFB
-# benchmark deliberately performs no network activity.
+# Discovery permission is needed only by normal PaperPad. Local MXCFB modes
+# deliberately perform no network activity.
 remove_discovery_rule
 if [ "$NEEDS_DISCOVERY" = "1" ]; then
     install_discovery_rule
@@ -246,8 +246,8 @@ fi
 if ! chmod +x "$BIN" 2>> "$LOG"; then
     echo "WARNING: chmod +x failed; attempting launch with existing mode" >> "$LOG"
 fi
-if [ "$MODE_ARG" = "--benchmark-mxcfb" ]; then
-    echo "PaperSpoon host: (benchmark is local; transport disabled)" >> "$LOG"
+if [ "$NEEDS_DISCOVERY" = "0" ]; then
+    echo "PaperSpoon host: (local mode; transport disabled)" >> "$LOG"
     "$BIN" "$@" >> "$LOG" 2>&1 &
 elif [ -n "$COMPANION_HOST" ]; then
     echo "PaperSpoon host: $COMPANION_HOST" >> "$LOG"

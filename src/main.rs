@@ -31,6 +31,8 @@ mod display;
 mod input;
 mod latency;
 mod mxcfb;
+#[cfg(target_os = "linux")]
+mod native_trial;
 mod net;
 mod runtime;
 mod ui;
@@ -98,9 +100,12 @@ fn run() -> Result<()> {
         (Some(arg), None) if arg == "--benchmark-mxcfb" => {
             return run_mxcfb_benchmark();
         }
+        (Some(arg), None) if arg == "--trial-mxcfb-no-x11" => {
+            return run_mxcfb_no_x11_trial();
+        }
         _ => {
             bail!(
-                "usage: rust_x11_hello [--inspect-framebuffer|--inspect-input|--trace-input|--benchmark-mxcfb]"
+                "usage: rust_x11_hello [--inspect-framebuffer|--inspect-input|--trace-input|--benchmark-mxcfb|--trial-mxcfb-no-x11]"
             )
         }
     }
@@ -306,6 +311,17 @@ fn run_mxcfb_benchmark() -> Result<()> {
             Ok(())
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+fn run_mxcfb_no_x11_trial() -> Result<()> {
+    install_signal_handlers()?;
+    native_trial::run(|| SHUTDOWN_REQUESTED.load(Ordering::Relaxed))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn run_mxcfb_no_x11_trial() -> Result<()> {
+    bail!("no-X11 MXCFB ownership trial requires Linux and /dev/fb0")
 }
 
 #[cfg(not(target_os = "linux"))]

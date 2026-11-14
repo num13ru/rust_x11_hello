@@ -13,6 +13,10 @@
       "action": "PAPERPAD_WATCHDOG_SECONDS=15 PAPERPAD_DISPLAY_BACKEND=mxcfb sh bin/run.sh"
     },
     {
+      "name": "Trial MXCFB without X11 (15s)",
+      "action": "PAPERPAD_WATCHDOG_SECONDS=30 sh bin/run.sh --trial-mxcfb-no-x11"
+    },
+    {
       "name": "Benchmark MXCFB GC16 (12)",
       "action": "PAPERPAD_WATCHDOG_SECONDS=60 PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=gc16 PAPERPAD_MXCFB_BENCHMARK_FRAMES=12 sh bin/run.sh --benchmark-mxcfb"
     },

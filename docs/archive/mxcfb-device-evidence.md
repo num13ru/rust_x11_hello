@@ -507,3 +507,31 @@ snapshot, binary status 0, and watchdog end reason. No forced `KILL` was sent.
 This establishes normal MXCFB cleanup after launcher-forwarded `TERM` while the
 X11 ownership window remains. It does not establish cleanup after `SIGKILL`, a
 kernel hang, power loss, or a no-X11 run.
+
+## Bounded no-X11 ownership trial (2026-11-14)
+
+The bounded ownership-trial build passed the full host suite, ARMv7 musl
+build, and static verification. Independent MTP readback matched the host
+artifact at SHA-256
+`d3dabc8c95000d21abd9ff77eb58917849510c85db4c079597c855954fc95018`.
+The retrieved cumulative log has SHA-256
+`04fbca170174a9c8333ee37eb291e85974c863144845a9f16abff19991db9e00`;
+the status snapshot has SHA-256
+`2fead5455234aee9d2909f8525bc5dab7bc5190893b73ddc8681f97309cc15b1`
+and reports `STOPPED status=0`.
+
+The operator ran **Trial MXCFB without X11 (15s)** and confirmed that the
+stock UI did not overwrite the trial, the original screen visibly restored,
+and the Kindle remained usable. The final launcher session ran from
+`Sat Nov 14 19:27:14 GMT+3:0100 2026` through `19:27:30`. It records local
+mode with transport disabled, `no-X11 ownership trial starting`, the 1272 x
+1696 MXCFB geometry, `/dev/input/event1` opened with `eviocgrab=false`, the
+trial becoming ready, deadline stop, restoration of the 2,157,312-byte
+snapshot, binary status 0, and process-exit end reason. No `connected to X11`
+record occurs within that launcher session.
+
+This establishes 15 seconds of native display ownership plus deadline cleanup
+without X11, transport, or an input grab on the tested device. It does not yet
+establish a connected normal-runtime session, a longer ownership interval,
+local-Exit cleanup on the no-X11 path, or recovery after `SIGKILL`, kernel
+hang, or power loss.

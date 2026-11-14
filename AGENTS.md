@@ -24,6 +24,13 @@ steps an agent should follow, especially around physical-device work.
   watchdog so the launcher's `TERM` forwarding, orderly framebuffer restore,
   and process exit can be checked without waiting five minutes. It is not a
   benchmark.
+- **Trial MXCFB without X11 (15s)** is an opt-in, transport-free ownership
+  experiment. It opens no X11 connection, uses native evdev for local Exit,
+  stops itself after 15 seconds, and has a 30-second launcher watchdog. Normal
+  launch behavior is unchanged. If cleanup does not visibly restore the stock
+  UI, wait for the watchdog, then use sleep/wake to request a stock UI redraw;
+  restart the Kindle only if that recovery fails. This recovery sequence still
+  requires device evidence.
 - **Inspect framebuffer metadata** is a read-only KUAL diagnostic. It logs
   `/dev/fb0` metadata without using the normal launcher or drawing.
 - **Inspect input devices** is a read-only KUAL diagnostic. It logs evdev names,
