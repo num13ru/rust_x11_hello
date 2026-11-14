@@ -3,7 +3,7 @@
 /// Height reserved for PaperPad-owned system UI at the bottom of the screen.
 pub(crate) const SYSTEM_UI_HEIGHT: u16 = 72;
 
-/// Signed X11 window-relative coordinate received from the device.
+/// Signed physical-screen coordinate received from the active input backend.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PhysicalPoint {
     pub x: i16,

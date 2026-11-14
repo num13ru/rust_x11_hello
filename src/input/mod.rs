@@ -1,4 +1,7 @@
-//! Native Linux input diagnostics and, later, event decoding.
+//! Native Linux input diagnostics and event decoding.
+
+#[cfg(any(target_os = "linux", test))]
+pub(crate) mod evdev;
 
 #[cfg(any(target_os = "linux", test))]
 mod probe;

@@ -405,3 +405,16 @@ No detailed device checklist or new runtime logs accompanied that report, so
 this entry records smoke acceptance only. It does not establish native evdev
 input or X11-free screen ownership; this intermediate build still uses X11 for
 event delivery and window lifecycle.
+
+## Dormant evdev decoder build smoke verification (2026-11-14)
+
+The first Phase 3 decoder build passed host checks, ARMv7 musl build, and static
+verification before deployment. Independent MTP readback matched the host
+artifact at SHA-256
+`bc7a01667e43eb116524a5923f7b51232d126ba39e994bd59b79f8d3caffe06e`.
+The operator subsequently reported the build verified on device.
+
+The decoder was not connected to normal input in this build, so this report
+establishes only that the preparatory code did not break the existing X11-driven
+runtime smoke test. Native evdev event delivery, cancellation, and device-loss
+behavior remain unverified on hardware.
