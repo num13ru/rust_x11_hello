@@ -563,3 +563,34 @@ This establishes exclusive input during a bounded no-X11 run and orderly
 release on local Exit on the tested device. It does not establish release at
 the internal deadline, after a signal, after an input/read failure, or solely
 through descriptor close after abnormal control flow.
+
+## Connected no-X11 runtime trial (2026-11-14)
+
+The connected-runtime trial build passed the full host suite, ARMv7 musl
+build, and static verification. Independent MTP readback matched the host
+artifact at SHA-256
+`5173ad1a5c2b4d714c9894fabbaec188287395fdab9c76ce8ff6557fc1864781`.
+The retrieved cumulative log has SHA-256
+`c724d510c1881833ea8314b6c2f99ec1eaffc49f23e6c37baa4e853818adc453`;
+the status snapshot has SHA-256
+`2fead5455234aee9d2909f8525bc5dab7bc5190893b73ddc8681f97309cc15b1`
+and reports `STOPPED status=0`.
+
+The operator ran **Trial connected runtime without X11 (60s)** with
+PaperSpoon active. The operator confirmed that the application rendered,
+remote touches updated it, the underlying Kindle/KUAL UI did not react, local
+Exit restored the original screen, and normal Kindle touch worked afterward.
+The launcher session ran from `Sat Nov 14 20:05:01 GMT+3:0100 2026` through
+`20:05:25`. It records discovery selecting `192.168.0.10:5581`, connection to
+PaperSpoon, the connection indicator changing to connected, Mono1 frame 1
+covering the 1272 x 1624 remote viewport, multiple exclusive evdev
+Press/Release pairs forwarded as remote Down/Up phases, and subsequent Mono1
+frame submissions. Local Exit then caused explicit `EVIOCGRAB` release,
+restoration of the 2,157,312-byte snapshot, binary status 0, and process-exit
+end reason. No `connected to X11` record occurs within that launcher session.
+
+This establishes the connected transport/runtime, Mono1 presentation, remote
+touch, exclusive input isolation, local Exit, and orderly restoration without
+X11 on the tested device. It does not establish Gray8 presentation,
+disconnect/reconnect behavior, the internal deadline, launcher-forwarded
+signal cleanup, input failure, or descriptor-close-only grab release.

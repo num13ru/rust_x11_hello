@@ -145,6 +145,10 @@ KUAL provides normal run, explicit benchmark, and diagnostic actions:
   `EVIOCGRAB` trial for checking that touches do not reach the underlying
   Kindle UI and that exclusive input is released on local Exit or timeout.
   Normal and benchmark runs remain nonexclusive.
+- **Trial connected runtime without X11 (60s)** — opt-in checkpoint using the
+  real PaperSpoon transport, MXCFB display, and exclusive native input without
+  opening X11. It has a 60-second internal deadline and 90-second launcher
+  watchdog; normal launch remains unchanged.
 - **Benchmark MXCFB GC16/DU/A2/DU4** — separate, explicit 12-frame local
   completion benchmarks with a one-minute watchdog. They use native evdev for
   local Exit and retain X11 for ownership and lifecycle, but do not connect to

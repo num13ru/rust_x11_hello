@@ -39,6 +39,12 @@ steps an agent should follow, especially around physical-device work.
   Exit; after restoration, confirm that the underlying Kindle UI did not react
   and that normal Kindle touch works again. If it does not, wait for the
   watchdog before using sleep/wake and then restart only as a last resort.
+- **Trial connected runtime without X11 (60s)** is the next opt-in checkpoint.
+  It uses the real PaperSpoon transport, MXCFB display, and exclusive native
+  input without opening X11. It stops itself after 60 seconds and has a
+  90-second launcher watchdog. PaperSpoon must be reachable for connected
+  rendering and remote-touch claims; otherwise the run proves only the
+  disconnected path. Normal launch behavior remains unchanged.
 - **Inspect framebuffer metadata** is a read-only KUAL diagnostic. It logs
   `/dev/fb0` metadata without using the normal launcher or drawing.
 - **Inspect input devices** is a read-only KUAL diagnostic. It logs evdev names,
