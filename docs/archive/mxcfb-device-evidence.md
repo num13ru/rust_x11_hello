@@ -472,3 +472,21 @@ native input initialized; the latest compact timings are in
 No benchmark run logged an evdev pointer record or an early stop. This sweep
 therefore does not establish benchmark-local Exit, ignored X11 duplicates
 during a benchmark contact, or signal-stop cleanup.
+
+## Framebuffer-derived startup geometry (2026-11-14)
+
+The geometry-first MXCFB build passed the full host suite, ARMv7 musl build,
+and static verification. Independent MTP readback matched the host artifact at
+SHA-256
+`3e3db7aca40a0b4a49c6cd024971354b59e4f58984be992fe6b6a8302bc3f905`.
+
+The operator verified the normal MXCFB launch. The retrieved log records
+`MXCFB startup metadata validated width=1272 height=1696 source=/dev/fb0`
+before the X11 connection, followed by a matching 1272 x 1696 ownership window,
+evdev reader, and read-write framebuffer backend. An application touch was
+forwarded, the device-local Exit activated, the 2,157,312-byte snapshot was
+restored, and the binary exited with status 0.
+
+This establishes framebuffer-derived startup geometry and mismatch-checked X11
+ownership for this run. It does not establish screen ownership without X11 or
+recovery after forced termination.

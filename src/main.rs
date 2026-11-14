@@ -106,10 +106,19 @@ fn run() -> Result<()> {
     }
 
     let display_kind = config::DisplayBackendKind::from_env()?;
-    #[cfg(not(target_os = "linux"))]
-    if display_kind == config::DisplayBackendKind::Mxcfb {
-        bail!("display backend=mxcfb requires Linux and /dev/fb0");
-    }
+    let framebuffer_size = match display_kind {
+        config::DisplayBackendKind::X11 => None,
+        config::DisplayBackendKind::Mxcfb => {
+            #[cfg(target_os = "linux")]
+            {
+                Some(mxcfb::validated_framebuffer_dimensions()?)
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                bail!("display backend=mxcfb requires Linux and /dev/fb0");
+            }
+        }
+    };
     let paperpad_config = config::PaperpadConfig::from_env()?;
 
     let (conn, screen_num) = RustConnection::connect(None)
@@ -122,7 +131,17 @@ fn run() -> Result<()> {
     };
     let mapped = x11_display::setup_window(&conn, screen_num, window_mode)?;
     let win = mapped.window;
-    let size = mapped.size;
+    let size = if let Some(framebuffer_size) = framebuffer_size {
+        anyhow::ensure!(
+            mapped.size == framebuffer_size,
+            "X11 ownership window {:?} differs from validated MXCFB framebuffer {:?}",
+            mapped.size,
+            framebuffer_size
+        );
+        framebuffer_size
+    } else {
+        mapped.size
+    };
 
     eprintln!(
         "window mapped id=0x{win:x} class={} x={} y={} width={} height={}",

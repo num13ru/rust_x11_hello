@@ -4,7 +4,27 @@
 use anyhow::{Context, Result};
 use std::fs::{self, File, OpenOptions};
 
+use super::metadata::FramebufferInfo;
 use super::{abi, hwtcon, layout, memory};
+
+/// Read and validate the native PaperPad screen size without mapping or drawing.
+pub(crate) fn validated_framebuffer_dimensions() -> Result<(u16, u16)> {
+    let file =
+        File::open("/dev/fb0").context("MXCFB startup metadata: open /dev/fb0 for reading")?;
+    let fixed = abi::fixed_info(&file).context("MXCFB startup metadata: FBIOGET_FSCREENINFO")?;
+    let variable =
+        abi::variable_info(&file).context("MXCFB startup metadata: FBIOGET_VSCREENINFO")?;
+    let info = FramebufferInfo::from_kernel(&fixed, &variable)
+        .context("MXCFB startup metadata: validate framebuffer")?;
+    hwtcon::query_panel_info(&file).context("MXCFB startup metadata: GET_PANEL_INFO_MTK")?;
+
+    let dimensions = info.screen.physical_size();
+    eprintln!(
+        "MXCFB startup metadata validated width={} height={} source=/dev/fb0",
+        dimensions.0, dimensions.1
+    );
+    Ok(dimensions)
+}
 
 pub(crate) fn inspect_framebuffer() -> Result<()> {
     eprintln!("mxcfb probe: read-only /dev/fb0 inspection");

@@ -1,7 +1,7 @@
 # X11 removal inventory and feasibility checkpoint
 
-Status: Phase 3 native-input integration device-validated for primary touch and
-local Exit, 2026-11-14.
+Status: Phase 4 framebuffer-derived startup geometry device-validated; X11
+ownership remains unresolved, 2026-11-14.
 
 This document records what the repository and existing Paperwhite 6 evidence
 establish as the X11 removal work proceeds. It is not a claim that X11-free
@@ -12,7 +12,7 @@ screen ownership works on the device.
 | Area | Current X11 responsibility | Required native replacement |
 | --- | --- | --- |
 | Build | `Cargo.toml` and `Cargo.lock` include `x11rb` and `x11rb-protocol`. | Remove both after the final X11 caller is gone. |
-| Startup and geometry | `src/main.rs` always connects to X11, reads the selected screen dimensions, maps a full-screen window, and checks MXCFB dimensions against that window. | Open `/dev/fb0` first and use validated `FramebufferInfo`/`ScreenLayout` geometry. Reject unsupported metadata before networking or drawing. |
+| Startup and geometry | MXCFB mode reads and validates `/dev/fb0` metadata before connecting to X11, derives PaperPad and evdev geometry from it, and rejects disagreement with both the X11 ownership window and the later read-write backend. Device evidence confirms the 1272 x 1696 metadata-before-X11 order, native touch, local Exit, and restoration. X11 mode still uses X11 geometry. | Remove the ownership-window comparison only after the bounded no-X11 lifecycle trial passes. |
 | Backend selection | `src/config.rs` selects the default X11 backend or experimental MXCFB backend with `PAPERPAD_DISPLAY_BACKEND`. | Remove the selector after MXCFB-only startup is device-validated. |
 | Window ownership | `src/x11/display.rs` creates, maps, and destroys the full-screen window. In MXCFB mode it uses a backgroundless `InputOutput` window with no graphics context. | A verified, reversible native lifecycle must stop stock UI updates from racing PaperPad and restore normal Kindle operation on exit. This is unresolved. |
 | Input | Normal Linux startup opens the single capability-selected direct touchscreen without `EVIOCGRAB`, drains bounded nonblocking Type-B records, and sends primary pointer/cancellation outcomes into the runtime. Core X11 button events are logged but ignored. Primary remote touch, ignored X11 duplicates, local Exit, and snapshot restoration have device evidence. | Validate viewport edges, secondary-contact cancellation, and device-loss behavior. Investigate an optional exclusive grab separately before X11 removal. |
