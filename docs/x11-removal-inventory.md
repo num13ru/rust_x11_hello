@@ -1,10 +1,11 @@
 # X11 removal inventory and feasibility checkpoint
 
-Status: Phase 3 native-input reader foundation, 2026-11-14.
+Status: Phase 3 native-input integration device-validated for primary touch and
+local Exit, 2026-11-14.
 
 This document records what the repository and existing Paperwhite 6 evidence
-establish as the X11 removal work proceeds. It is not a claim that native input
-or X11-free screen ownership works on the device.
+establish as the X11 removal work proceeds. It is not a claim that X11-free
+screen ownership works on the device.
 
 ## Current dependency and responsibility inventory
 
@@ -14,8 +15,8 @@ or X11-free screen ownership works on the device.
 | Startup and geometry | `src/main.rs` always connects to X11, reads the selected screen dimensions, maps a full-screen window, and checks MXCFB dimensions against that window. | Open `/dev/fb0` first and use validated `FramebufferInfo`/`ScreenLayout` geometry. Reject unsupported metadata before networking or drawing. |
 | Backend selection | `src/config.rs` selects the default X11 backend or experimental MXCFB backend with `PAPERPAD_DISPLAY_BACKEND`. | Remove the selector after MXCFB-only startup is device-validated. |
 | Window ownership | `src/x11/display.rs` creates, maps, and destroys the full-screen window. In MXCFB mode it uses a backgroundless `InputOutput` window with no graphics context. | A verified, reversible native lifecycle must stop stock UI updates from racing PaperPad and restore normal Kindle operation on exit. This is unresolved. |
-| Input | Normal startup still uses core X11 pointer events. `src/input/evdev.rs` can open the single capability-selected direct touchscreen without `EVIOCGRAB`, drain bounded nonblocking records, and decode PW6 Type-B reports into backend-neutral primary pointer/cancellation outcomes. | Feed reader outcomes into the runtime; validate live secondary-contact and device-loss behavior. Investigate an optional exclusive grab separately before cutover. |
-| Event loop | `src/x11/events.rs` polls and decodes X11 events, while `src/runtime.rs` owns transport polling, frame presentation, connection-indicator updates, display maintenance, application dispatch, and explicit shutdown requests. | Replace the remaining X11 polling/decoding boundary with native input while preserving runtime service cadence and cleanup order. |
+| Input | Normal Linux startup opens the single capability-selected direct touchscreen without `EVIOCGRAB`, drains bounded nonblocking Type-B records, and sends primary pointer/cancellation outcomes into the runtime. Core X11 button events are logged but ignored. Primary remote touch, ignored X11 duplicates, local Exit, and snapshot restoration have device evidence. | Validate viewport edges, secondary-contact cancellation, and device-loss behavior. Investigate an optional exclusive grab separately before X11 removal. |
+| Event loop | `src/x11/events.rs` services native input and polls X11 only for expose, geometry, ownership, and lifecycle events. `src/runtime.rs` owns transport polling, frame presentation, connection-indicator updates, display maintenance, application dispatch, and explicit shutdown requests. | Replace the remaining X11 lifecycle/event-polling boundary while preserving runtime service cadence and cleanup order. |
 | Redraw and geometry events | `Expose` redraws retained content and local UI. `ConfigureNotify` updates `AppState`, announces a viewport change, and invalidates incompatible retained frames. | Fixed MXCFB geometry removes ordinary window resize handling. Startup and resume/reassertion must still restore retained content and local UI without asking PaperSpoon for a new frame. |
 | Termination | Local Exit now returns an explicit shutdown outcome; external `DestroyNotify` remains distinct. Display cleanup still precedes X11 window cleanup. | Native input and signals must feed the same explicit shutdown path, followed by input, networking, framebuffer restoration, and platform lifecycle cleanup in a defined order. |
 | X11 display path | `src/x11/backend.rs`, `framebuffer.rs`, and `render.rs` implement Mono1 conversion, X11 upload, and X11 local UI drawing. | Delete after the native path passes the required hardware checkpoint. The transport-independent cache and frame validation remain useful. |
@@ -121,12 +122,11 @@ action passed host checks, the ARMv7 musl build, static verification, deployed
 binary readback verification, and a physical PW6 capability run. The compact
 result is recorded in `docs/archive/mxcfb-device-evidence.md`.
 
-1. Feed decoder outcomes into the X11-independent runtime while retaining the
-   existing X11 window lifecycle for the intermediate device trial. Keep
-   `EVIOCGRAB` disabled until its recovery behavior is tested explicitly.
-2. Exercise the nonexclusive reader on device, confirming one physical tap does
-   not double-dispatch through simultaneous X11 and evdev paths. Validate local
-   Exit, viewport edges, cancellation, and descriptor failure separately.
+1. Complete the remaining native-input edge trials: viewport boundaries,
+   secondary-contact cancellation, and descriptor failure. The primary touch,
+   single-dispatch, and local Exit path has passed its first device trial.
+2. Migrate benchmark-local Exit from `LocalExitPoll` to the validated native
+   reader without changing benchmark timing, waveform, or restoration behavior.
 3. Design a separately bounded no-X11 ownership trial with signal cleanup and a
    documented operator recovery path. Do not combine its first device run with
    normal-launch cutover.

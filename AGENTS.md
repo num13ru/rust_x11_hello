@@ -9,13 +9,15 @@ steps an agent should follow, especially around physical-device work.
 - Rust binary (`src/`) builds for ARMv7 musl via Docker (`make build`, `make verify`).
 - Host artifact: `kindle-extension/rust_x11_hello/bin/rust_x11_hello` (untracked, rebuilt by `make build`).
 - Device extension root: `/extensions/rust_x11_hello` (MTP) = `/mnt/us/extensions/rust_x11_hello` (runtime).
-- KUAL actions: **Run Paperpad (5m)** uses the X11 default; **Run Paperpad
-  MXCFB (5m, experimental)** selects direct framebuffer output while retaining
-  a backgroundless X11 InputOutput window for input and clipping, without an
-  X11 GC. Stop from
+- KUAL actions: **Run Paperpad (5m)** uses the X11 display backend; **Run
+  Paperpad MXCFB (5m, experimental)** selects direct framebuffer output. Both
+  normal runs use capability-selected native evdev touch while retaining an X11
+  window for screen ownership, clipping, geometry, and lifecycle; MXCFB uses a
+  backgroundless `InputOutput` window without an X11 GC. Stop from
   the in-window **Exit** button or let the
   watchdog end the run; the full-screen window covers KUAL. A first MXCFB
-  trial on the Paperwhite 6 exercised direct display, X11 touch, and local Exit;
+  historical first MXCFB trial on the Paperwhite 6 exercised direct display,
+  the then-current X11 touch path, and local Exit;
   remaining visual and lifecycle checks are recorded in
   `docs/archive/mxcfb-device-evidence.md`.
 - **Inspect framebuffer metadata** is a read-only KUAL diagnostic. It logs
@@ -51,7 +53,7 @@ steps an agent should follow, especially around physical-device work.
 PaperSpoon owns application state, layout, rendering, hit testing, and the
 mapping from application controls to semantic actions. PaperPad treats the
 remote viewport as an opaque, negotiated Mono1 or Gray8 framebuffer: it may
-interpret physical X11 coordinates only to map them into viewport-relative
+interpret physical input coordinates only to map them into viewport-relative
 pointer coordinates or to handle its own device-local system UI, including
 Exit. Do not duplicate
 application button geometry in PaperPad or send application action IDs across
@@ -64,10 +66,11 @@ The dependency direction is PaperSpoon application layout/rendering/input and
 host-side JPEG decoding → transport-independent `paper-protocol` PPFB v2
 frames → PaperPad framebuffer receiver → sibling X11 or MXCFB display backend.
 JPEG bytes and paths never cross the protocol boundary. Viewport-relative
-pointer messages travel in the opposite direction through the X11 input window
-for both display modes. Keep framebuffer primitives independent of transport
-and display backend; X11-specific bitmap conversion belongs in PaperPad's X11
-adapter, not in `paper-protocol` or MXCFB.
+pointer messages travel in the opposite direction from the native evdev reader
+for both normal display modes. X11 pointer events are diagnostic-only while the
+X11 window remains for screen ownership and lifecycle. Keep framebuffer
+primitives independent of transport and display backend; X11-specific bitmap
+conversion belongs in PaperPad's X11 adapter, not in `paper-protocol` or MXCFB.
 
 ## Device deployment (MTP)
 
@@ -141,6 +144,7 @@ After a successful deploy, `mtp-rs ls /extensions/rust_x11_hello --recursive` sh
 - Kindle-side logs (`rust_x11_hello.log`, `rust_x11_hello.status`) are authoritative for
   input/transport behavior; host checks prove buildability only.
 - Match the deployed binary's SHA-256 against the host artifact before trusting a run.
-- A missing `ButtonPress`/`ButtonRelease` after verifying checksum, event mask, mapped
-  window, and geometry means core-X11 touch is unverified on that configuration — not
-  that the build failed.
+- Native-input claims require `input reader: opened` plus evdev Press/Release
+  records in the authoritative Kindle log and the matching deployed checksum.
+  X11 `ButtonPress`/`ButtonRelease` records are expected to be logged as ignored
+  during normal Linux runs and are not evidence that PaperPad dispatched twice.

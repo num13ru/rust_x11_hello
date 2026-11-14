@@ -130,9 +130,11 @@ mtp-rs rm /extensions/rust_x11_hello/bin/rust_x11_hello.previous --yes
 
 KUAL provides normal run, explicit benchmark, and diagnostic actions:
 
-- **Run Paperpad (5m)** — reference X11 display backend with a five-minute watchdog.
+- **Run Paperpad (5m)** — reference X11 display backend with native evdev touch
+  and a five-minute watchdog.
 - **Run Paperpad MXCFB (5m, experimental)** — direct framebuffer display with
-  a five-minute watchdog and X11 still providing touch and lifecycle events.
+  a five-minute watchdog, native evdev touch, and X11 retained for screen
+  ownership and lifecycle events.
 - **Benchmark MXCFB GC16/DU/A2/DU4** — separate, explicit 12-frame local
   completion benchmarks with a one-minute watchdog. They do not connect to
   PaperSpoon; DU, A2, and DU4 are experimental fidelity/ghosting tradeoffs.
@@ -195,7 +197,7 @@ Legacy environment variable names are not read.
 | Backend | Mono1 | Gray8 and JPEG | Notes |
 | --- | --- | --- | --- |
 | X11 | Yes | No | Reference display path |
-| MXCFB | Yes | Yes | Experimental; uses a backgroundless X11 InputOutput window for input and clipping |
+| MXCFB | Yes | Yes | Experimental; uses native evdev touch and a backgroundless X11 InputOutput window for ownership and clipping |
 
 MXCFB startup requires the tested framebuffer layout and HWTCON capabilities;
 it fails rather than silently falling back to X11. Both formats currently use
@@ -203,7 +205,7 @@ the GC16 update path. The MXCFB window is a full-screen X11 InputOutput window
 but requests no X11 background pixel or pixmap and creates no graphics context.
 Its mapped stacking footprint clips lower Kindle/KUAL X11 windows, while
 Expose events ask the MXCFB backend to redraw cached content. Direct framebuffer
-output, X11 touch, local Exit, Gray8, JPEG, and Apple Music Now Playing have
+output, the historical X11 touch path, local Exit, Gray8, JPEG, and Apple Music Now Playing have
 been observed on the documented Paperwhite 6. Subsequent
 device runs completed marker-specific waits and visibly restored the original
 screen after every benchmark. Exact pixel fidelity, sleep/wake interaction,
@@ -267,7 +269,7 @@ evidence.
 
 ## Touch and Mac actions
 
-PaperPad forwards only primary core-X11 contacts (`detail=1`) inside the remote
+PaperPad forwards only primary native evdev contacts (`detail=1`) inside the remote
 viewport. PaperSpoon fills a grid button while its contact is armed and restores
 it before dispatching the action. It activates a button only when a matching
 release remains inside the button that was pressed. Gaps, unmatched releases,
@@ -350,9 +352,10 @@ mtp-rs rm /extensions/rust_x11_hello/rust_x11_hello.log --yes
 
 Match the deployed binary's SHA-256 with the host artifact before trusting a
 run. A successful host build or accepted framebuffer ioctl is not evidence of
-visible panel output. Likewise, missing `ButtonPress`/`ButtonRelease` records
-after checksum, event-mask, window, and geometry checks means touch remains
-unverified on that configuration; it does not mean the Rust build failed.
+visible panel output. Native touch requires an `input reader: opened` record and
+evdev Press/Release records in the Kindle log. Normal Linux runs may also log X11
+button events as ignored; those records are lifecycle diagnostics, not a second
+application-input path.
 
 ## Apple Container network issues
 
@@ -379,7 +382,7 @@ network other than `default`.
 
 | Path | Responsibility |
 | --- | --- |
-| `src/` | PaperPad lifecycle, X11 input, networking, and display backends |
+| `src/` | PaperPad lifecycle, native input, networking, and display backends |
 | `crates/paper-protocol/` | Transport-independent PPFB types and codecs |
 | `tools/paperspoon/` | Host rendering, input resolution, discovery, and actions |
 | `kindle-extension/` | KUAL package and launch scripts |

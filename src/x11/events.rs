@@ -1,12 +1,15 @@
-//! X11 event polling, decoding, and raw event diagnostics.
+//! X11 lifecycle polling and raw event diagnostics.
 //!
-//! This is the boundary layer: it translates `x11rb::protocol::Event` into
-//! [`crate::ui::button::PointerEvent`]. Rendering is delegated to the sibling
-//! adapter, and the UI layer never sees X11 types.
+//! Normal Linux runs dispatch native evdev input and ignore X11 button events.
+//! X11 pointer decoding remains only for benchmark-local Exit and the non-Linux
+//! fallback. Rendering is delegated to the sibling adapter, and the UI layer
+//! never sees X11 types.
 
 #[cfg(target_os = "linux")]
 use crate::app::{Activation, AppState};
 use crate::display::{DisplayBackend, RedrawCause};
+#[cfg(target_os = "linux")]
+use crate::input::evdev::{DecodedInput, EvdevReader};
 use crate::latency;
 use crate::net::Paperspoon;
 use crate::runtime::{GeometryOutcome, PaperpadRuntime, RuntimeControl, RuntimePointerInput};
@@ -109,6 +112,49 @@ fn ensure_benchmark_geometry(expected: (u16, u16), reported: (u16, u16)) -> Resu
 
 const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
+#[cfg(target_os = "linux")]
+fn service_native_input(
+    runtime: &mut PaperpadRuntime,
+    input_reader: &mut EvdevReader,
+    paperspoon: &mut Paperspoon,
+) -> Result<RuntimeControl> {
+    let decoded = match input_reader.drain() {
+        Ok(decoded) => decoded,
+        Err(error) => {
+            if error.cancel_contact() {
+                runtime.cancel_contact();
+                eprintln!("input source=evdev action=cancel reason=reader_failure");
+            }
+            return Err(error).context("native evdev input reader failed");
+        }
+    };
+
+    for input in decoded {
+        match input {
+            DecodedInput::Pointer(event) => {
+                let input_stamp = latency::stamp();
+                eprintln!(
+                    "input source=evdev type={:?} detail={} physical_x={} physical_y={}",
+                    event.kind, event.detail, event.point.x, event.point.y
+                );
+                let control = runtime.handle_pointer(
+                    RuntimePointerInput::new(event, input_stamp, None),
+                    paperspoon,
+                );
+                if control == RuntimeControl::ShutdownRequested {
+                    return Ok(control);
+                }
+            }
+            DecodedInput::CancelContact => {
+                runtime.cancel_contact();
+                eprintln!("input source=evdev action=cancel reason=decoder_state");
+            }
+        }
+    }
+
+    Ok(RuntimeControl::Continue)
+}
+
 /// Poll X11 until the runtime requests shutdown, the window is destroyed, or
 /// event processing fails.
 pub(crate) fn event_loop(
@@ -116,11 +162,18 @@ pub(crate) fn event_loop(
     win: Window,
     display: &mut dyn DisplayBackend,
     paperspoon: &mut Paperspoon,
+    #[cfg(target_os = "linux")] input_reader: &mut EvdevReader,
 ) -> Result<EventLoopExit> {
     let mut runtime = PaperpadRuntime::new(display.dimensions());
 
     loop {
         runtime.service(display, paperspoon)?;
+        #[cfg(target_os = "linux")]
+        if service_native_input(&mut runtime, input_reader, paperspoon)?
+            == RuntimeControl::ShutdownRequested
+        {
+            return Ok(EventLoopExit::ShutdownRequested);
+        }
         let Some(event) = conn
             .poll_for_event()
             .context("X11 connection failed while waiting for an event")?
@@ -159,48 +212,58 @@ pub(crate) fn event_loop(
             }
             Event::ConfigureNotify(_) => {}
             Event::ButtonPress(event) if event.event == win => {
-                let input_stamp = latency::stamp();
                 eprintln!("{}", format_pointer_event("ButtonPress", &event));
-                let control = runtime.handle_pointer(
-                    RuntimePointerInput::new(
-                        PointerEvent {
-                            kind: PointerEventKind::Press,
-                            detail: event.detail,
-                            point: PhysicalPoint {
-                                x: event.event_x,
-                                y: event.event_y,
+                #[cfg(target_os = "linux")]
+                eprintln!("input source=x11 ignored=true reason=evdev_active");
+                #[cfg(not(target_os = "linux"))]
+                {
+                    let input_stamp = latency::stamp();
+                    let control = runtime.handle_pointer(
+                        RuntimePointerInput::new(
+                            PointerEvent {
+                                kind: PointerEventKind::Press,
+                                detail: event.detail,
+                                point: PhysicalPoint {
+                                    x: event.event_x,
+                                    y: event.event_y,
+                                },
                             },
-                        },
-                        input_stamp,
-                        Some(u64::from(event.time)),
-                    ),
-                    paperspoon,
-                );
-                if control == RuntimeControl::ShutdownRequested {
-                    return Ok(EventLoopExit::ShutdownRequested);
+                            input_stamp,
+                            Some(u64::from(event.time)),
+                        ),
+                        paperspoon,
+                    );
+                    if control == RuntimeControl::ShutdownRequested {
+                        return Ok(EventLoopExit::ShutdownRequested);
+                    }
                 }
             }
             Event::ButtonPress(_) => {}
             Event::ButtonRelease(event) if event.event == win => {
-                let input_stamp = latency::stamp();
                 eprintln!("{}", format_pointer_event("ButtonRelease", &event));
-                let control = runtime.handle_pointer(
-                    RuntimePointerInput::new(
-                        PointerEvent {
-                            kind: PointerEventKind::Release,
-                            detail: event.detail,
-                            point: PhysicalPoint {
-                                x: event.event_x,
-                                y: event.event_y,
+                #[cfg(target_os = "linux")]
+                eprintln!("input source=x11 ignored=true reason=evdev_active");
+                #[cfg(not(target_os = "linux"))]
+                {
+                    let input_stamp = latency::stamp();
+                    let control = runtime.handle_pointer(
+                        RuntimePointerInput::new(
+                            PointerEvent {
+                                kind: PointerEventKind::Release,
+                                detail: event.detail,
+                                point: PhysicalPoint {
+                                    x: event.event_x,
+                                    y: event.event_y,
+                                },
                             },
-                        },
-                        input_stamp,
-                        Some(u64::from(event.time)),
-                    ),
-                    paperspoon,
-                );
-                if control == RuntimeControl::ShutdownRequested {
-                    return Ok(EventLoopExit::ShutdownRequested);
+                            input_stamp,
+                            Some(u64::from(event.time)),
+                        ),
+                        paperspoon,
+                    );
+                    if control == RuntimeControl::ShutdownRequested {
+                        return Ok(EventLoopExit::ShutdownRequested);
+                    }
                 }
             }
             Event::ButtonRelease(_) => {}

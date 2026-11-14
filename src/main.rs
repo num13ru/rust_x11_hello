@@ -1,11 +1,13 @@
 //! Paperpad Kindle/KUAL process entry point.
 //!
-//! Entry point only: chooses a display backend, keeps X11 for input and window
-//! lifecycle, runs the event loop, and tears down. Logical UI concepts live
+//! Entry point only: chooses a display backend, keeps X11 for window ownership
+//! and lifecycle, runs the event loop, and tears down. Logical UI concepts live
 //! in [`ui`].
 
 use crate::display::DisplayBackend;
 use anyhow::{Context, Result, bail};
+#[cfg(target_os = "linux")]
+use input::evdev::EvdevReader;
 #[cfg(target_os = "linux")]
 use mxcfb::MxcfbDisplayBackend;
 use std::env;
@@ -131,6 +133,19 @@ fn run() -> Result<()> {
         size.1
     );
 
+    #[cfg(target_os = "linux")]
+    let mut input_reader = match EvdevReader::open(size) {
+        Ok(reader) => reader,
+        Err(primary) => {
+            if let Err(cleanup_error) = x11_display::cleanup(&conn, mapped, true) {
+                eprintln!(
+                    "X11 cleanup after input initialization failure also failed: {cleanup_error:#}"
+                );
+            }
+            return Err(primary);
+        }
+    };
+
     let mut display_backend = match create_display_backend(display_kind, &conn, mapped) {
         Ok(backend) => backend,
         Err(primary) => {
@@ -147,7 +162,25 @@ fn run() -> Result<()> {
         remote_viewport_size(size),
         display_backend.pixel_formats(),
     );
+    #[cfg(target_os = "linux")]
+    let event_result = event_loop(
+        &conn,
+        win,
+        display_backend.as_mut(),
+        &mut paperspoon,
+        &mut input_reader,
+    );
+    #[cfg(not(target_os = "linux"))]
     let event_result = event_loop(&conn, win, display_backend.as_mut(), &mut paperspoon);
+
+    #[cfg(target_os = "linux")]
+    {
+        if input_reader.shutdown().is_some() {
+            eprintln!("input reader: shutdown canceled active contact");
+        }
+        drop(input_reader);
+    }
+
     let display_cleanup_result = display_backend.shutdown();
     drop(display_backend);
 

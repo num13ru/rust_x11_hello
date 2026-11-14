@@ -431,3 +431,24 @@ Normal startup did not open the reader in this build. This report therefore
 establishes only an existing-runtime smoke check; capability selection,
 nonblocking reads, decoded pointer delivery, and cancellation remain unverified
 on hardware.
+
+## Native evdev runtime integration (2026-11-14)
+
+The normal PaperPad build passed the full host suite, ARMv7 musl build, and
+static verification before deployment. Independent MTP readback matched the
+host artifact at SHA-256
+`d248b776e12b00b9cb5bd15cb0a8cd69449d51287889da0b77ad5b88991d8500`.
+The operator then verified the run on the Paperwhite 6.
+
+The retrieved device log records the capability-selected `pt_mt` reader opened
+at `/dev/input/event1`, axis ranges `0..1271` and `0..1695`, screen geometry
+1272 x 1696, and `eviocgrab=false`. It records primary evdev Press/Release pairs
+queued to PaperSpoon while corresponding core-X11 button events were logged as
+ignored. The final evdev contact reached the device-local Exit strip and was
+followed by MXCFB restoration of the 2,157,312-byte framebuffer snapshot.
+
+This establishes the primary nonexclusive native-input path, suppression of
+duplicate X11 dispatch, remote pointer forwarding, local Exit, and normal
+framebuffer restoration for this run. It does not establish viewport-edge
+accuracy, secondary-contact cancellation, descriptor-loss recovery, exclusive
+grab behavior, or X11-free screen ownership.
