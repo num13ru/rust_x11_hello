@@ -1,7 +1,7 @@
 # X11 removal inventory and feasibility checkpoint
 
-Status: Phase 4 connected X11-free runtime and local-Exit cleanup
-device-validated; signal and failure cleanup remain unresolved, 2026-11-14.
+Status: Phase 4 connected X11-free runtime, local Exit, and graceful signal
+cleanup device-validated; normal-launch cutover is next, 2026-11-14.
 
 This document records what the repository and existing Paperwhite 6 evidence
 establish as the X11 removal work proceeds. It is not a claim that the complete
@@ -14,11 +14,11 @@ X11-free normal runtime works on the device.
 | Build | `Cargo.toml` and `Cargo.lock` include `x11rb` and `x11rb-protocol`. | Remove both after the final X11 caller is gone. |
 | Startup and geometry | MXCFB mode reads and validates `/dev/fb0` metadata before connecting to X11, derives PaperPad and evdev geometry from it, and rejects disagreement with both the X11 ownership window and the later read-write backend. Device evidence confirms the 1272 x 1696 metadata-before-X11 order, native touch, local Exit, and restoration. X11 mode still uses X11 geometry. | Remove the ownership-window comparison when the connected no-X11 runtime, exclusive input, and cleanup paths are device-validated. |
 | Backend selection | `src/config.rs` selects the default X11 backend or experimental MXCFB backend with `PAPERPAD_DISPLAY_BACKEND`. | Remove the selector after MXCFB-only startup is device-validated. |
-| Window ownership | Normal MXCFB still uses a backgroundless X11 `InputOutput` window with no graphics context. Device-validated no-X11 trials were not overwritten by the stock UI, restored the framebuffer snapshot, left the Kindle usable, and included a connected 24-second runtime session ending through local Exit. | Validate launcher-forwarded signal cleanup before changing normal launch. Forced-recovery cases remain unverified. |
+| Window ownership | Normal MXCFB still uses a backgroundless X11 `InputOutput` window with no graphics context. Device-validated no-X11 trials were not overwritten by the stock UI, restored the framebuffer snapshot, left the Kindle usable, and covered connected local-Exit and launcher-forwarded signal cleanup. | Promote the validated native lifecycle to normal MXCFB startup. Forced-recovery cases remain unverified. |
 | Input | Normal Linux startup opens the single capability-selected direct touchscreen without `EVIOCGRAB`, drains bounded nonblocking Type-B records, and sends primary pointer/cancellation outcomes into the runtime. Core X11 button events are logged but ignored. Connected no-X11 device evidence confirms exclusive remote Press/Release forwarding, underlying UI isolation, and explicit grab release on local Exit. Normal and benchmark paths remain nonexclusive. | Deadline, signal, input-failure, and descriptor-close-only release still need evidence, as do viewport edges, secondary-contact cancellation, and device-loss behavior. |
-| Event loop | `src/x11/events.rs` services native input and polls X11 only for expose, geometry, ownership, and lifecycle events. `src/runtime.rs` owns transport polling, frame presentation, connection-indicator updates, display maintenance, application dispatch, and explicit shutdown requests. A device-validated fixed-geometry native loop drives that runtime directly for the opt-in connected trial. | Validate signal cleanup, then promote the native loop to normal startup without changing service cadence or cleanup order before deleting the X11 lifecycle/event-polling boundary. |
+| Event loop | `src/x11/events.rs` services native input and polls X11 only for expose, geometry, ownership, and lifecycle events. `src/runtime.rs` owns transport polling, frame presentation, connection-indicator updates, display maintenance, application dispatch, and explicit shutdown requests. A device-validated fixed-geometry native loop drives that runtime directly for the opt-in connected trial. | Promote the native loop to normal startup without changing service cadence or cleanup order before deleting the X11 lifecycle/event-polling boundary. |
 | Redraw and geometry events | `Expose` redraws retained content and local UI. `ConfigureNotify` updates `AppState`, announces a viewport change, and invalidates incompatible retained frames. | Fixed MXCFB geometry removes ordinary window resize handling. Startup and resume/reassertion must still restore retained content and local UI without asking PaperSpoon for a new frame. |
-| Termination | Local Exit returns an explicit shutdown outcome; external `DestroyNotify` remains distinct. Linux normal and benchmark runs install atomic `HUP`/`INT`/`TERM` handlers. The normal loop converts the flag into the same shutdown outcome, then closes input and restores the display before X11 cleanup. Device evidence confirms launcher-forwarded `TERM`, restoration, status 0, and no forced `KILL`. | Reuse the validated graceful path in the bounded no-X11 ownership trial. `SIGKILL`, kernel hangs, and power loss still bypass userspace restoration. |
+| Termination | Local Exit returns an explicit shutdown outcome; external `DestroyNotify` remains distinct. Linux paths install atomic `HUP`/`INT`/`TERM` handlers. Device evidence confirms the connected no-X11 loop receives launcher-forwarded `TERM`, stops for signal, releases the grab, restores the framebuffer, exits status 0, and avoids `KILL`. | Preserve the validated input, transport, display cleanup order at cutover. `SIGKILL`, kernel hangs, and power loss still bypass userspace restoration. |
 | X11 display path | `src/x11/backend.rs`, `framebuffer.rs`, and `render.rs` implement Mono1 conversion, X11 upload, and X11 local UI drawing. | Delete after the native path passes the required hardware checkpoint. The transport-independent cache and frame validation remain useful. |
 | MXCFB benchmark | `src/main.rs` maps an X11 ownership window, uses the native evdev reader for benchmark-local Exit, and polls X11 only for fixed geometry and lifecycle. | Remove the remaining X11 lifecycle dependency while preserving bounded samples, markers, waveform choices, and snapshot restoration. |
 | Launcher and KUAL menu | `menu.json` exposes X11 and experimental MXCFB normal launches. The watchdog is backend-independent. | Keep the watchdog and one normal native launch; keep framebuffer diagnostics and explicit benchmarks. |
@@ -102,9 +102,9 @@ particular:
   investigated in this repository and must not be attempted without a known
   reversible command sequence and forced-termination recovery procedure.
 
-Consequently, the old X11 lifecycle must not be removed and MXCFB-only startup
-must not become the normal KUAL path until the connected no-X11 runtime also
-passes launcher-forwarded signal cleanup and release checks.
+The required pre-cutover checkpoint has passed. The next slice can promote the
+validated connected native lifecycle to normal MXCFB startup while retaining
+the old X11 path until the cutover itself is device-checked.
 
 ## Risk report
 
@@ -113,7 +113,7 @@ passes launcher-forwarded signal cleanup and release checks.
 | Stock UI overwrites PaperPad without the X11 occlusion window | High: corrupt or unusable active display | Bounded native-only run with deliberate delayed stock UI activity, operator-visible result, watchdog recovery, and post-run usability check. |
 | Wrong evdev device or axis transform | High: incorrect actions or inaccessible local Exit | Capability-based discovery plus captured axis ranges and synthetic normalization tests, followed by edge/corner and system-strip device tests. |
 | Lost or malformed input report leaves a contact armed | High: unintended release/action later | Handle `SYN_DROPPED`, incomplete reports, read errors, disconnect, and shutdown as explicit contact cancellation. |
-| Exclusive input grab survives abnormal flow | High: Kindle becomes temporarily unusable | Local-Exit release passed on device. Keep descriptor-close fallback, then validate deadline and signal cleanup in bounded trials before cutover. |
+| Exclusive input grab survives abnormal flow | High: Kindle becomes temporarily unusable | Local-Exit and graceful-signal release passed on device. Keep descriptor-close fallback; `SIGKILL` and input-failure recovery remain unverified. |
 | `SIGKILL` bypasses framebuffer restoration | High: stale PaperPad image remains | Keep launcher TERM grace, verify graceful signal cleanup, and define a device-local recovery action that can restore stock UI after forced termination. |
 | Runtime extraction changes latest-frame or failure semantics | Medium: stale/invalid content becomes authoritative | Preserve mailbox polling, successful-presentation cache policy, reconnect behavior, and tests before changing input. |
 | Benchmark migration changes measurement meaning | Medium: invalid comparisons | Preserve bounded frames, region, waveform, marker waits, and full-snapshot cleanup; continue to avoid visual-FPS claims without camera evidence. |
@@ -132,9 +132,9 @@ result is recorded in `docs/archive/mxcfb-device-evidence.md`.
    native-reader completion paths and restorations passed, but benchmark-local
    Exit, ignored X11 duplicates during a contact, and signal stop remain
    unverified on device.
-3. Add a short-watchdog action for the connected no-X11 runtime and verify
-   launcher-forwarded `TERM`, explicit grab release, framebuffer restoration,
-   clean process exit, and post-run Kindle touch.
+3. Promote the validated connected native loop to normal MXCFB startup without
+   removing the old X11 implementation in the same slice. Perform one
+   consolidated device verification before deleting X11 code.
 
 The target architecture works only if the PW6 exposes a readable, identifiable
 touchscreen event device with stable coordinate metadata, PaperPad can obtain

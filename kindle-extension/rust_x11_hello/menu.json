@@ -25,6 +25,10 @@
       "action": "PAPERPAD_WATCHDOG_SECONDS=90 sh bin/run.sh --trial-connected-no-x11"
     },
     {
+      "name": "Test connected no-X11 TERM cleanup (15s)",
+      "action": "PAPERPAD_WATCHDOG_SECONDS=15 sh bin/run.sh --trial-connected-no-x11"
+    },
+    {
       "name": "Benchmark MXCFB GC16 (12)",
       "action": "PAPERPAD_WATCHDOG_SECONDS=60 PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=gc16 PAPERPAD_MXCFB_BENCHMARK_FRAMES=12 sh bin/run.sh --benchmark-mxcfb"
     },

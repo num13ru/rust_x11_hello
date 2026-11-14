@@ -45,6 +45,10 @@ steps an agent should follow, especially around physical-device work.
   90-second launcher watchdog. PaperSpoon must be reachable for connected
   rendering and remote-touch claims; otherwise the run proves only the
   disconnected path. Normal launch behavior remains unchanged.
+- **Test connected no-X11 TERM cleanup (15s)** runs that same connected trial
+  with a watchdog shorter than its internal deadline. The launcher must send
+  `TERM`; PaperPad must release `EVIOCGRAB`, restore the framebuffer, and exit
+  before escalation. It is a lifecycle test, not a benchmark.
 - **Inspect framebuffer metadata** is a read-only KUAL diagnostic. It logs
   `/dev/fb0` metadata without using the normal launcher or drawing.
 - **Inspect input devices** is a read-only KUAL diagnostic. It logs evdev names,

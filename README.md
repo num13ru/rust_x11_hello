@@ -149,6 +149,9 @@ KUAL provides normal run, explicit benchmark, and diagnostic actions:
   real PaperSpoon transport, MXCFB display, and exclusive native input without
   opening X11. It has a 60-second internal deadline and 90-second launcher
   watchdog; normal launch remains unchanged.
+- **Test connected no-X11 TERM cleanup (15s)** — the same connected trial with
+  a short watchdog to verify signal-driven exclusive-input release,
+  framebuffer restoration, and clean exit before watchdog escalation.
 - **Benchmark MXCFB GC16/DU/A2/DU4** — separate, explicit 12-frame local
   completion benchmarks with a one-minute watchdog. They use native evdev for
   local Exit and retain X11 for ownership and lifecycle, but do not connect to

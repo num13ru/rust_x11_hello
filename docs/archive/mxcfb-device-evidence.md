@@ -594,3 +594,30 @@ touch, exclusive input isolation, local Exit, and orderly restoration without
 X11 on the tested device. It does not establish Gray8 presentation,
 disconnect/reconnect behavior, the internal deadline, launcher-forwarded
 signal cleanup, input failure, or descriptor-close-only grab release.
+
+## Connected no-X11 TERM cleanup (2026-11-14)
+
+The lifecycle action reused the independently read-back connected-runtime
+artifact at SHA-256
+`5173ad1a5c2b4d714c9894fabbaec188287395fdab9c76ce8ff6557fc1864781`.
+The full host suite, ARMv7 musl build, and static verification passed before
+the updated KUAL menu was deployed. The retrieved cumulative log has SHA-256
+`a59c83823b40627f5fedab63ea52a6dcd5313662c73dedbf8ee1b3a1c309909c`;
+the status snapshot has SHA-256
+`7b518dd1f30983840b0c2ce28fd7996f09263a71985050d6a0d66397f7d87c8e`
+and reports `STOPPED status=0 reason=watchdog`.
+
+The operator ran **Test connected no-X11 TERM cleanup (15s)** with PaperSpoon
+active and confirmed automatic visible restoration plus normal Kindle touch
+afterward. The launcher session ran from
+`Sat Nov 14 20:12:14 GMT+3:0100 2026` through `20:12:29`. It records exclusive
+evdev input, PaperSpoon discovery and connection, Mono1 frame 34 presentation,
+the launcher reaching its 15-second deadline and sending `TERM` to PID 17839,
+the native loop stopping for `signal`, explicit `EVIOCGRAB` release,
+restoration of the 2,157,312-byte snapshot, binary status 0, and watchdog end
+reason. No `KILL` escalation or `connected to X11` record occurs in the
+session.
+
+This establishes launcher-forwarded graceful signal cleanup for the connected
+no-X11 runtime on the tested device. It does not establish `SIGKILL`, kernel
+hang, power-loss, input-failure, or descriptor-close-only recovery.
