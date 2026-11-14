@@ -418,3 +418,16 @@ The decoder was not connected to normal input in this build, so this report
 establishes only that the preparatory code did not break the existing X11-driven
 runtime smoke test. Native evdev event delivery, cancellation, and device-loss
 behavior remain unverified on hardware.
+
+## Dormant evdev reader build smoke verification (2026-11-14)
+
+The nonblocking reader build passed the full host suite, ARMv7 musl build, and
+static verification before deployment. Independent MTP readback matched the
+host artifact at SHA-256
+`0f9abbde9b1730a14e63fe0666f9a257240595ca8d70d7250b1b060784b6d619`.
+The operator subsequently reported the build verified on device.
+
+Normal startup did not open the reader in this build. This report therefore
+establishes only an existing-runtime smoke check; capability selection,
+nonblocking reads, decoded pointer delivery, and cancellation remain unverified
+on hardware.

@@ -7,7 +7,21 @@
 
 use crate::ui::button::{PRIMARY_BUTTON_DETAIL, PointerEvent, PointerEventKind};
 use crate::ui::screen::PhysicalPoint;
+#[cfg(target_os = "linux")]
+use anyhow::Context;
 use anyhow::{Result, ensure};
+#[cfg(target_os = "linux")]
+use std::fs::{File, OpenOptions};
+use std::io;
+#[cfg(target_os = "linux")]
+use std::io::Read;
+#[cfg(target_os = "linux")]
+use std::os::unix::fs::OpenOptionsExt;
+#[cfg(target_os = "linux")]
+use std::path::{Path, PathBuf};
+
+#[cfg(target_os = "linux")]
+use super::probe::select_touch_device;
 
 pub(crate) const EV_SYN: u16 = 0x00;
 pub(crate) const EV_ABS: u16 = 0x03;
@@ -17,6 +31,11 @@ pub(crate) const ABS_MT_SLOT: u16 = 0x2f;
 pub(crate) const ABS_MT_POSITION_X: u16 = 0x35;
 pub(crate) const ABS_MT_POSITION_Y: u16 = 0x36;
 pub(crate) const ABS_MT_TRACKING_ID: u16 = 0x39;
+
+#[cfg(target_os = "linux")]
+const EVENTS_PER_READ: usize = 64;
+#[cfg(target_os = "linux")]
+const MAX_EVENTS_PER_DRAIN: usize = 256;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct AxisRange {
@@ -241,6 +260,176 @@ impl TypeBDecoder {
     }
 }
 
+/// Nonblocking owner of the capability-selected Type-B touchscreen.
+///
+/// This reader never requests `EVIOCGRAB`. Callers must process every returned
+/// decoder outcome in order and honor `EvdevReadError::cancel_contact` before
+/// handling or reporting a terminal read failure.
+#[cfg(target_os = "linux")]
+pub(crate) struct EvdevReader {
+    file: File,
+    path: PathBuf,
+    name: String,
+    decoder: TypeBDecoder,
+    bytes: Vec<u8>,
+}
+
+#[cfg(target_os = "linux")]
+impl EvdevReader {
+    pub(crate) fn open(screen_size: (u16, u16)) -> Result<Self> {
+        let selected = select_touch_device()?;
+        let (x, y) = selected.multitouch_axes.with_context(|| {
+            format!(
+                "selected direct touchscreen {} does not expose Type-B multitouch axes",
+                selected.path.display()
+            )
+        })?;
+        let geometry = TouchGeometry::new(
+            AxisRange::new(x.minimum, x.maximum)?,
+            AxisRange::new(y.minimum, y.maximum)?,
+            screen_size.0,
+            screen_size.1,
+        )?;
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC)
+            .open(&selected.path)
+            .with_context(|| {
+                format!(
+                    "open selected touchscreen {} nonblocking",
+                    selected.path.display()
+                )
+            })?;
+        let event_size = std::mem::size_of::<libc::input_event>();
+        eprintln!(
+            "input reader: opened path={} name={:?} axes_x={}..{} axes_y={}..{} screen={}x{} eviocgrab=false",
+            selected.path.display(),
+            selected.name,
+            x.minimum,
+            x.maximum,
+            y.minimum,
+            y.maximum,
+            screen_size.0,
+            screen_size.1
+        );
+        Ok(Self {
+            file,
+            path: selected.path,
+            name: selected.name,
+            decoder: TypeBDecoder::new(geometry),
+            bytes: vec![0; event_size * EVENTS_PER_READ],
+        })
+    }
+
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Drain at most `MAX_EVENTS_PER_DRAIN` currently available records.
+    pub(crate) fn drain(&mut self) -> Result<Vec<DecodedInput>, EvdevReadError> {
+        let mut decoded = Vec::new();
+        let mut event_count = 0usize;
+
+        while event_count < MAX_EVENTS_PER_DRAIN {
+            let read = match self.file.read(&mut self.bytes) {
+                Ok(0) => {
+                    return Err(self.fail(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "event device reached EOF or disappeared",
+                    )));
+                }
+                Ok(read) => read,
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(self.fail(error)),
+            };
+
+            let record_count =
+                match complete_record_count(read, std::mem::size_of::<libc::input_event>()) {
+                    Ok(record_count) => record_count,
+                    Err(error) => return Err(self.fail(error)),
+                };
+            for chunk in self.bytes[..read].chunks_exact(std::mem::size_of::<libc::input_event>()) {
+                // SAFETY: divisibility was checked above, each chunk contains
+                // exactly one input_event, and unaligned reads accept byte buffers.
+                let event: libc::input_event =
+                    unsafe { std::ptr::read_unaligned(chunk.as_ptr().cast()) };
+                if let Some(input) = self.decoder.feed(event.type_, event.code, event.value) {
+                    decoded.push(input);
+                }
+            }
+            event_count += record_count;
+        }
+
+        Ok(decoded)
+    }
+
+    /// Cancel decoder state before normal reader shutdown.
+    pub(crate) fn shutdown(&mut self) -> Option<DecodedInput> {
+        self.decoder.disconnect()
+    }
+
+    fn fail(&mut self, source: io::Error) -> EvdevReadError {
+        // A terminal failure discards this drain's decoded batch. Even if the
+        // decoder just observed a release, its caller has not received that
+        // release, so cancellation must be unconditional and idempotent.
+        let _ = self.decoder.disconnect();
+        EvdevReadError {
+            path: self.path.clone(),
+            source,
+            cancel_contact: true,
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Debug)]
+pub(crate) struct EvdevReadError {
+    path: PathBuf,
+    source: io::Error,
+    cancel_contact: bool,
+}
+
+#[cfg(target_os = "linux")]
+impl EvdevReadError {
+    pub(crate) fn cancel_contact(&self) -> bool {
+        self.cancel_contact
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl std::fmt::Display for EvdevReadError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "read touchscreen {}: {}",
+            self.path.display(),
+            self.source
+        )
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl std::error::Error for EvdevReadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
+fn complete_record_count(byte_count: usize, record_size: usize) -> io::Result<usize> {
+    if byte_count.checked_rem(record_size) != Some(0) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("read {byte_count} bytes not divisible by input_event size {record_size}"),
+        ));
+    }
+    Ok(byte_count / record_size)
+}
+
 fn pointer(kind: PointerEventKind, point: PhysicalPoint) -> PointerEvent {
     PointerEvent {
         kind,
@@ -443,5 +632,18 @@ mod tests {
         assert!(TouchGeometry::new(valid, valid, 0, 1).is_err());
         assert!(TouchGeometry::new(valid, valid, 1, 0).is_err());
         assert!(TouchGeometry::new(valid, valid, 32_769, 1).is_err());
+    }
+
+    #[test]
+    fn event_record_reads_require_complete_fixed_size_records() {
+        assert_eq!(complete_record_count(48, 16).unwrap(), 3);
+        assert_eq!(
+            complete_record_count(47, 16).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert_eq!(
+            complete_record_count(0, 0).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
     }
 }

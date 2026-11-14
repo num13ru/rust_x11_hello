@@ -6,6 +6,11 @@
 // device-walking entry point is intentionally unreachable.
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
 
+use super::evdev::{
+    ABS_MT_POSITION_X, ABS_MT_POSITION_Y, ABS_MT_SLOT, ABS_MT_TRACKING_ID, EV_ABS, EV_SYN,
+};
+#[cfg(target_os = "linux")]
+use super::evdev::{SYN_DROPPED, SYN_REPORT};
 use anyhow::{Context, Result, bail};
 use std::fs::{self, File};
 use std::io;
@@ -24,18 +29,14 @@ const IOC_TYPE_SHIFT: u32 = 8;
 const IOC_SIZE_SHIFT: u32 = 16;
 const IOC_DIR_SHIFT: u32 = 30;
 
-const EV_SYN: u16 = 0x00;
 const EV_KEY: u16 = 0x01;
 const EV_REL: u16 = 0x02;
-const EV_ABS: u16 = 0x03;
 const EV_MSC: u16 = 0x04;
 const EV_SW: u16 = 0x05;
 const EV_MAX: u16 = 0x1f;
 
-const SYN_REPORT: u16 = 0x00;
 const SYN_CONFIG: u16 = 0x01;
 const SYN_MT_REPORT: u16 = 0x02;
-const SYN_DROPPED: u16 = 0x03;
 
 const BTN_TOOL_FINGER: u16 = 0x145;
 const BTN_TOUCH: u16 = 0x14a;
@@ -43,10 +44,6 @@ const KEY_MAX: u16 = 0x2ff;
 
 const ABS_X: u16 = 0x00;
 const ABS_Y: u16 = 0x01;
-const ABS_MT_SLOT: u16 = 0x2f;
-const ABS_MT_POSITION_X: u16 = 0x35;
-const ABS_MT_POSITION_Y: u16 = 0x36;
-const ABS_MT_TRACKING_ID: u16 = 0x39;
 const ABS_MAX: u16 = 0x3f;
 
 const INPUT_PROP_DIRECT: u16 = 0x01;
@@ -100,6 +97,20 @@ struct CapabilityBits {
     keys: Vec<u8>,
     absolute: Vec<u8>,
     direct: bool,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct AxisLimits {
+    pub(super) minimum: i32,
+    pub(super) maximum: i32,
+}
+
+#[cfg(target_os = "linux")]
+pub(super) struct SelectedTouchDevice {
+    pub(super) path: PathBuf,
+    pub(super) name: String,
+    pub(super) multitouch_axes: Option<(AxisLimits, AxisLimits)>,
 }
 
 impl TouchProtocols {
@@ -273,7 +284,7 @@ fn read_capabilities(file: &File, path: &Path) -> Result<CapabilityBits> {
 
 #[cfg(target_os = "linux")]
 pub(crate) fn trace_input() -> Result<()> {
-    let (path, name) = select_touch_device()?;
+    let SelectedTouchDevice { path, name, .. } = select_touch_device()?;
     eprintln!(
         "input trace: start path={} name={name:?} duration_ms={} max_events={} eviocgrab=false",
         path.display(),
@@ -358,7 +369,7 @@ pub(crate) fn trace_input() -> Result<()> {
 }
 
 #[cfg(target_os = "linux")]
-fn select_touch_device() -> Result<(PathBuf, String)> {
+pub(super) fn select_touch_device() -> Result<SelectedTouchDevice> {
     let mut paths = event_paths()?;
     paths.sort_by_key(|path| event_number(path).unwrap_or(u32::MAX));
     let mut candidates = Vec::new();
@@ -374,13 +385,35 @@ fn select_touch_device() -> Result<(PathBuf, String)> {
             &capabilities.absolute,
         );
         if protocols.is_candidate() && capabilities.direct {
-            candidates.push((path, name));
+            let multitouch_axes = if protocols.multitouch {
+                let x = read_value::<InputAbsInfo>(&file, eviocgabs(ABS_MT_POSITION_X))
+                    .with_context(|| format!("EVIOCGABS ABS_MT_POSITION_X {}", path.display()))?;
+                let y = read_value::<InputAbsInfo>(&file, eviocgabs(ABS_MT_POSITION_Y))
+                    .with_context(|| format!("EVIOCGABS ABS_MT_POSITION_Y {}", path.display()))?;
+                Some((
+                    AxisLimits {
+                        minimum: x.minimum,
+                        maximum: x.maximum,
+                    },
+                    AxisLimits {
+                        minimum: y.minimum,
+                        maximum: y.maximum,
+                    },
+                ))
+            } else {
+                None
+            };
+            candidates.push(SelectedTouchDevice {
+                path,
+                name,
+                multitouch_axes,
+            });
         }
     }
     match candidates.len() {
         1 => Ok(candidates.pop().expect("one candidate")),
-        0 => bail!("input trace: no readable direct touchscreen candidate found"),
-        count => bail!("input trace: {count} direct touchscreen candidates are ambiguous"),
+        0 => bail!("input: no readable direct touchscreen candidate found"),
+        count => bail!("input: {count} direct touchscreen candidates are ambiguous"),
     }
 }
 
