@@ -1,9 +1,8 @@
 //! X11 lifecycle polling and raw event diagnostics.
 //!
-//! Normal Linux runs dispatch native evdev input and ignore X11 button events.
-//! X11 pointer decoding remains only for benchmark-local Exit and the non-Linux
-//! fallback. Rendering is delegated to the sibling adapter, and the UI layer
-//! never sees X11 types.
+//! Linux runs dispatch native evdev input and ignore X11 button events. X11
+//! pointer decoding remains only for the non-Linux fallback. Rendering is
+//! delegated to the sibling adapter, and the UI layer never sees X11 types.
 
 #[cfg(target_os = "linux")]
 use crate::app::{Activation, AppState};
@@ -13,7 +12,9 @@ use crate::input::evdev::{DecodedInput, EvdevReader};
 use crate::latency;
 use crate::net::Paperspoon;
 use crate::runtime::{GeometryOutcome, PaperpadRuntime, RuntimeControl, RuntimePointerInput};
+#[cfg(not(target_os = "linux"))]
 use crate::ui::button::{PointerEvent, PointerEventKind};
+#[cfg(not(target_os = "linux"))]
 use crate::ui::screen::PhysicalPoint;
 use anyhow::{Context, Result, anyhow};
 use std::time::Duration;
@@ -28,17 +29,19 @@ pub enum EventLoopExit {
     WindowDestroyed,
 }
 
-/// Minimal X11 input pump for the local MXCFB benchmark. It deliberately
-/// forwards no remote pointer messages, but preserves PaperPad's local Exit
-/// behavior and aborts if the fixed framebuffer/window geometry diverges.
+/// Native local-Exit and X11 lifecycle pump for the MXCFB benchmark.
+///
+/// It deliberately forwards no remote pointer messages. X11 button events are
+/// diagnostic-only, while window loss and fixed-geometry divergence still stop
+/// the benchmark.
 #[cfg(target_os = "linux")]
-pub(crate) struct LocalExitPoll {
+pub(crate) struct BenchmarkExitPoll {
     app: AppState,
     window_destroyed: bool,
 }
 
 #[cfg(target_os = "linux")]
-impl LocalExitPoll {
+impl BenchmarkExitPoll {
     pub(crate) fn new(size: (u16, u16)) -> Self {
         Self {
             app: AppState::new(size),
@@ -50,23 +53,65 @@ impl LocalExitPoll {
         self.window_destroyed
     }
 
-    pub(crate) fn poll(&mut self, conn: &RustConnection, win: Window) -> Result<bool> {
+    pub(crate) fn shutdown(&mut self, input_reader: &mut EvdevReader) {
+        if input_reader.shutdown().is_some() {
+            self.app.cancel_contact();
+            eprintln!("input source=evdev action=cancel reason=benchmark_shutdown");
+        }
+    }
+
+    pub(crate) fn poll(
+        &mut self,
+        input_reader: &mut EvdevReader,
+        conn: &RustConnection,
+        win: Window,
+    ) -> Result<bool> {
+        let decoded = match input_reader.drain() {
+            Ok(decoded) => decoded,
+            Err(error) => {
+                if error.cancel_contact() {
+                    self.app.cancel_contact();
+                    eprintln!("input source=evdev action=cancel reason=reader_failure");
+                }
+                return Err(error).context("native evdev input reader failed during benchmark");
+            }
+        };
+
+        for input in decoded {
+            match input {
+                DecodedInput::Pointer(event) => {
+                    eprintln!(
+                        "input source=evdev type={:?} detail={} physical_x={} physical_y={}",
+                        event.kind, event.detail, event.point.x, event.point.y
+                    );
+                    if self
+                        .app
+                        .handle_pointer(event)
+                        .activation()
+                        .is_some_and(dispatch_activation)
+                    {
+                        return Ok(true);
+                    }
+                }
+                DecodedInput::CancelContact => {
+                    self.app.cancel_contact();
+                    eprintln!("input source=evdev action=cancel reason=decoder_state");
+                }
+            }
+        }
+
         while let Some(event) = conn
             .poll_for_event()
-            .context("X11 connection failed while polling benchmark input")?
+            .context("X11 connection failed while polling benchmark lifecycle")?
         {
             match event {
                 Event::ButtonPress(event) if event.event == win => {
                     eprintln!("{}", format_pointer_event("ButtonPress", &event));
-                    if self.handle_pointer(PointerEventKind::Press, &event) {
-                        return Ok(true);
-                    }
+                    eprintln!("input source=x11 ignored=true reason=evdev_active");
                 }
                 Event::ButtonRelease(event) if event.event == win => {
                     eprintln!("{}", format_pointer_event("ButtonRelease", &event));
-                    if self.handle_pointer(PointerEventKind::Release, &event) {
-                        return Ok(true);
-                    }
+                    eprintln!("input source=x11 ignored=true reason=evdev_active");
                 }
                 Event::ConfigureNotify(event) if event.window == win => {
                     ensure_benchmark_geometry(self.app.size(), (event.width, event.height))?;
@@ -86,18 +131,6 @@ impl LocalExitPoll {
             }
         }
         Ok(false)
-    }
-
-    fn handle_pointer(&mut self, kind: PointerEventKind, event: &ButtonPressEvent) -> bool {
-        let outcome = self.app.handle_pointer(PointerEvent {
-            kind,
-            detail: event.detail,
-            point: PhysicalPoint {
-                x: event.event_x,
-                y: event.event_y,
-            },
-        });
-        outcome.activation().is_some_and(dispatch_activation)
     }
 }
 

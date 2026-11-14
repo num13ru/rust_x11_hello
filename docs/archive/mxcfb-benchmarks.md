@@ -2,42 +2,44 @@
 
 This document holds the maintained MXCFB benchmark method and latest compact
 result set. Dated trials, artifact hashes, failures, and earlier approaches are
-kept in [the device evidence archive](archive/mxcfb-device-evidence.md).
+kept in [the device evidence archive](mxcfb-device-evidence.md).
 
 ## Current result
 
-The latest results were recorded on 2026-10-26 on a Kindle Paperwhite 6
+The latest results were recorded on 2026-11-14 on a Kindle Paperwhite 6
 (Sangria / Bellatrix4), firmware 5.17.1.0.4, with a 1272 x 1624 update region.
 Each KUAL action performed one uncounted warmup followed by 12 serialized,
 alternating full-black and full-white measured updates.
 
 | Requested waveform | Kernel-timed throughput | p50 | p95 / max | 60 updates/s software budget |
 | --- | ---: | ---: | ---: | --- |
-| A2 | 9.006 updates/s | 106.337 ms | 121.368 ms | Not met |
-| DU4 | 6.836 updates/s | 144.166 ms | 153.626 ms | Not met |
-| DU | 6.707 updates/s | 151.797 ms | 158.576 ms | Not met |
-| GC16 | 3.718 updates/s | 271.397 ms | 275.620 ms | Not met |
+| A2 | 8.379 updates/s | 120.296 ms | 126.156 ms | Not met |
+| DU4 | 6.419 updates/s | 154.730 ms | 164.578 ms | Not met |
+| DU | 6.368 updates/s | 156.479 ms | 173.622 ms | Not met |
+| GC16 | 3.358 updates/s | 295.981 ms | 304.003 ms | Not met |
 
 Under these conditions, serialized full-screen 60 FPS is infeasible. A2 was
-the fastest tested request at approximately 9 completed updates/s. These are
+the fastest tested request at approximately 8.4 completed updates/s. These are
 kernel-timed completion results, not camera-verified visual FPS: completion
 markers do not establish when visible pigment stopped moving, pixel fidelity,
 or acceptable ghosting.
 
-Across the nine marker-specific launches in the cumulative device log, all 108
-measured samples completed. There were no missing or foreign-marker failures,
-immediate returns, timeout-range waits, or cleanup failures. Each run restored
-the 2,157,312-byte framebuffer snapshot and submitted a full-screen GC16
-cleanup refresh. The operator confirmed that the original screen visibly
-returned after every benchmark.
+Across the seven latest marker-specific launches, all 84 measured samples
+completed with process status 0. There were no missing or foreign-marker
+failures, immediate returns, timeout-range waits, or cleanup failures. Each run
+opened the capability-selected nonexclusive evdev reader, restored the
+2,157,312-byte framebuffer snapshot, and submitted a full-screen GC16 cleanup
+refresh. This run did not exercise benchmark-local Exit or signal shutdown.
 
 ## Dirty-region sweep
 
-The next tuning pass keeps the proven A2 marker-specific completion path but
-limits both framebuffer writes and submitted updates to centered 512 x 512,
-256 x 256, and 64 x 64 rectangles. These results must be reported with their
-region sizes and must not replace the full-screen baseline above. The KUAL
-actions are present, but no physical-device result has been recorded yet.
+The same 2026-11-14 run completed the centered A2 dirty-region actions:
+
+| Region | Kernel-timed throughput | p50 | p95 / max | 60 updates/s software budget |
+| --- | ---: | ---: | ---: | --- |
+| 64 x 64 | 8.835 updates/s | 112.526 ms | 117.404 ms | Not met |
+| 256 x 256 | 8.761 updates/s | 114.683 ms | 118.006 ms | Not met |
+| 512 x 512 | 8.729 updates/s | 113.757 ms | 119.241 ms | Not met |
 
 The measured region remains wholly inside the remote viewport. The local Exit
 strip is unchanged, while cleanup still restores the complete 2,157,312-byte

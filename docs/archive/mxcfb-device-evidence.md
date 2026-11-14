@@ -452,3 +452,23 @@ duplicate X11 dispatch, remote pointer forwarding, local Exit, and normal
 framebuffer restoration for this run. It does not establish viewport-edge
 accuracy, secondary-contact cancellation, descriptor-loss recovery, exclusive
 grab behavior, or X11-free screen ownership.
+
+## Native-input benchmark completion sweep (2026-11-14)
+
+The benchmark-local native-input build passed the full host suite, ARMv7 musl
+build, and static verification. Independent MTP readback matched the host
+artifact at SHA-256
+`1710d85c72a94a061635de09e69a7db2413adfb9587be876d5fff60d08573d60`.
+The operator then ran all seven KUAL benchmark actions.
+
+The retrieved device log records successful GC16, DU4, DU, full-viewport A2,
+and 64 x 64, 256 x 256, and 512 x 512 A2 launches. Every launch opened the
+capability-selected `/dev/input/event1` reader without `EVIOCGRAB`, completed
+all 12 measured samples, exited with status 0, and restored the 2,157,312-byte
+framebuffer snapshot. This establishes 84 of 84 normal-completion samples with
+native input initialized; the latest compact timings are in
+[`mxcfb-benchmarks.md`](mxcfb-benchmarks.md).
+
+No benchmark run logged an evdev pointer record or an early stop. This sweep
+therefore does not establish benchmark-local Exit, ignored X11 duplicates
+during a benchmark contact, or signal-stop cleanup.

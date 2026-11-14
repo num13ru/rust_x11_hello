@@ -29,8 +29,9 @@ steps an agent should follow, especially around physical-device work.
   It logs raw touchscreen records for protocol analysis and does not request
   `EVIOCGRAB`.
 - The four **Benchmark MXCFB** KUAL actions are bounded, local completion tests
-  for GC16, DU, A2, and DU4. They bypass PaperSpoon, retain X11 for local Exit,
-  and must not be described as visual FPS without camera/operator evidence.
+  for GC16, DU, A2, and DU4. They bypass PaperSpoon, use native evdev for local
+  Exit, retain X11 only for window ownership and lifecycle, and must not be
+  described as visual FPS without camera/operator evidence.
 - The **Benchmark A2 512px/256px/64px** actions use centered dirty regions to
   isolate update-area scaling. They retain full-framebuffer snapshot cleanup;
   do not compare them to full-screen throughput without stating region size.
@@ -43,7 +44,7 @@ steps an agent should follow, especially around physical-device work.
   not a destination for raw logs, per-sample benchmark dumps, or accumulating
   device-test history.
 - Maintain benchmark methodology and the latest compact result set in
-  `docs/mxcfb-benchmarks.md`. Put dated runs, checksums, failures, and historical
+  `docs/archive/mxcfb-benchmarks.md`. Put dated runs, checksums, failures, and historical
   device evidence in `docs/archive/mxcfb-device-evidence.md`.
 - Keep retrieved device logs and status snapshots local and uncommitted. Summarize
   only the evidence needed to support a claim in the appropriate documentation.

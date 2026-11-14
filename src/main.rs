@@ -21,7 +21,7 @@ use runtime::remote_viewport_size;
 use x11::X11DisplayBackend;
 use x11::display::{self as x11_display, MappedWindow, WindowMode};
 #[cfg(target_os = "linux")]
-use x11::events::LocalExitPoll;
+use x11::events::BenchmarkExitPoll;
 use x11::events::{EventLoopExit, event_loop};
 
 mod app;
@@ -240,15 +240,19 @@ fn run_mxcfb_benchmark() -> Result<()> {
             benchmark.dimensions(),
             size
         );
-        let mut local_exit = LocalExitPoll::new(size);
+        let mut input_reader = EvdevReader::open(size)?;
+        let mut benchmark_exit = BenchmarkExitPoll::new(size);
         let run_result = benchmark.run(|| {
             if BENCHMARK_SHUTDOWN_REQUESTED.load(Ordering::Relaxed) {
                 eprintln!("mxcfb benchmark graceful shutdown requested by signal");
                 Ok(true)
             } else {
-                local_exit.poll(&conn, win)
+                benchmark_exit.poll(&mut input_reader, &conn, win)
             }
         });
+        benchmark_exit.shutdown(&mut input_reader);
+        drop(input_reader);
+        let window_destroyed = benchmark_exit.window_destroyed();
         let restore_result = benchmark.restore_initial_screen();
         match (run_result, restore_result) {
             (Err(primary), Err(restore_error)) => {
@@ -259,7 +263,7 @@ fn run_mxcfb_benchmark() -> Result<()> {
             }
             (Err(primary), Ok(())) => Err(primary),
             (Ok(_), Err(restore_error)) => Err(restore_error),
-            (Ok(outcome), Ok(())) => Ok((outcome, local_exit.window_destroyed())),
+            (Ok(outcome), Ok(())) => Ok((outcome, window_destroyed)),
         }
     })();
 

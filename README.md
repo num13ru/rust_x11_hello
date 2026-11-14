@@ -136,7 +136,8 @@ KUAL provides normal run, explicit benchmark, and diagnostic actions:
   a five-minute watchdog, native evdev touch, and X11 retained for screen
   ownership and lifecycle events.
 - **Benchmark MXCFB GC16/DU/A2/DU4** — separate, explicit 12-frame local
-  completion benchmarks with a one-minute watchdog. They do not connect to
+  completion benchmarks with a one-minute watchdog. They use native evdev for
+  local Exit and retain X11 for ownership and lifecycle, but do not connect to
   PaperSpoon; DU, A2, and DU4 are experimental fidelity/ghosting tradeoffs.
 - **Benchmark A2 512px/256px/64px** — centered dirty-region completion tests
   for measuring how update area affects the fastest full-screen waveform.
@@ -222,7 +223,7 @@ completion. On the tested Paperwhite 6, none approached the 60 updates/s
 software budget; A2 was the fastest at about 9 updates/s. These are
 kernel-timed completion results, not camera-verified visual FPS.
 
-See [MXCFB benchmarks](docs/mxcfb-benchmarks.md) for the current results,
+See [MXCFB benchmarks](docs/archive/mxcfb-benchmarks.md) for the current results,
 methodology, commands, operating conditions, cleanup behavior, and waveform
 limitations.
 

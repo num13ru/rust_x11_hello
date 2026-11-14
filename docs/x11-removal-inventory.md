@@ -20,7 +20,7 @@ screen ownership works on the device.
 | Redraw and geometry events | `Expose` redraws retained content and local UI. `ConfigureNotify` updates `AppState`, announces a viewport change, and invalidates incompatible retained frames. | Fixed MXCFB geometry removes ordinary window resize handling. Startup and resume/reassertion must still restore retained content and local UI without asking PaperSpoon for a new frame. |
 | Termination | Local Exit now returns an explicit shutdown outcome; external `DestroyNotify` remains distinct. Display cleanup still precedes X11 window cleanup. | Native input and signals must feed the same explicit shutdown path, followed by input, networking, framebuffer restoration, and platform lifecycle cleanup in a defined order. |
 | X11 display path | `src/x11/backend.rs`, `framebuffer.rs`, and `render.rs` implement Mono1 conversion, X11 upload, and X11 local UI drawing. | Delete after the native path passes the required hardware checkpoint. The transport-independent cache and frame validation remain useful. |
-| MXCFB benchmark | `src/main.rs` maps an X11 window and `LocalExitPoll` supplies benchmark-local Exit and window lifecycle. | Reuse native input and explicit shutdown while preserving bounded samples, markers, waveform choices, and snapshot restoration. |
+| MXCFB benchmark | `src/main.rs` maps an X11 ownership window, uses the native evdev reader for benchmark-local Exit, and polls X11 only for fixed geometry and lifecycle. | Remove the remaining X11 lifecycle dependency while preserving bounded samples, markers, waveform choices, and snapshot restoration. |
 | Launcher and KUAL menu | `menu.json` exposes X11 and experimental MXCFB normal launches. The watchdog is backend-independent. | Keep the watchdog and one normal native launch; keep framebuffer diagnostics and explicit benchmarks. |
 | Diagnostics and analysis | New runtime traces use backend-neutral `input_received`; `scripts/analyze-latency.py` accepts historical `x11_received` traces as a fallback. | Preserve the compatibility fallback while native input adopts `input_received`; do not rewrite retained historical evidence. |
 | Documentation | `README.md` and `AGENTS.md` describe the hybrid architecture. Archived plans and evidence preserve historical X11 results. | Update current operator documentation at cutover; do not rewrite archived evidence. |
@@ -125,8 +125,10 @@ result is recorded in `docs/archive/mxcfb-device-evidence.md`.
 1. Complete the remaining native-input edge trials: viewport boundaries,
    secondary-contact cancellation, and descriptor failure. The primary touch,
    single-dispatch, and local Exit path has passed its first device trial.
-2. Migrate benchmark-local Exit from `LocalExitPoll` to the validated native
-   reader without changing benchmark timing, waveform, or restoration behavior.
+2. Optionally complete the deferred interrupted-benchmark trial. All seven
+   native-reader completion paths and restorations passed, but benchmark-local
+   Exit, ignored X11 duplicates during a contact, and signal stop remain
+   unverified on device.
 3. Design a separately bounded no-X11 ownership trial with signal cleanup and a
    documented operator recovery path. Do not combine its first device run with
    normal-launch cutover.
