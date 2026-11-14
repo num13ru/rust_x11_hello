@@ -490,3 +490,20 @@ restored, and the binary exited with status 0.
 This establishes framebuffer-derived startup geometry and mismatch-checked X11
 ownership for this run. It does not establish screen ownership without X11 or
 recovery after forced termination.
+
+## Graceful TERM cleanup (2026-11-14)
+
+The normal-runtime signal build passed the full host suite, ARMv7 musl build,
+and static verification. Independent MTP readback matched the host artifact at
+SHA-256
+`511e479fbb8d90361bc9839feb176248148c334ef1a33b00e1e2fd5b37f27b6e`.
+
+The operator ran **Test MXCFB TERM cleanup (15s)** and confirmed visible
+restoration and post-run Kindle usability. The retrieved log records the
+launcher sending `TERM` to PID 7440 at its 15-second deadline, PaperPad
+acknowledging graceful signal shutdown, restoration of the 2,157,312-byte
+snapshot, binary status 0, and watchdog end reason. No forced `KILL` was sent.
+
+This establishes normal MXCFB cleanup after launcher-forwarded `TERM` while the
+X11 ownership window remains. It does not establish cleanup after `SIGKILL`, a
+kernel hang, power loss, or a no-X11 run.

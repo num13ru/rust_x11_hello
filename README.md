@@ -135,6 +135,9 @@ KUAL provides normal run, explicit benchmark, and diagnostic actions:
 - **Run Paperpad MXCFB (5m, experimental)** — direct framebuffer display with
   a five-minute watchdog, native evdev touch, and X11 retained for screen
   ownership and lifecycle events.
+- **Test MXCFB TERM cleanup (15s)** — normal MXCFB runtime with a short
+  watchdog for verifying graceful `TERM`, framebuffer restoration, and clean
+  process exit; it is not a benchmark.
 - **Benchmark MXCFB GC16/DU/A2/DU4** — separate, explicit 12-frame local
   completion benchmarks with a one-minute watchdog. They use native evdev for
   local Exit and retain X11 for ownership and lifecycle, but do not connect to

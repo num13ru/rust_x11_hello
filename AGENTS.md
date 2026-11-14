@@ -20,6 +20,10 @@ steps an agent should follow, especially around physical-device work.
   the then-current X11 touch path, and local Exit;
   remaining visual and lifecycle checks are recorded in
   `docs/archive/mxcfb-device-evidence.md`.
+- **Test MXCFB TERM cleanup (15s)** runs the normal MXCFB path with a short
+  watchdog so the launcher's `TERM` forwarding, orderly framebuffer restore,
+  and process exit can be checked without waiting five minutes. It is not a
+  benchmark.
 - **Inspect framebuffer metadata** is a read-only KUAL diagnostic. It logs
   `/dev/fb0` metadata without using the normal launcher or drawing.
 - **Inspect input devices** is a read-only KUAL diagnostic. It logs evdev names,

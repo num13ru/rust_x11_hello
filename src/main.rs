@@ -37,7 +37,7 @@ mod ui;
 mod x11;
 
 #[cfg(target_os = "linux")]
-static BENCHMARK_SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
+static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 fn main() -> Result<()> {
     latency::init_from_env();
@@ -54,28 +54,28 @@ fn print_environment() {
 }
 
 #[cfg(target_os = "linux")]
-extern "C" fn request_benchmark_shutdown(_signal: libc::c_int) {
-    BENCHMARK_SHUTDOWN_REQUESTED.store(true, Ordering::Relaxed);
+extern "C" fn request_shutdown(_signal: libc::c_int) {
+    SHUTDOWN_REQUESTED.store(true, Ordering::Relaxed);
 }
 
 #[cfg(target_os = "linux")]
-fn install_benchmark_signal_handlers() -> Result<()> {
+fn install_signal_handlers() -> Result<()> {
     // SAFETY: zero is a valid initial representation before all fields used by
     // sigaction(2) are initialized below.
     let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
-    action.sa_sigaction = request_benchmark_shutdown as usize;
+    action.sa_sigaction = request_shutdown as usize;
     action.sa_flags = 0;
     // SAFETY: `action.sa_mask` is a valid writable sigset_t.
     if unsafe { libc::sigemptyset(&mut action.sa_mask) } != 0 {
-        return Err(io::Error::last_os_error()).context("initialize benchmark signal mask");
+        return Err(io::Error::last_os_error()).context("initialize PaperPad signal mask");
     }
     for signal in [libc::SIGHUP, libc::SIGINT, libc::SIGTERM] {
         // SAFETY: `action` remains valid for the call and the handler performs
         // only an atomic store. No previous disposition needs restoring because
-        // benchmark mode exits after this run.
+        // PaperPad exits after this run.
         if unsafe { libc::sigaction(signal, &action, std::ptr::null_mut()) } != 0 {
             return Err(io::Error::last_os_error())
-                .with_context(|| format!("install benchmark handler for signal {signal}"));
+                .with_context(|| format!("install PaperPad handler for signal {signal}"));
         }
     }
     Ok(())
@@ -104,6 +104,9 @@ fn run() -> Result<()> {
             )
         }
     }
+
+    #[cfg(target_os = "linux")]
+    install_signal_handlers()?;
 
     let display_kind = config::DisplayBackendKind::from_env()?;
     let framebuffer_size = match display_kind {
@@ -188,6 +191,7 @@ fn run() -> Result<()> {
         display_backend.as_mut(),
         &mut paperspoon,
         &mut input_reader,
+        || SHUTDOWN_REQUESTED.load(Ordering::Relaxed),
     );
     #[cfg(not(target_os = "linux"))]
     let event_result = event_loop(&conn, win, display_backend.as_mut(), &mut paperspoon);
@@ -235,7 +239,7 @@ fn run() -> Result<()> {
 #[cfg(target_os = "linux")]
 fn run_mxcfb_benchmark() -> Result<()> {
     let config = mxcfb::BenchmarkConfig::from_env()?;
-    install_benchmark_signal_handlers()?;
+    install_signal_handlers()?;
     let (conn, screen_num) = RustConnection::connect(None)
         .context("failed to connect to X11 display; check DISPLAY and /tmp/.X11-unix/X0")?;
     x11_display::print_screen_info(&conn, screen_num);
@@ -262,7 +266,7 @@ fn run_mxcfb_benchmark() -> Result<()> {
         let mut input_reader = EvdevReader::open(size)?;
         let mut benchmark_exit = BenchmarkExitPoll::new(size);
         let run_result = benchmark.run(|| {
-            if BENCHMARK_SHUTDOWN_REQUESTED.load(Ordering::Relaxed) {
+            if SHUTDOWN_REQUESTED.load(Ordering::Relaxed) {
                 eprintln!("mxcfb benchmark graceful shutdown requested by signal");
                 Ok(true)
             } else {

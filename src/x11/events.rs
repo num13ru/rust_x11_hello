@@ -196,10 +196,18 @@ pub(crate) fn event_loop(
     display: &mut dyn DisplayBackend,
     paperspoon: &mut Paperspoon,
     #[cfg(target_os = "linux")] input_reader: &mut EvdevReader,
+    #[cfg(target_os = "linux")] shutdown_requested: impl Fn() -> bool,
 ) -> Result<EventLoopExit> {
     let mut runtime = PaperpadRuntime::new(display.dimensions());
 
     loop {
+        #[cfg(target_os = "linux")]
+        if shutdown_requested() {
+            runtime.cancel_contact();
+            eprintln!("PaperPad graceful shutdown requested by signal");
+            return Ok(EventLoopExit::ShutdownRequested);
+        }
+
         runtime.service(display, paperspoon)?;
         #[cfg(target_os = "linux")]
         if service_native_input(&mut runtime, input_reader, paperspoon)?
