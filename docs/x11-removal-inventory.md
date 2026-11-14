@@ -1,10 +1,10 @@
 # X11 removal inventory and feasibility checkpoint
 
-Status: Phase 1 evidence review, 2026-11-13.
+Status: Phase 2 runtime extraction, 2026-11-14.
 
 This document records what the repository and existing Paperwhite 6 evidence
-establish before the X11 removal work changes runtime behavior. It is not a
-claim that native input or X11-free screen ownership works on the device.
+establish as the X11 removal work proceeds. It is not a claim that native input
+or X11-free screen ownership works on the device.
 
 ## Current dependency and responsibility inventory
 
@@ -15,13 +15,13 @@ claim that native input or X11-free screen ownership works on the device.
 | Backend selection | `src/config.rs` selects the default X11 backend or experimental MXCFB backend with `PAPERPAD_DISPLAY_BACKEND`. | Remove the selector after MXCFB-only startup is device-validated. |
 | Window ownership | `src/x11/display.rs` creates, maps, and destroys the full-screen window. In MXCFB mode it uses a backgroundless `InputOutput` window with no graphics context. | A verified, reversible native lifecycle must stop stock UI updates from racing PaperPad and restore normal Kindle operation on exit. This is unresolved. |
 | Input | `src/x11/display.rs` selects core pointer events. `src/x11/events.rs` converts primary `ButtonPress`/`ButtonRelease` coordinates to `PointerEvent`. | Discover the touchscreen evdev node by capabilities; validate axes and orientation; handle reports, cancellation, errors, and device loss; release any optional exclusive grab. |
-| Event loop | `src/x11/events.rs` combines X11 polling with transport polling, frame presentation, connection-indicator updates, display maintenance, application dispatch, and termination. | Move transport/display/application work to an X11-independent runtime before replacing the event source. |
+| Event loop | `src/x11/events.rs` polls and decodes X11 events, while `src/runtime.rs` owns transport polling, frame presentation, connection-indicator updates, display maintenance, application dispatch, and explicit shutdown requests. | Replace the remaining X11 polling/decoding boundary with native input while preserving runtime service cadence and cleanup order. |
 | Redraw and geometry events | `Expose` redraws retained content and local UI. `ConfigureNotify` updates `AppState`, announces a viewport change, and invalidates incompatible retained frames. | Fixed MXCFB geometry removes ordinary window resize handling. Startup and resume/reassertion must still restore retained content and local UI without asking PaperSpoon for a new frame. |
-| Termination | Local Exit destroys the X11 window; `DestroyNotify` is the successful event-loop outcome. X11 cleanup follows display cleanup. | Local Exit and signals need an explicit shutdown outcome, followed by input, networking, framebuffer restoration, and platform lifecycle cleanup in a defined order. |
+| Termination | Local Exit now returns an explicit shutdown outcome; external `DestroyNotify` remains distinct. Display cleanup still precedes X11 window cleanup. | Native input and signals must feed the same explicit shutdown path, followed by input, networking, framebuffer restoration, and platform lifecycle cleanup in a defined order. |
 | X11 display path | `src/x11/backend.rs`, `framebuffer.rs`, and `render.rs` implement Mono1 conversion, X11 upload, and X11 local UI drawing. | Delete after the native path passes the required hardware checkpoint. The transport-independent cache and frame validation remain useful. |
 | MXCFB benchmark | `src/main.rs` maps an X11 window and `LocalExitPoll` supplies benchmark-local Exit and window lifecycle. | Reuse native input and explicit shutdown while preserving bounded samples, markers, waveform choices, and snapshot restoration. |
 | Launcher and KUAL menu | `menu.json` exposes X11 and experimental MXCFB normal launches. The watchdog is backend-independent. | Keep the watchdog and one normal native launch; keep framebuffer diagnostics and explicit benchmarks. |
-| Diagnostics and analysis | Logs and `scripts/analyze-latency.py` use X11-specific event names such as `x11_received`. | Rename newly emitted latency stages without breaking interpretation of retained historical traces. |
+| Diagnostics and analysis | New runtime traces use backend-neutral `input_received`; `scripts/analyze-latency.py` accepts historical `x11_received` traces as a fallback. | Preserve the compatibility fallback while native input adopts `input_received`; do not rewrite retained historical evidence. |
 | Documentation | `README.md` and `AGENTS.md` describe the hybrid architecture. Archived plans and evidence preserve historical X11 results. | Update current operator documentation at cutover; do not rewrite archived evidence. |
 
 The package, binary, extension directory, and KUAL identifier still contain

@@ -86,6 +86,11 @@ def percentile(values: list[float], fraction: float) -> float:
     return ordered[index]
 
 
+def input_stage(events: dict[str, dict[str, Any]]) -> dict[str, Any] | None:
+    """Prefer backend-neutral traces while accepting historical X11 logs."""
+    return events.get("input_received") or events.get("x11_received")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Join latency traces and emit one CSV row per pointer event."
@@ -139,13 +144,13 @@ def main() -> int:
 
     ordered_keys = sorted(
         paperpad,
-        key=lambda key: int(paperpad[key].get("x11_received", {}).get("wall_us", 0)),
+        key=lambda key: int((input_stage(paperpad[key]) or {}).get("wall_us", 0)),
     )
     for key in ordered_keys:
         pp = paperpad[key]
         ps = paperspoon.get(key, {})
         hs = hammerspoon.get(key, {})
-        x11 = pp.get("x11_received")
+        input_received = input_stage(pp)
         queued = pp.get("pointer_queued")
         write_done = pp.get("socket_write_done")
         received = ps.get("pointer_received")
@@ -180,32 +185,32 @@ def main() -> int:
             ) / 2
 
         release_to_hammerspoon = None
-        if handler and x11 and clock_offset is not None:
+        if handler and input_received and clock_offset is not None:
             release_to_hammerspoon = int(handler["wall_us"]) - (
-                int(x11["wall_us"]) + clock_offset
+                int(input_received["wall_us"]) + clock_offset
             )
         release_to_dispatch_return = None
-        if dispatch_return and x11 and clock_offset is not None:
+        if dispatch_return and input_received and clock_offset is not None:
             release_to_dispatch_return = int(dispatch_return["wall_us"]) - (
-                int(x11["wall_us"]) + clock_offset
+                int(input_received["wall_us"]) + clock_offset
             )
         release_to_effect = None
-        if target_effect and x11 and clock_offset is not None:
+        if target_effect and input_received and clock_offset is not None:
             release_to_effect = int(target_effect["wall_us"]) - (
-                int(x11["wall_us"]) + clock_offset
+                int(input_received["wall_us"]) + clock_offset
             )
 
         contact_hold = None
         down_to_hammerspoon = None
         down_to_dispatch_return = None
         down_to_effect = None
-        if phase == "down" and x11:
-            last_down[key[0]] = (key, x11)
-        elif phase == "up" and x11:
+        if phase == "down" and input_received:
+            last_down[key[0]] = (key, input_received)
+        elif phase == "up" and input_received:
             down_entry = last_down.pop(key[0], None)
             if down_entry:
-                down_key, down_x11 = down_entry
-                contact_hold = mono_delta(x11, down_x11)
+                down_key, down_input = down_entry
+                contact_hold = mono_delta(input_received, down_input)
                 down_ps = paperspoon.get(down_key, {})
                 down_feedback = down_ps.get("feedback_frame_sent")
                 down_frame_id = (
@@ -231,26 +236,26 @@ def main() -> int:
                     ) / 2
                 if handler and down_offset is not None:
                     down_to_hammerspoon = int(handler["wall_us"]) - (
-                        int(down_x11["wall_us"]) + down_offset
+                        int(down_input["wall_us"]) + down_offset
                     )
                 if dispatch_return and down_offset is not None:
                     down_to_dispatch_return = int(dispatch_return["wall_us"]) - (
-                        int(down_x11["wall_us"]) + down_offset
+                        int(down_input["wall_us"]) + down_offset
                     )
                 if target_effect and down_offset is not None:
                     down_to_effect = int(target_effect["wall_us"]) - (
-                        int(down_x11["wall_us"]) + down_offset
+                        int(down_input["wall_us"]) + down_offset
                     )
 
         metrics: dict[str, float | int | None] = {
-            "input_to_queue_us": mono_delta(queued, x11),
+            "input_to_queue_us": mono_delta(queued, input_received),
             "queue_to_write_us": mono_delta(write_done, queued),
             "paperspoon_process_us": mono_delta(processed, received),
             "feedback_server_us": server_turnaround,
             "transport_rtt_us": transport_rtt,
             "symmetric_one_way_us": one_way,
             "clock_offset_us": clock_offset,
-            "visual_submit_roundtrip_us": mono_delta(frame_present, x11),
+            "visual_submit_roundtrip_us": mono_delta(frame_present, input_received),
             "frame_present_duration_us": mono_delta(frame_present, frame_present_start),
             "release_to_invoke_us": mono_delta(invoke_start, received),
             "open_duration_us": mono_delta(invoke_return, invoke_start),

@@ -15,11 +15,12 @@ use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use x11rb::rust_connection::RustConnection;
 
+use runtime::remote_viewport_size;
 use x11::X11DisplayBackend;
 use x11::display::{self as x11_display, MappedWindow, WindowMode};
 #[cfg(target_os = "linux")]
 use x11::events::LocalExitPoll;
-use x11::events::{EventLoopExit, event_loop, remote_viewport_size};
+use x11::events::{EventLoopExit, event_loop};
 
 mod app;
 mod config;
@@ -29,6 +30,7 @@ mod input;
 mod latency;
 mod mxcfb;
 mod net;
+mod runtime;
 mod ui;
 mod x11;
 
@@ -149,10 +151,7 @@ fn run() -> Result<()> {
     let display_cleanup_result = display_backend.shutdown();
     drop(display_backend);
 
-    let destroy_window = match &event_result {
-        Ok(EventLoopExit::WindowDestroyed) => false,
-        Err(_) => true,
-    };
+    let destroy_window = !matches!(&event_result, Ok(EventLoopExit::WindowDestroyed));
     let cleanup_result = x11_display::cleanup(&conn, mapped, destroy_window);
 
     match event_result {

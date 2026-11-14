@@ -392,3 +392,16 @@ reconnect, and Exit-strip isolation were not reported, so those details are not
 claimed as independently evidenced by this entry. Host tests cover contain
 scaling, white letterboxing, malformed and missing files, retained-pixel
 reconnects, and connection/viewport races.
+
+## Phase 2 runtime extraction smoke verification (2026-11-14)
+
+The Phase 2 PaperPad build was deployed to the Paperwhite 6 after host checks,
+ARMv7 musl build, and static verification passed. Independent MTP readback
+matched the host artifact at SHA-256
+`34b4f8330d9f135e632ad790d30141c430376f72ff063a7270927f42f58491ff`.
+The operator subsequently reported the build verified on device.
+
+No detailed device checklist or new runtime logs accompanied that report, so
+this entry records smoke acceptance only. It does not establish native evdev
+input or X11-free screen ownership; this intermediate build still uses X11 for
+event delivery and window lifecycle.

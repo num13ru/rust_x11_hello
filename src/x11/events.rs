@@ -1,25 +1,27 @@
-//! Event loop and raw X11 event diagnostics.
+//! X11 event polling, decoding, and raw event diagnostics.
 //!
 //! This is the boundary layer: it translates `x11rb::protocol::Event` into
 //! [`crate::ui::button::PointerEvent`]. Rendering is delegated to the sibling
 //! adapter, and the UI layer never sees X11 types.
 
-use crate::app::{Activation, AppState, GeometryUpdate, Redraw, RemotePointerEvent};
-use crate::display::{DisplayBackend, RedrawCause, RemoteFrame};
+#[cfg(target_os = "linux")]
+use crate::app::{Activation, AppState};
+use crate::display::{DisplayBackend, RedrawCause};
 use crate::latency;
 use crate::net::Paperspoon;
+use crate::runtime::{GeometryOutcome, PaperpadRuntime, RuntimeControl, RuntimePointerInput};
 use crate::ui::button::{PointerEvent, PointerEventKind};
-use crate::ui::screen::{PhysicalPoint, ScreenLayout};
+use crate::ui::screen::PhysicalPoint;
 use anyhow::{Context, Result, anyhow};
-use paper_protocol::V2PointerPhase;
 use std::time::Duration;
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
-use x11rb::protocol::xproto::{ButtonPressEvent, ConnectionExt, Window};
+use x11rb::protocol::xproto::{ButtonPressEvent, Window};
 use x11rb::rust_connection::RustConnection;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EventLoopExit {
+    ShutdownRequested,
     WindowDestroyed,
 }
 
@@ -107,59 +109,18 @@ fn ensure_benchmark_geometry(expected: (u16, u16), reported: (u16, u16)) -> Resu
 
 const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
-/// Run the event loop until the window is destroyed or the connection fails.
+/// Poll X11 until the runtime requests shutdown, the window is destroyed, or
+/// event processing fails.
 pub(crate) fn event_loop(
     conn: &RustConnection,
     win: Window,
     display: &mut dyn DisplayBackend,
     paperspoon: &mut Paperspoon,
 ) -> Result<EventLoopExit> {
-    let mut app = AppState::new(display.dimensions());
-    let mut displayed_connection = None;
+    let mut runtime = PaperpadRuntime::new(display.dimensions());
 
     loop {
-        let connected = paperspoon.is_connected();
-        if connection_indicator_changed(&mut displayed_connection, connected) {
-            display
-                .draw_system_ui(connected)
-                .context("failed to draw connection state")?;
-            eprintln!("ui connection indicator connected={connected}");
-        }
-        if let Some(frame) = paperspoon.poll_frame() {
-            match RemoteFrame::new(
-                frame.frame_id(),
-                frame.width(),
-                frame.height(),
-                frame.pixel_format(),
-                frame.stride(),
-                frame.pixels(),
-                frame.receive_decode_us(),
-            ) {
-                Ok(frame) => {
-                    let frame_id = frame.frame_id();
-                    latency::record(
-                        "frame_present_start",
-                        None,
-                        &format!(",\"frame_id\":{frame_id}"),
-                    );
-                    display.display_remote_frame(frame);
-                    latency::record(
-                        "frame_present_return",
-                        None,
-                        &format!(",\"frame_id\":{frame_id}"),
-                    );
-                }
-                Err(error) => eprintln!(
-                    "frame validation error id={} width={} height={}: {error}",
-                    frame.frame_id(),
-                    frame.width(),
-                    frame.height()
-                ),
-            }
-        }
-        display
-            .maintain()
-            .context("failed to maintain display backend")?;
+        runtime.service(display, paperspoon)?;
         let Some(event) = conn
             .poll_for_event()
             .context("X11 connection failed while waiting for an event")?
@@ -170,43 +131,29 @@ pub(crate) fn event_loop(
 
         match event {
             Event::Expose(event) if event.window == win && event.count == 0 => {
-                draw_surface(display, app.redraw(), RedrawCause::SurfaceDamage, connected)
+                runtime
+                    .redraw_surface(
+                        display,
+                        RedrawCause::SurfaceDamage,
+                        paperspoon.is_connected(),
+                    )
                     .context("failed to redraw final Expose batch")?;
             }
             Event::Expose(_) => {}
             Event::ConfigureNotify(event) if event.window == win => {
-                match app.update_geometry((event.width, event.height)) {
-                    GeometryUpdate::IgnoredZero => {
+                match runtime.update_geometry((event.width, event.height), display, paperspoon)? {
+                    GeometryOutcome::IgnoredZero => {
                         eprintln!(
                             "event type=ConfigureNotify ignored=zero_geometry width={} height={}",
                             event.width, event.height
                         );
                     }
-                    GeometryUpdate::Unchanged => {}
-                    GeometryUpdate::Redraw(redraw) => {
-                        let (width, height) = redraw.size();
-                        let viewport = remote_viewport_size((width, height));
-                        if let Err(error) = paperspoon.send_viewport_changed(viewport) {
-                            eprintln!("transport error sending viewport change: {error:#}");
-                        }
-                        if let Some(frame) = display.set_dimensions((width, height))? {
-                            eprintln!(
-                                "frame cache invalidated id={} width={} height={} format={:?} stride={} viewport_width={} viewport_height={}",
-                                frame.frame_id(),
-                                frame.dimensions().0,
-                                frame.dimensions().1,
-                                frame.pixel_format(),
-                                frame.stride(),
-                                viewport.0,
-                                viewport.1
-                            );
-                        }
+                    GeometryOutcome::Unchanged => {}
+                    GeometryOutcome::Redrawn => {
                         eprintln!(
-                            "event type=ConfigureNotify x={} y={} width={width} height={height} window=0x{:x}",
-                            event.x, event.y, event.window
+                            "event type=ConfigureNotify x={} y={} width={} height={} window=0x{:x}",
+                            event.x, event.y, event.width, event.height, event.window
                         );
-                        draw_surface(display, redraw, RedrawCause::GeometryChange, connected)
-                            .context("failed to redraw after ConfigureNotify")?;
                     }
                 }
             }
@@ -214,70 +161,46 @@ pub(crate) fn event_loop(
             Event::ButtonPress(event) if event.event == win => {
                 let input_stamp = latency::stamp();
                 eprintln!("{}", format_pointer_event("ButtonPress", &event));
-                let outcome = app.handle_pointer(PointerEvent {
-                    kind: PointerEventKind::Press,
-                    detail: event.detail,
-                    point: PhysicalPoint {
-                        x: event.event_x,
-                        y: event.event_y,
-                    },
-                });
-                if let Some(pointer) = outcome.remote() {
-                    let trace = latency::new_trace(input_stamp);
-                    latency::record_at(
+                let control = runtime.handle_pointer(
+                    RuntimePointerInput::new(
+                        PointerEvent {
+                            kind: PointerEventKind::Press,
+                            detail: event.detail,
+                            point: PhysicalPoint {
+                                x: event.event_x,
+                                y: event.event_y,
+                            },
+                        },
                         input_stamp,
-                        "x11_received",
-                        Some(trace),
-                        &format!(
-                            ",\"x11_phase\":\"down\",\"x11_time\":{},\"event_x\":{},\"event_y\":{}",
-                            event.time, event.event_x, event.event_y
-                        ),
-                    );
-                    forward_remote_pointer(pointer, paperspoon, trace);
-                }
-                let Some(activation) = outcome.activation() else {
-                    continue;
-                };
-                if dispatch_activation(activation) {
-                    conn.destroy_window(win)
-                        .context("failed to destroy window after exit")?
-                        .check()
-                        .context("X11 server rejected destroy-window")?;
+                        Some(u64::from(event.time)),
+                    ),
+                    paperspoon,
+                );
+                if control == RuntimeControl::ShutdownRequested {
+                    return Ok(EventLoopExit::ShutdownRequested);
                 }
             }
             Event::ButtonPress(_) => {}
             Event::ButtonRelease(event) if event.event == win => {
                 let input_stamp = latency::stamp();
                 eprintln!("{}", format_pointer_event("ButtonRelease", &event));
-                let outcome = app.handle_pointer(PointerEvent {
-                    kind: PointerEventKind::Release,
-                    detail: event.detail,
-                    point: PhysicalPoint {
-                        x: event.event_x,
-                        y: event.event_y,
-                    },
-                });
-                if let Some(pointer) = outcome.remote() {
-                    let trace = latency::new_trace(input_stamp);
-                    latency::record_at(
+                let control = runtime.handle_pointer(
+                    RuntimePointerInput::new(
+                        PointerEvent {
+                            kind: PointerEventKind::Release,
+                            detail: event.detail,
+                            point: PhysicalPoint {
+                                x: event.event_x,
+                                y: event.event_y,
+                            },
+                        },
                         input_stamp,
-                        "x11_received",
-                        Some(trace),
-                        &format!(
-                            ",\"x11_phase\":\"up\",\"x11_time\":{},\"event_x\":{},\"event_y\":{}",
-                            event.time, event.event_x, event.event_y
-                        ),
-                    );
-                    forward_remote_pointer(pointer, paperspoon, trace);
-                }
-                let Some(activation) = outcome.activation() else {
-                    continue;
-                };
-                if dispatch_activation(activation) {
-                    conn.destroy_window(win)
-                        .context("failed to destroy window after exit")?
-                        .check()
-                        .context("X11 server rejected destroy-window")?;
+                        Some(u64::from(event.time)),
+                    ),
+                    paperspoon,
+                );
+                if control == RuntimeControl::ShutdownRequested {
+                    return Ok(EventLoopExit::ShutdownRequested);
                 }
             }
             Event::ButtonRelease(_) => {}
@@ -290,7 +213,7 @@ pub(crate) fn event_loop(
             }
             Event::MapNotify(_) => {}
             Event::UnmapNotify(event) if event.window == win => {
-                app.cancel_contact();
+                runtime.cancel_contact();
                 eprintln!("event type=UnmapNotify window=0x{:x}", event.window);
             }
             Event::UnmapNotify(_) => {}
@@ -306,32 +229,6 @@ pub(crate) fn event_loop(
             _ => eprintln!("event type=Other"),
         }
     }
-}
-
-fn connection_indicator_changed(displayed: &mut Option<bool>, connected: bool) -> bool {
-    if *displayed == Some(connected) {
-        return false;
-    }
-    *displayed = Some(connected);
-    true
-}
-
-pub(crate) fn remote_viewport_size(physical_size: (u16, u16)) -> (u16, u16) {
-    ScreenLayout::new(physical_size.0, physical_size.1)
-        .map(|layout| (layout.remote_viewport.width, layout.remote_viewport.height))
-        .unwrap_or((0, 0))
-}
-
-fn draw_surface(
-    display: &mut dyn DisplayBackend,
-    redraw: Redraw,
-    cause: RedrawCause,
-    connected: bool,
-) -> Result<()> {
-    debug_assert_eq!(display.dimensions(), redraw.size());
-    display.draw_system_ui(connected)?;
-    display.redraw_cached_frame(cause);
-    Ok(())
 }
 
 /// One-line raw diagnostic for a press or release event.
@@ -353,6 +250,7 @@ pub fn format_pointer_event(event_type: &str, event: &ButtonPressEvent) -> Strin
 }
 
 /// Log the local system activation and request window teardown.
+#[cfg(target_os = "linux")]
 fn dispatch_activation(activation: Activation) -> bool {
     match activation {
         Activation::Exit => {
@@ -362,60 +260,6 @@ fn dispatch_activation(activation: Activation) -> bool {
     }
 }
 
-fn forward_remote_pointer(
-    pointer: RemotePointerEvent,
-    paperspoon: &mut Paperspoon,
-    trace: paper_protocol::V2PointerTrace,
-) {
-    let phase = match pointer.kind() {
-        PointerEventKind::Press => V2PointerPhase::Down,
-        PointerEventKind::Release => V2PointerPhase::Up,
-    };
-    let point = pointer.point();
-    // Capture this before handing the message to the writer thread. The writer
-    // can consume a successful try_send before this thread resumes, so taking
-    // the stamp afterward would make the measured queue delay negative.
-    let queued = latency::stamp();
-    if let Err(error) = paperspoon.send_traced_pointer(phase, point.x, point.y, trace) {
-        latency::record(
-            "pointer_queue_error",
-            Some(trace),
-            &format!(
-                ",\"phase\":\"{}\",\"x\":{},\"y\":{}",
-                phase_label(phase),
-                point.x,
-                point.y
-            ),
-        );
-        eprintln!(
-            "pointer transport error phase={phase:?} x={} y={}: {error:#}",
-            point.x, point.y
-        );
-    } else {
-        latency::record_at(
-            queued,
-            "pointer_queued",
-            Some(trace),
-            &format!(
-                ",\"phase\":\"{}\",\"x\":{},\"y\":{}",
-                phase_label(phase),
-                point.x,
-                point.y
-            ),
-        );
-        eprintln!(
-            "remote pointer queued phase={phase:?} x={} y={}",
-            point.x, point.y
-        );
-    }
-}
-
-fn phase_label(phase: V2PointerPhase) -> &'static str {
-    match phase {
-        V2PointerPhase::Down => "down",
-        V2PointerPhase::Up => "up",
-    }
-}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -443,22 +287,5 @@ mod tests {
             format_pointer_event("ButtonRelease", &event),
             "input type=ButtonRelease detail=3 event_x=-1 event_y=360 root_x=79 root_y=480 time=123456 window=0x2600001 root=0x50d child=0x0 state=0x0101 same_screen=true"
         );
-    }
-
-    #[test]
-    fn connection_indicator_redraws_initially_and_only_on_transitions() {
-        let mut displayed = None;
-        assert!(connection_indicator_changed(&mut displayed, false));
-        assert!(!connection_indicator_changed(&mut displayed, false));
-        assert!(connection_indicator_changed(&mut displayed, true));
-        assert!(!connection_indicator_changed(&mut displayed, true));
-        assert!(connection_indicator_changed(&mut displayed, false));
-    }
-
-    #[test]
-    fn remote_viewport_size_excludes_local_system_ui() {
-        assert_eq!(remote_viewport_size((1272, 1696)), (1272, 1624));
-        assert_eq!(remote_viewport_size((100, 40)), (100, 0));
-        assert_eq!(remote_viewport_size((0, 40)), (0, 0));
     }
 }

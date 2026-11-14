@@ -5,13 +5,13 @@
 //! connection for the run. Protocol-v2 pointer phases use one bounded writer
 //! queue so their byte ordering is deterministic. A reader thread
 //! consumes inbound protocol-v2 Frame messages,
-//! publishing the latest of each into mailboxes the X11 event loop drains
+//! publishing the latest of each into mailboxes the PaperPad runtime drains
 //! between events and on a bounded idle poll interval. Frames are validated
 //! against the current remote viewport but are not rendered yet.
 //!
 //! If startup fails, the background worker retries resolution and connection.
 //! If an established connection drops, the reconnector retries the same
-//! endpoint. Neither path blocks or breaks the X11 event loop.
+//! endpoint. Neither path blocks or breaks the PaperPad runtime loop.
 
 use paper_protocol::{
     V2_HEADER_LEN, V2DecodeResult, V2Hello, V2MessageType, V2Payload, V2PixelFormat,
@@ -184,7 +184,7 @@ impl FrameMailbox {
 }
 
 /// A persistent outbound connection to PaperSpoon with an inbound message
-/// queue drained by the X11 event loop.
+/// queue drained by the PaperPad runtime.
 pub struct Paperspoon {
     /// Shared with the reconnector thread; owns the active socket.
     connection: Arc<Mutex<ConnectionState>>,
