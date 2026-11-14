@@ -74,30 +74,34 @@ adapter, not in `paper-protocol` or MXCFB.
 Prerequisites:
 
 - Kindle unlocked with USB accessory access allowed; `mtp-rs devices` lists it.
-- Binary built and verified first: `make check && make build && make verify`.
-- App stopped: in-window **Exit** used or watchdog ended the run, and window
-  confirmed gone.
-  MTP cannot prove process state; `--confirm-stopped` is an operator assertion.
+- PaperPad-affecting changes built and verified first:
+  `make check && make build && make verify`.
 
 ### Agent deployment authorization
 
-When the user explicitly asks to deploy and exactly one accessible Kindle is
-connected, do not ask for a separate stopped-process or backup-replacement
-confirmation. Treat that deploy request as the operator's assertion that
-PaperPad is stopped and as authorization to:
+After making and verifying changes, classify their deployment scope:
 
-- pass `update --confirm-stopped` when the canonical extension already exists;
-- remove only
-  `/extensions/rust_x11_hello/bin/rust_x11_hello.previous` when that retained
-  backup blocks the requested update; and
-- replace it with the newly retained pre-update binary through the normal
-  verified deployment workflow.
+- PaperSpoon-only changes under `tools/paperspoon/` do not require Kindle
+  deployment.
+- PaperPad changes under `src/`, changes to shared protocol code used by the
+  PaperPad binary, or changes under `kindle-extension/rust_x11_hello/` require
+  automatic deployment when exactly one Kindle is accessible.
+- Mixed PaperPad and PaperSpoon changes follow the PaperPad rule.
 
-Still resolve install versus update with read-only MTP checks, run the required
-build verification, use the canonical deploy script, and verify the deployed
-binary by independent readback. Do not deploy without an explicit user request.
-Ask for direction only when no Kindle is accessible, more than one target is
-ambiguous, or a materially different destructive action would be required.
+Do not ask whether to deploy and do not require a separate stopped-process or
+backup-replacement confirmation. A single accessible Kindle is standing
+authorization to resolve install versus update, remove only
+`/extensions/rust_x11_hello/bin/rust_x11_hello.previous` when it blocks the
+update, and run the normal verified deployment workflow.
+
+Before transferring, use read-only MTP checks and an independent readback to
+compare the built host binary's SHA-256 with the deployed binary. Skip transfer
+when the hashes match and no extension support file changed. After transferring,
+independently read back the deployed binary and require its SHA-256 to match the
+host artifact. Keep the required build verification and use the canonical deploy
+script. If no Kindle is accessible, report that deployment could not run. Ask
+for direction only when multiple targets are ambiguous or a materially different
+destructive action would be required.
 
 Fresh install (only when `/extensions/rust_x11_hello` does not exist):
 
@@ -108,7 +112,7 @@ scripts/deploy-kindle-mtp.sh install
 Update (replaces existing binary, retains a verified `rust_x11_hello.previous`):
 
 ```sh
-scripts/deploy-kindle-mtp.sh update --confirm-stopped
+scripts/deploy-kindle-mtp.sh update
 ```
 
 Rules the deploy script enforces:

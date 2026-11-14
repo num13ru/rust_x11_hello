@@ -110,15 +110,15 @@ For a fresh install, after confirming the canonical extension does not exist:
 scripts/deploy-kindle-mtp.sh install
 ```
 
-For an update, first stop PaperPad with its in-window **Exit** button or let the
-watchdog finish, confirm the window is gone, then run:
+For an update, run:
 
 ```sh
-scripts/deploy-kindle-mtp.sh update --confirm-stopped
+scripts/deploy-kindle-mtp.sh update
 ```
 
-MTP cannot inspect running processes; `--confirm-stopped` is the operator's
-assertion. The update keeps the previous verified binary as
+When practical, stop PaperPad with its in-window **Exit** button or let the
+watchdog finish before updating; MTP cannot inspect running processes. The
+update keeps the previous verified binary as
 `bin/rust_x11_hello.previous` and refuses to overwrite an existing backup. To
 clear that backup explicitly before a later retry:
 
