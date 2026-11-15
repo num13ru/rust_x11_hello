@@ -26,7 +26,7 @@ mod input;
 mod latency;
 mod mxcfb;
 #[cfg(target_os = "linux")]
-mod native_trial;
+mod native_runtime;
 mod net;
 mod runtime;
 mod ui;
@@ -93,18 +93,9 @@ fn run() -> Result<()> {
         (Some(arg), None) if arg == "--benchmark-mxcfb" => {
             return run_mxcfb_benchmark();
         }
-        (Some(arg), None) if arg == "--trial-mxcfb-no-x11" => {
-            return run_mxcfb_no_x11_trial();
-        }
-        (Some(arg), None) if arg == "--trial-mxcfb-grab-no-x11" => {
-            return run_mxcfb_grab_no_x11_trial();
-        }
-        (Some(arg), None) if arg == "--trial-connected-no-x11" => {
-            return run_connected_no_x11_trial();
-        }
         _ => {
             bail!(
-                "usage: rust_x11_hello [--inspect-framebuffer|--inspect-input|--trace-input|--benchmark-mxcfb|--trial-mxcfb-no-x11|--trial-mxcfb-grab-no-x11|--trial-connected-no-x11]"
+                "usage: rust_x11_hello [--inspect-framebuffer|--inspect-input|--trace-input|--benchmark-mxcfb]"
             )
         }
     }
@@ -114,7 +105,7 @@ fn run() -> Result<()> {
 
     #[cfg(target_os = "linux")]
     {
-        native_trial::run_normal(|| SHUTDOWN_REQUESTED.load(Ordering::Relaxed))
+        native_runtime::run(|| SHUTDOWN_REQUESTED.load(Ordering::Relaxed))
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -168,39 +159,6 @@ fn run_mxcfb_benchmark() -> Result<()> {
             Ok(())
         }
     }
-}
-
-#[cfg(target_os = "linux")]
-fn run_mxcfb_no_x11_trial() -> Result<()> {
-    install_signal_handlers()?;
-    native_trial::run(|| SHUTDOWN_REQUESTED.load(Ordering::Relaxed))
-}
-
-#[cfg(target_os = "linux")]
-fn run_mxcfb_grab_no_x11_trial() -> Result<()> {
-    install_signal_handlers()?;
-    native_trial::run_exclusive(|| SHUTDOWN_REQUESTED.load(Ordering::Relaxed))
-}
-
-#[cfg(target_os = "linux")]
-fn run_connected_no_x11_trial() -> Result<()> {
-    install_signal_handlers()?;
-    native_trial::run_connected(|| SHUTDOWN_REQUESTED.load(Ordering::Relaxed))
-}
-
-#[cfg(not(target_os = "linux"))]
-fn run_mxcfb_no_x11_trial() -> Result<()> {
-    bail!("no-X11 MXCFB ownership trial requires Linux and /dev/fb0")
-}
-
-#[cfg(not(target_os = "linux"))]
-fn run_mxcfb_grab_no_x11_trial() -> Result<()> {
-    bail!("no-X11 MXCFB exclusive-input trial requires Linux and /dev/fb0")
-}
-
-#[cfg(not(target_os = "linux"))]
-fn run_connected_no_x11_trial() -> Result<()> {
-    bail!("connected no-X11 trial requires Linux and /dev/fb0")
 }
 
 #[cfg(not(target_os = "linux"))]

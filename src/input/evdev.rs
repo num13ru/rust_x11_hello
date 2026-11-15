@@ -264,9 +264,9 @@ impl TypeBDecoder {
 
 /// Nonblocking owner of the capability-selected Type-B touchscreen.
 ///
-/// Normal readers remain nonexclusive. The separately bounded no-X11 input
-/// trial may request `EVIOCGRAB`; its caller must release the grab during
-/// orderly cleanup. Closing the descriptor remains the kernel fallback.
+/// Benchmark readers remain nonexclusive. The normal runtime requests
+/// `EVIOCGRAB`; its caller must release the grab during orderly cleanup.
+/// Closing the descriptor remains the kernel fallback.
 /// Callers must process every returned decoder outcome in order and honor
 /// `EvdevReadError::cancel_contact` before handling or reporting a terminal
 /// read failure.
@@ -286,7 +286,7 @@ impl EvdevReader {
         Self::open_with_grab(screen_size, false)
     }
 
-    pub(crate) fn open_exclusive_trial(screen_size: (u16, u16)) -> Result<Self> {
+    pub(crate) fn open_exclusive(screen_size: (u16, u16)) -> Result<Self> {
         Self::open_with_grab(screen_size, true)
     }
 

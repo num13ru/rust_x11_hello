@@ -136,20 +136,6 @@ KUAL provides normal run, explicit benchmark, and diagnostic actions:
 - **Test MXCFB TERM cleanup (15s)** — normal MXCFB runtime with a short
   watchdog for verifying graceful `TERM`, framebuffer restoration, and clean
   process exit; it is not a benchmark.
-- **Trial MXCFB without X11 (15s)** — bounded, transport-free ownership trial
-  using MXCFB and native evdev without opening X11. It restores automatically
-  after 15 seconds; a 30-second launcher watchdog remains as fallback.
-- **Trial exclusive input without X11 (15s)** — bounded, transport-free
-  `EVIOCGRAB` trial for checking that touches do not reach the underlying
-  Kindle UI and that exclusive input is released on local Exit or timeout.
-  Normal and benchmark runs remain nonexclusive.
-- **Trial connected runtime without X11 (60s)** — opt-in checkpoint using the
-  real PaperSpoon transport, MXCFB display, and exclusive native input without
-  opening X11. It has a 60-second internal deadline and 90-second launcher
-  watchdog; normal launch remains unchanged.
-- **Test connected no-X11 TERM cleanup (15s)** — the same connected trial with
-  a short watchdog to verify signal-driven exclusive-input release,
-  framebuffer restoration, and clean exit before watchdog escalation.
 - **Benchmark MXCFB GC16/DU/A2/DU4** — separate, explicit 12-frame local
   completion benchmarks with a one-minute watchdog. They use native evdev for
   local Exit, derive geometry from `/dev/fb0`, and open no X11 or PaperSpoon
@@ -163,8 +149,8 @@ KUAL provides normal run, explicit benchmark, and diagnostic actions:
 - **Trace input events (15s; tap)** — bounded raw evdev record capture for
   controlled touch diagnostics; it does not request an exclusive grab.
 
-The full-screen window covers KUAL. Stop it with PaperPad's **Exit** button or
-wait for the watchdog. The launcher serializes runs and escalates from `TERM`
+PaperPad's direct framebuffer view covers KUAL. Stop it with the **Exit** button
+or wait for the watchdog. The launcher serializes runs and escalates from `TERM`
 to `KILL` only after revalidating the recorded PaperPad process.
 
 ## Connection configuration

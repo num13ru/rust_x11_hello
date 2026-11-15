@@ -21,31 +21,6 @@ steps an agent should follow, especially around physical-device work.
   short watchdog so the launcher's `TERM` forwarding, exclusive-input release,
   orderly framebuffer restore, and process exit can be checked without waiting
   five minutes. It is not a benchmark.
-- **Trial MXCFB without X11 (15s)** is an opt-in, transport-free ownership
-  experiment. It opens no X11 connection, uses native evdev for local Exit,
-  stops itself after 15 seconds, and has a 30-second launcher watchdog. Normal
-  launch behavior is unchanged. If cleanup does not visibly restore the stock
-  UI, wait for the watchdog, then use sleep/wake to request a stock UI redraw;
-  restart the Kindle only if that recovery fails. This recovery sequence still
-  requires device evidence.
-- **Trial exclusive input without X11 (15s)** is a separate opt-in input-
-  ownership experiment. It requests `EVIOCGRAB`, performs no transport, and
-  retains the same local Exit, internal deadline, framebuffer restoration, and
-  30-second launcher watchdog. Normal and benchmark readers remain
-  nonexclusive. During the trial, tap the blank remote area before using local
-  Exit; after restoration, confirm that the underlying Kindle UI did not react
-  and that normal Kindle touch works again. If it does not, wait for the
-  watchdog before using sleep/wake and then restart only as a last resort.
-- **Trial connected runtime without X11 (60s)** is the next opt-in checkpoint.
-  It uses the real PaperSpoon transport, MXCFB display, and exclusive native
-  input without opening X11. It stops itself after 60 seconds and has a
-  90-second launcher watchdog. PaperSpoon must be reachable for connected
-  rendering and remote-touch claims; otherwise the run proves only the
-  disconnected path. Normal launch behavior remains unchanged.
-- **Test connected no-X11 TERM cleanup (15s)** runs that same connected trial
-  with a watchdog shorter than its internal deadline. The launcher must send
-  `TERM`; PaperPad must release `EVIOCGRAB`, restore the framebuffer, and exit
-  before escalation. It is a lifecycle test, not a benchmark.
 - **Inspect framebuffer metadata** is a read-only KUAL diagnostic. It logs
   `/dev/fb0` metadata without using the normal launcher or drawing.
 - **Inspect input devices** is a read-only KUAL diagnostic. It logs evdev names,

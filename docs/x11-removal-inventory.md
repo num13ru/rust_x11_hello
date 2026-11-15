@@ -1,8 +1,8 @@
 # X11 removal inventory and feasibility checkpoint
 
-Status: Phase 6 X11 source/dependency deletion complete; host checks, ARM
-verification, and deployment readback passed; runtime validation of the
-deployed artifact is pending, 2026-11-15.
+Status: Phase 6 X11 source/dependency deletion complete and obsolete cutover
+trials retired; host checks, ARM verification, and deployment readback passed;
+runtime validation of the deployed artifact is pending, 2026-11-15.
 
 This document records the repository state and existing Paperwhite 6 evidence.
 Removing the dormant source does not expand the existing device claims; the
@@ -23,7 +23,7 @@ requires matching operator and device evidence.
 | Termination | Local Exit returns an explicit shutdown outcome. Linux paths install atomic `HUP`/`INT`/`TERM` handlers. Device evidence confirms the connected native loop receives launcher-forwarded `TERM`, stops for signal, releases the grab, restores the framebuffer, exits status 0, and avoids `KILL`. | Preserve the validated input, transport, and display cleanup order. `SIGKILL`, kernel hangs, and power loss still bypass userspace restoration. |
 | Display path | MXCFB is the sole PaperPad display backend; the X11 backend modules are deleted. | Keep the transport-independent cache and frame validation. |
 | MXCFB benchmark | `src/main.rs` opens the benchmark framebuffer, derives evdev geometry from it, polls native local Exit and signals, and restores the full snapshot without X11. A 12-sample GC16 run passed on device. | Preserve bounded samples, markers, waveform choices, and snapshot restoration. |
-| Launcher and KUAL menu | `menu.json` exposes one normal native launch. The watchdog is backend-independent. | Keep framebuffer diagnostics and explicit benchmarks. |
+| Launcher and KUAL menu | `menu.json` exposes the normal runtime, its short TERM-cleanup action, diagnostics, and explicit benchmarks. Obsolete cutover trials are retired. | Keep the watchdog backend-independent. |
 | Diagnostics and analysis | New runtime traces use backend-neutral `input_received`; `scripts/analyze-latency.py` accepts historical `x11_received` traces as a fallback. | Preserve the compatibility fallback while native input adopts `input_received`; do not rewrite retained historical evidence. |
 | Documentation | `README.md` and `AGENTS.md` describe the X11-free native architecture. Archived plans and evidence preserve historical X11 results. | Do not rewrite archived evidence or remove analyzer compatibility for historical traces. |
 
@@ -127,14 +127,11 @@ action passed host checks, the ARMv7 musl build, static verification, deployed
 binary readback verification, and a physical PW6 capability run. The compact
 result is recorded in `docs/archive/mxcfb-device-evidence.md`.
 
-1. Complete the remaining native-input edge trials: viewport boundaries,
-   secondary-contact cancellation, and descriptor failure. The primary touch,
-   single-dispatch, and local Exit path has passed its first device trial.
-2. Optionally complete the deferred interrupted-benchmark trial. All seven
-   native-reader completion paths and restorations passed, but benchmark-local
-   Exit and signal stop remain unverified on device.
-3. Run the normal PaperPad action and confirm display, input, and cleanup against
-   the matching deployed hash. Do not add more one-off KUAL test actions.
+1. Run the normal PaperPad action and confirm display, input, and cleanup against
+   the matching deployed hash.
+2. Retrieve the authoritative device log before expanding runtime claims.
+
+No additional one-off KUAL test actions are planned.
 
 The target architecture works only if the PW6 exposes a readable, identifiable
 touchscreen event device with stable coordinate metadata, PaperPad can obtain
