@@ -94,8 +94,10 @@ host-side JPEG decoding → transport-independent `paper-protocol` PPFB v2
 frames → PaperPad framebuffer receiver → MXCFB display backend. JPEG bytes and
 paths never cross the protocol boundary. Viewport-relative pointer messages
 travel in the opposite direction from the native evdev reader. Keep framebuffer
-primitives independent of transport and display lifecycle. The remaining X11
-source and dependencies are dormant removal scaffolding with no runtime caller.
+primitives independent of transport and display lifecycle. PaperPad has no X11
+source modules or client dependencies. The historical `rust_x11_hello` package
+and extension names remain for deployment compatibility; they are not runtime
+dependencies.
 
 ## Device deployment (MTP)
 

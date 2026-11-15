@@ -212,6 +212,10 @@ Legacy environment variable names are not read.
 | --- | --- | --- | --- |
 | Native MXCFB | Yes | Yes | Exclusive evdev touch and no X11 connection |
 
+PaperPad has no X11 source modules or client dependencies. The historical
+`rust_x11_hello` package and extension names remain for deployment
+compatibility; they are not runtime dependencies.
+
 MXCFB startup requires the tested framebuffer layout and HWTCON capabilities;
 unsupported devices fail during initialization. Both formats currently use the
 GC16 update path. The native runtime derives fixed geometry from `/dev/fb0`,

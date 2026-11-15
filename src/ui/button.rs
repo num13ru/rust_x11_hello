@@ -2,7 +2,7 @@
 
 use super::screen::PhysicalPoint;
 
-/// Core-X11 button detail representing a primary touch contact.
+/// Normalized button detail representing a primary touch contact.
 pub const PRIMARY_BUTTON_DETAIL: u8 = 1;
 
 /// Normalized pointer event in window-relative physical coordinates.

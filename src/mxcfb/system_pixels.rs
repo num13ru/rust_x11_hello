@@ -14,8 +14,7 @@ const GLYPH_WIDTH: usize = 5;
 const GLYPH_HEIGHT: usize = 7;
 const TEXT_UNITS: usize = 4 * GLYPH_WIDTH + 3;
 
-// Five-column glyphs, top row first. These are deliberately backend-local;
-// X11 continues using its own ImageText8 font.
+// Five-column glyphs, top row first. These stay display-local.
 const EXIT_GLYPHS: [[u8; GLYPH_HEIGHT]; 4] = [
     [
         0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111,

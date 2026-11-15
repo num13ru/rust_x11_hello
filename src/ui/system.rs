@@ -4,13 +4,9 @@
 //! and application-button contact tracking.
 
 use super::button::{PRIMARY_BUTTON_DETAIL, PointerEvent, PointerEventKind};
-use super::geometry::{
-    CELL_MARGIN, LABEL_TEXT_Y_OFFSET, LayoutRect, LogicalRect, TextPlacement, logical_coordinate,
-};
+use super::geometry::{CELL_MARGIN, LogicalRect};
 use super::screen::{SYSTEM_UI_HEIGHT, ScreenLayout};
 
-const EXIT_TEXT_X_OFFSET: u16 = 18;
-const EXIT_TEXT: &[u8] = b"EXIT";
 pub(crate) const CONNECTION_INDICATOR_DIAMETER: u16 = 24;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -24,13 +20,6 @@ enum ExitContact {
     Idle,
     Armed,
     Cancelled,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct SystemDrawLayout {
-    pub(crate) rectangle: LayoutRect,
-    pub(crate) text: TextPlacement,
-    pub(crate) connection_indicator: Option<LayoutRect>,
 }
 
 #[derive(Debug, Default)]
@@ -124,32 +113,6 @@ pub(crate) fn connection_indicator_bounds(width: u16, height: u16) -> Option<Log
     })
 }
 
-pub(crate) fn draw_layout(width: u16, height: u16) -> Option<SystemDrawLayout> {
-    let bounds = exit_bounds(width, height)?;
-    let center_x = u32::from(bounds.x) + u32::from(bounds.width) / 2;
-    let center_y = u32::from(bounds.y) + u32::from(bounds.height) / 2;
-
-    Some(SystemDrawLayout {
-        rectangle: LayoutRect {
-            x: logical_coordinate(u32::from(bounds.x)),
-            y: logical_coordinate(u32::from(bounds.y)),
-            width: bounds.width,
-            height: bounds.height,
-        },
-        text: TextPlacement {
-            x: logical_coordinate(center_x.saturating_sub(u32::from(EXIT_TEXT_X_OFFSET))),
-            y: logical_coordinate(center_y + u32::from(LABEL_TEXT_Y_OFFSET)),
-            text: EXIT_TEXT,
-        },
-        connection_indicator: connection_indicator_bounds(width, height).map(|bounds| LayoutRect {
-            x: logical_coordinate(u32::from(bounds.x)),
-            y: logical_coordinate(u32::from(bounds.y)),
-            width: bounds.width,
-            height: bounds.height,
-        }),
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -185,28 +148,6 @@ mod tests {
                 height: 72,
             })
         );
-        assert_eq!(
-            draw_layout(WINDOW_WIDTH, WINDOW_HEIGHT),
-            Some(SystemDrawLayout {
-                rectangle: LayoutRect {
-                    x: 64,
-                    y: 1624,
-                    width: 1188,
-                    height: 72,
-                },
-                text: TextPlacement {
-                    x: 640,
-                    y: 1665,
-                    text: b"EXIT",
-                },
-                connection_indicator: Some(LayoutRect {
-                    x: 20,
-                    y: 1648,
-                    width: 24,
-                    height: 24,
-                }),
-            })
-        );
     }
 
     #[test]
@@ -238,7 +179,6 @@ mod tests {
     fn exit_requires_nonzero_margined_width_and_full_system_height() {
         for (width, height) in [(0, 1696), (1272, 0), (40, 1696), (1272, 71)] {
             assert_eq!(exit_bounds(width, height), None);
-            assert_eq!(draw_layout(width, height), None);
         }
 
         assert!(exit_bounds(41, 72).is_some());

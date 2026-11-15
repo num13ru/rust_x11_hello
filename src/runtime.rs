@@ -1,7 +1,7 @@
-//! X11-independent PaperPad application runtime.
+//! PaperPad application runtime.
 
-use crate::app::{Activation, AppState, GeometryUpdate, Redraw, RemotePointerEvent};
-use crate::display::{DisplayBackend, RedrawCause, RemoteFrame};
+use crate::app::{Activation, AppState, RemotePointerEvent};
+use crate::display::{DisplayBackend, RemoteFrame};
 use crate::latency::{self, Stamp};
 use crate::net::Paperspoon;
 use crate::ui::button::{PointerEvent, PointerEventKind};
@@ -13,13 +13,6 @@ use paper_protocol::V2PointerPhase;
 pub(crate) enum RuntimeControl {
     Continue,
     ShutdownRequested,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum GeometryOutcome {
-    IgnoredZero,
-    Unchanged,
-    Redrawn,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -103,53 +96,6 @@ impl PaperpadRuntime {
             .context("failed to maintain display backend")
     }
 
-    pub(crate) fn redraw_surface(
-        &self,
-        display: &mut dyn DisplayBackend,
-        cause: RedrawCause,
-        connected: bool,
-    ) -> Result<()> {
-        draw_surface(display, self.app.redraw(), cause, connected)
-    }
-
-    pub(crate) fn update_geometry(
-        &mut self,
-        reported: (u16, u16),
-        display: &mut dyn DisplayBackend,
-        paperspoon: &mut Paperspoon,
-    ) -> Result<GeometryOutcome> {
-        match self.app.update_geometry(reported) {
-            GeometryUpdate::IgnoredZero => Ok(GeometryOutcome::IgnoredZero),
-            GeometryUpdate::Unchanged => Ok(GeometryOutcome::Unchanged),
-            GeometryUpdate::Redraw(redraw) => {
-                let (width, height) = redraw.size();
-                let viewport = remote_viewport_size((width, height));
-                if let Err(error) = paperspoon.send_viewport_changed(viewport) {
-                    eprintln!("transport error sending viewport change: {error:#}");
-                }
-                if let Some(frame) = display.set_dimensions((width, height))? {
-                    eprintln!(
-                        "frame cache invalidated id={} width={} height={} format={:?} stride={} viewport_width={} viewport_height={}",
-                        frame.frame_id(),
-                        frame.dimensions().0,
-                        frame.dimensions().1,
-                        frame.pixel_format(),
-                        frame.stride(),
-                        viewport.0,
-                        viewport.1
-                    );
-                }
-                draw_surface(
-                    display,
-                    redraw,
-                    RedrawCause::GeometryChange,
-                    paperspoon.is_connected(),
-                )?;
-                Ok(GeometryOutcome::Redrawn)
-            }
-        }
-    }
-
     pub(crate) fn handle_pointer(
         &mut self,
         input: RuntimePointerInput,
@@ -209,18 +155,6 @@ fn control_for_activation(activation: Option<Activation>) -> RuntimeControl {
         }
         None => RuntimeControl::Continue,
     }
-}
-
-fn draw_surface(
-    display: &mut dyn DisplayBackend,
-    redraw: Redraw,
-    cause: RedrawCause,
-    connected: bool,
-) -> Result<()> {
-    debug_assert_eq!(display.dimensions(), redraw.size());
-    display.draw_system_ui(connected)?;
-    display.redraw_cached_frame(cause);
-    Ok(())
 }
 
 fn forward_remote_pointer(

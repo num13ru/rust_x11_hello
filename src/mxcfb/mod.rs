@@ -34,7 +34,6 @@ mod opened;
 mod present;
 #[cfg(target_os = "linux")]
 mod probe;
-#[cfg(target_os = "linux")]
 #[cfg(any(target_os = "linux", test))]
 mod region;
 // Local Exit pixels are prepared without touching /dev/fb0.

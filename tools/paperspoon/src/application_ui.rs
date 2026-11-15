@@ -11,8 +11,8 @@ const TITLE_BASELINE: u16 = 40;
 const LABEL_TEXT_X_OFFSET: u16 = 3;
 const LABEL_TEXT_Y_OFFSET: u16 = 5;
 
-/// Existing application title retained for visual equivalence.
-pub const TITLE_TEXT: &str = "Core X11 button grid: tap 1-9";
+/// PaperSpoon application title.
+pub const TITLE_TEXT: &str = "PaperSpoon button grid: tap 1-9";
 
 const BUTTON_LABELS: [&str; 9] = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
 

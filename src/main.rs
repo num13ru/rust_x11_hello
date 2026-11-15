@@ -30,7 +30,6 @@ mod native_trial;
 mod net;
 mod runtime;
 mod ui;
-mod x11;
 
 #[cfg(target_os = "linux")]
 static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);

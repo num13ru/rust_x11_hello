@@ -1,29 +1,31 @@
 # X11 removal inventory and feasibility checkpoint
 
-Status: Phase 6 native benchmark lifecycle device-validated; dormant X11
-source/dependency deletion is next, 2026-11-15.
+Status: Phase 6 X11 source/dependency deletion complete; host checks, ARM
+verification, and deployment readback passed; runtime validation of the
+deployed artifact is pending, 2026-11-15.
 
-This document records what the repository and existing Paperwhite 6 evidence
-establish as the X11 removal work proceeds. It is not a claim that the complete
-X11-free normal runtime works on the device.
+This document records the repository state and existing Paperwhite 6 evidence.
+Removing the dormant source does not expand the existing device claims; the
+deployed artifact is byte-for-byte verified, while runtime behavior still
+requires matching operator and device evidence.
 
 ## Current dependency and responsibility inventory
 
-| Area | Current X11 responsibility | Required native replacement |
+| Area | Current state | Remaining obligation |
 | --- | --- | --- |
-| Build | `Cargo.toml` and `Cargo.lock` include `x11rb` and `x11rb-protocol`. | Remove both after the final X11 caller is gone. |
-| Startup and geometry | Native normal startup opens and validates `/dev/fb0`, derives PaperPad and evdev geometry from it, and never connects to X11. | Preserve the validated geometry checks while migrating benchmarks. |
+| Build | `Cargo.toml` and `Cargo.lock` contain no X11 client dependency, and `src/x11/` is deleted. | Keep host and ARM verification free of X11 reintroduction. |
+| Startup and geometry | Native normal startup opens and validates `/dev/fb0`, derives PaperPad and evdev geometry from it, and never connects to X11. | Preserve the validated geometry checks. |
 | Backend selection | Normal startup selects MXCFB directly; `PAPERPAD_DISPLAY_BACKEND` is no longer read. | None for the normal runtime. |
-| Window ownership | Normal and benchmark startup use native MXCFB lifecycles without an X11 window. | Delete the now-dormant X11 ownership source. Forced-recovery cases remain unverified. |
-| Input | Normal startup uses the validated exclusive reader and forwards viewport-relative Press/Release pairs into the shared runtime. Benchmarks use the same capability-selected reader nonexclusively for local Exit; native initialization passed the GC16 lifecycle check. | Delete dormant X11 input diagnostics. Benchmark-local Exit, input-failure, and descriptor-close-only release remain unverified. |
-| Event loop | `src/runtime.rs` owns normal transport, presentation, local UI, input dispatch, and shutdown. Benchmarks poll native evdev and the shared signal flag between bounded phases. | Delete the dormant X11 event loop without changing native service cadence or cleanup order. |
-| Redraw and geometry events | `Expose` redraws retained content and local UI. `ConfigureNotify` updates `AppState`, announces a viewport change, and invalidates incompatible retained frames. | Fixed MXCFB geometry removes ordinary window resize handling. Startup and resume/reassertion must still restore retained content and local UI without asking PaperSpoon for a new frame. |
-| Termination | Local Exit returns an explicit shutdown outcome; external `DestroyNotify` remains distinct. Linux paths install atomic `HUP`/`INT`/`TERM` handlers. Device evidence confirms the connected no-X11 loop receives launcher-forwarded `TERM`, stops for signal, releases the grab, restores the framebuffer, exits status 0, and avoids `KILL`. | Preserve the validated input, transport, display cleanup order at cutover. `SIGKILL`, kernel hangs, and power loss still bypass userspace restoration. |
-| X11 display path | The drawable X11 backend modules are detached from compilation and have no runtime caller. | Delete their source files with the remaining benchmark X11 code. The transport-independent cache and frame validation remain useful. |
-| MXCFB benchmark | `src/main.rs` opens the benchmark framebuffer, derives evdev geometry from it, polls native local Exit and signals, and restores the full snapshot without X11. A 12-sample GC16 run passed on device. | Preserve bounded samples, markers, waveform choices, and snapshot restoration while deleting dormant X11 code. |
+| Window ownership | Normal and benchmark startup use native MXCFB lifecycles; the X11 ownership source is deleted. | Forced-recovery cases remain unverified. |
+| Input | Normal startup uses the validated exclusive reader and forwards viewport-relative Press/Release pairs into the shared runtime. Benchmarks use the same capability-selected reader nonexclusively for local Exit; X11 input diagnostics are deleted. | Benchmark-local Exit, input-failure, and descriptor-close-only release remain unverified. |
+| Event loop | `src/runtime.rs` owns normal transport, presentation, local UI, input dispatch, and shutdown. Benchmarks poll native evdev and the shared signal flag between bounded phases; the X11 event loop is deleted. | Preserve native service cadence and cleanup order. |
+| Redraw and geometry | MXCFB resume/reassertion and UI redraw preserve the latest successfully presented frame. Fixed framebuffer geometry replaces live window reconfiguration. | Keep geometry validation strict on unsupported framebuffer layouts. |
+| Termination | Local Exit returns an explicit shutdown outcome. Linux paths install atomic `HUP`/`INT`/`TERM` handlers. Device evidence confirms the connected native loop receives launcher-forwarded `TERM`, stops for signal, releases the grab, restores the framebuffer, exits status 0, and avoids `KILL`. | Preserve the validated input, transport, and display cleanup order. `SIGKILL`, kernel hangs, and power loss still bypass userspace restoration. |
+| Display path | MXCFB is the sole PaperPad display backend; the X11 backend modules are deleted. | Keep the transport-independent cache and frame validation. |
+| MXCFB benchmark | `src/main.rs` opens the benchmark framebuffer, derives evdev geometry from it, polls native local Exit and signals, and restores the full snapshot without X11. A 12-sample GC16 run passed on device. | Preserve bounded samples, markers, waveform choices, and snapshot restoration. |
 | Launcher and KUAL menu | `menu.json` exposes one normal native launch. The watchdog is backend-independent. | Keep framebuffer diagnostics and explicit benchmarks. |
 | Diagnostics and analysis | New runtime traces use backend-neutral `input_received`; `scripts/analyze-latency.py` accepts historical `x11_received` traces as a fallback. | Preserve the compatibility fallback while native input adopts `input_received`; do not rewrite retained historical evidence. |
-| Documentation | `README.md` and `AGENTS.md` describe native normal and benchmark lifecycles. Archived plans and evidence preserve historical X11 results. | Remove dormant-source wording at final deletion; do not rewrite archived evidence. |
+| Documentation | `README.md` and `AGENTS.md` describe the X11-free native architecture. Archived plans and evidence preserve historical X11 results. | Do not rewrite archived evidence or remove analyzer compatibility for historical traces. |
 
 The package, binary, extension directory, and KUAL identifier still contain
 `rust_x11_hello`. Those names are not an X11 runtime dependency. Renaming them
@@ -45,8 +47,7 @@ plan.
   full-snapshot restoration while preserving marker-specific completion
   semantics.
 - `AppState`, `ScreenLayout`, frame validation, and the remote-frame cache are
-  independent of raw X11 protocol types. Their X11-specific comments and
-  coordinate type limits still need cleanup at the final cutover.
+  independent of display-protocol types and remain in the native runtime.
 
 This reuse is sufficient for framebuffer geometry, presentation, local UI, and
 normal-process restoration. It does not establish touchscreen access, prevent
@@ -131,10 +132,9 @@ result is recorded in `docs/archive/mxcfb-device-evidence.md`.
    single-dispatch, and local Exit path has passed its first device trial.
 2. Optionally complete the deferred interrupted-benchmark trial. All seven
    native-reader completion paths and restorations passed, but benchmark-local
-   Exit, ignored X11 duplicates during a contact, and signal stop remain
-   unverified on device.
-3. Remove the dormant X11 dependency and source files. Do not add more one-off
-   KUAL test actions.
+   Exit and signal stop remain unverified on device.
+3. Run the normal PaperPad action and confirm display, input, and cleanup against
+   the matching deployed hash. Do not add more one-off KUAL test actions.
 
 The target architecture works only if the PW6 exposes a readable, identifiable
 touchscreen event device with stable coordinate metadata, PaperPad can obtain

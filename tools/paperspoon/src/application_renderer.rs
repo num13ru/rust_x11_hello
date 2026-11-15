@@ -123,8 +123,8 @@ mod tests {
             .expect("application frame");
         assert_eq!((frame.width(), frame.height()), (WIDTH, HEIGHT));
 
-        assert_eq!(frame.pixel(20, 27), Some(Mono1Pixel::White));
-        assert_eq!(frame.pixel(21, 27), Some(Mono1Pixel::Black));
+        assert_eq!(frame.pixel(20, 27), Some(Mono1Pixel::Black));
+        assert_eq!(frame.pixel(24, 27), Some(Mono1Pixel::White));
         assert_eq!(frame.pixel(20, 60), Some(Mono1Pixel::Black));
         assert_eq!(frame.pixel(403, 60), Some(Mono1Pixel::Black));
         assert_eq!(frame.pixel(20, 443), Some(Mono1Pixel::Black));

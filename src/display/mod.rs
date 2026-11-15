@@ -77,52 +77,6 @@ impl<'a> RemoteFrame<'a> {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct CachedFrameMetadata {
-    frame_id: u64,
-    dimensions: (u16, u16),
-    pixel_format: PixelFormat,
-    stride: usize,
-}
-
-impl CachedFrameMetadata {
-    pub(crate) fn new(
-        frame_id: u64,
-        dimensions: (u16, u16),
-        pixel_format: PixelFormat,
-        stride: usize,
-    ) -> Self {
-        Self {
-            frame_id,
-            dimensions,
-            pixel_format,
-            stride,
-        }
-    }
-
-    pub(crate) fn frame_id(self) -> u64 {
-        self.frame_id
-    }
-
-    pub(crate) fn dimensions(self) -> (u16, u16) {
-        self.dimensions
-    }
-
-    pub(crate) fn pixel_format(self) -> PixelFormat {
-        self.pixel_format
-    }
-
-    pub(crate) fn stride(self) -> usize {
-        self.stride
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum RedrawCause {
-    SurfaceDamage,
-    GeometryChange,
-}
-
 /// Operations the PaperPad runtime needs from any display implementation.
 ///
 /// Remote-frame conversion and presentation failures remain non-fatal and are
@@ -132,11 +86,7 @@ pub(crate) trait DisplayBackend {
     fn dimensions(&self) -> (u16, u16);
     fn pixel_formats(&self) -> V2PixelFormats;
 
-    fn set_dimensions(&mut self, dimensions: (u16, u16)) -> Result<Option<CachedFrameMetadata>>;
-
     fn display_remote_frame(&mut self, frame: RemoteFrame<'_>);
-
-    fn redraw_cached_frame(&mut self, cause: RedrawCause);
 
     fn draw_system_ui(&mut self, connected: bool) -> Result<()>;
 
@@ -145,7 +95,7 @@ pub(crate) trait DisplayBackend {
         Ok(())
     }
 
-    /// Restore backend-owned display state before platform window teardown.
+    /// Restore backend-owned display state during orderly shutdown.
     fn shutdown(&mut self) -> Result<()> {
         Ok(())
     }
