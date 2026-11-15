@@ -128,18 +128,36 @@ Rules the deploy script enforces:
 - Uploads are verified by MTP readback; `menu.json` is uploaded last so KUAL never
   exposes a partially transferred extension.
 
-After a successful deploy, `mtp-rs ls /extensions/rust_x11_hello --recursive` shows:
-`rust_x11_hello.log`, `rust_x11_hello.status`,
-`bin/{rust_x11_hello, run.sh, probe-fb.sh, probe-input.sh}`,
-`config.xml`, `menu.json`, plus `bin/rust_x11_hello.previous` retained from the update.
+After a successful deploy, `mtp-rs ls /extensions/rust_x11_hello --recursive` shows
+`bin/{rust_x11_hello, run.sh, probe-fb.sh, probe-input.sh}`, `config.xml`, and
+`menu.json`; an update also retains `bin/rust_x11_hello.previous`. Runtime files
+such as `rust_x11_hello.status`, `rust_x11_hello.log`, and
+`paperpad.latency.jsonl` may be absent after cleanup and are not deployment
+payloads.
 
 ## Log handling
 
-- Retrieve evidence after a run:
-  `mtp-rs get /extensions/rust_x11_hello/rust_x11_hello.log rust_x11_hello.device.log --replace`
-- The on-device log grows unbounded across runs. If it is too large (or before a clean
-  evidence run), delete it over MTP — the next run recreates it:
-  `mtp-rs rm /extensions/rust_x11_hello/rust_x11_hello.log --yes`
+- Treat `rust_x11_hello.log` and `paperpad.latency.jsonl` as ephemeral evidence,
+  not retained project artifacts. Neither file belongs in Git or the repository
+  working tree.
+- Before every agent-directed device run, preserve any still-needed evidence from
+  the preceding run and then remove both files from the single connected Kindle
+  without asking for confirmation. The launcher recreates them as needed:
+  `mtp-rs rm /extensions/rust_x11_hello/rust_x11_hello.log --yes` and
+  `mtp-rs rm /extensions/rust_x11_hello/paperpad.latency.jsonl --yes`. A missing
+  file is already clean and is not an error.
+- Retrieve a log only after the run has stopped and only when it is needed to
+  support a specific claim. Store it in a task-specific directory under
+  `/private/tmp`, never in the repository root.
+- Inspect large logs with targeted searches or bounded tails. Do not dump an
+  entire device log into tool output or copy raw per-event records into committed
+  documentation.
+- After extracting the required evidence and recording a compact summary, delete
+  the temporary local copies and both append-style files from the Kindle. Do not
+  leave them on the Kindle between agent tasks. Keep a raw log only when the user
+  explicitly requests it, and keep it outside Git.
+- `rust_x11_hello.status` is a small current-state snapshot, not an accumulating
+  log. Preserve it unless it is stale or the user explicitly requests its removal.
 
 ## Verification discipline
 
