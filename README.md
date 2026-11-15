@@ -132,9 +132,9 @@ KUAL provides normal run, explicit benchmark, and diagnostic actions:
 
 - **Run Paperpad (5m)** — reference X11 display backend with native evdev touch
   and a five-minute watchdog.
-- **Run Paperpad MXCFB (5m, experimental)** — direct framebuffer display with
-  a five-minute watchdog, native evdev touch, and X11 retained for screen
-  ownership and lifecycle events.
+- **Run Paperpad MXCFB (5m, experimental)** — connected native runtime with
+  direct framebuffer display, exclusive evdev touch, no X11 connection, and a
+  five-minute watchdog.
 - **Test MXCFB TERM cleanup (15s)** — normal MXCFB runtime with a short
   watchdog for verifying graceful `TERM`, framebuffer restoration, and clean
   process exit; it is not a benchmark.
@@ -215,15 +215,15 @@ Legacy environment variable names are not read.
 | Backend | Mono1 | Gray8 and JPEG | Notes |
 | --- | --- | --- | --- |
 | X11 | Yes | No | Reference display path |
-| MXCFB | Yes | Yes | Experimental; uses native evdev touch and a backgroundless X11 InputOutput window for ownership and clipping |
+| MXCFB | Yes | Yes | Experimental; native runtime uses exclusive evdev touch and no X11 connection |
 
 MXCFB startup requires the tested framebuffer layout and HWTCON capabilities;
 it fails rather than silently falling back to X11. Both formats currently use
-the GC16 update path. The MXCFB window is a full-screen X11 InputOutput window
-but requests no X11 background pixel or pixmap and creates no graphics context.
-Its mapped stacking footprint clips lower Kindle/KUAL X11 windows, while
-Expose events ask the MXCFB backend to redraw cached content. Direct framebuffer
-output, the historical X11 touch path, local Exit, Gray8, JPEG, and Apple Music Now Playing have
+the GC16 update path. The native runtime derives fixed geometry from `/dev/fb0`,
+uses exclusive evdev input, and opens no X11 connection. The historical hybrid
+path used a backgroundless full-screen X11 InputOutput window for stacking and
+lifecycle. Direct framebuffer output, native touch, local Exit, Gray8, JPEG,
+and Apple Music Now Playing have
 been observed on the documented Paperwhite 6. Subsequent
 device runs completed marker-specific waits and visibly restored the original
 screen after every benchmark. Exact pixel fidelity, sleep/wake interaction,

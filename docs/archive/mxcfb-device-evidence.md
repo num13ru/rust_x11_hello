@@ -621,3 +621,39 @@ session.
 This establishes launcher-forwarded graceful signal cleanup for the connected
 no-X11 runtime on the tested device. It does not establish `SIGKILL`, kernel
 hang, power-loss, input-failure, or descriptor-close-only recovery.
+
+## Normal MXCFB action native-runtime cutover (2026-11-15)
+
+The cutover build passed the full host suite, ARMv7 musl build, and static
+verification. Independent post-deployment MTP readback matched the host artifact
+at SHA-256
+`0c286a2e91029b51c49e0bc80f7400b4a1571f4bd42d6eb018dc34a37804f845`.
+The retrieved cumulative log has SHA-256
+`28edeec12c348ae134c07370f03a5c28882983c16e7a5b4dfbd50f0d45d1e131`;
+the status snapshot has SHA-256
+`7b518dd1f30983840b0c2ce28fd7996f09263a71985050d6a0d66397f7d87c8e`
+and reports `STOPPED status=0 reason=watchdog` after the final run.
+
+The operator ran the existing **Run Paperpad MXCFB (5m, experimental)** action
+with PaperSpoon active and confirmed the device result. The first relevant
+launcher session ran from `Sun Nov 15 11:59:33 GMT+3:0100 2026` through
+`12:00:04`. It records normal `paperpad` mode, the native runtime with
+`eviocgrab=true`, `/dev/input/event1`, discovery and connection to PaperSpoon,
+Mono1 frame presentation, repeated evdev Press/Release pairs forwarded as
+remote Down/Up phases, device-local Exit, explicit grab release, restoration of
+the 2,157,312-byte framebuffer snapshot, and binary status 0. No
+`connected to X11` record occurs within that launcher session.
+
+A second normal-action session ran from `12:00:37` through `12:05:38`. It
+records the same native exclusive-input startup, PaperSpoon connection, Mono1
+and Gray8 frame presentation, the five-minute launcher watchdog sending
+`TERM`, a signal stop, explicit grab release, full-snapshot restoration, binary
+status 0, and no forced `KILL`. No `connected to X11` record occurs within that
+launcher session.
+
+This establishes the normal KUAL MXCFB action's X11-free startup, connected
+Mono1 and Gray8 presentation, remote touch forwarding, local Exit, graceful
+watchdog termination, exclusive-input release, and orderly framebuffer
+restoration on the tested device. It does not establish disconnect/reconnect,
+pixel fidelity, recovery after `SIGKILL`, kernel hang, power loss, input
+failure, or descriptor-close-only grab release.

@@ -1,8 +1,7 @@
 //! Paperpad Kindle/KUAL process entry point.
 //!
-//! Entry point only: chooses a display backend, keeps X11 for window ownership
-//! and lifecycle, runs the event loop, and tears down. Logical UI concepts live
-//! in [`ui`].
+//! Entry point only: chooses the reference X11 or native MXCFB lifecycle, runs
+//! the event loop, and tears down. Logical UI concepts live in [`ui`].
 
 use crate::display::DisplayBackend;
 use anyhow::{Context, Result, bail};
@@ -120,6 +119,10 @@ fn run() -> Result<()> {
     install_signal_handlers()?;
 
     let display_kind = config::DisplayBackendKind::from_env()?;
+    #[cfg(target_os = "linux")]
+    if display_kind == config::DisplayBackendKind::Mxcfb {
+        return native_trial::run_normal(|| SHUTDOWN_REQUESTED.load(Ordering::Relaxed));
+    }
     let framebuffer_size = match display_kind {
         config::DisplayBackendKind::X11 => None,
         config::DisplayBackendKind::Mxcfb => {

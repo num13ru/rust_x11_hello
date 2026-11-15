@@ -9,21 +9,19 @@ steps an agent should follow, especially around physical-device work.
 - Rust binary (`src/`) builds for ARMv7 musl via Docker (`make build`, `make verify`).
 - Host artifact: `kindle-extension/rust_x11_hello/bin/rust_x11_hello` (untracked, rebuilt by `make build`).
 - Device extension root: `/extensions/rust_x11_hello` (MTP) = `/mnt/us/extensions/rust_x11_hello` (runtime).
-- KUAL actions: **Run Paperpad (5m)** uses the X11 display backend; **Run
-  Paperpad MXCFB (5m, experimental)** selects direct framebuffer output. Both
-  normal runs use capability-selected native evdev touch while retaining an X11
-  window for screen ownership, clipping, geometry, and lifecycle; MXCFB uses a
-  backgroundless `InputOutput` window without an X11 GC. Stop from
-  the in-window **Exit** button or let the
-  watchdog end the run; the full-screen window covers KUAL. A first MXCFB
+- KUAL actions: **Run Paperpad (5m)** remains the reference X11 display path;
+  **Run Paperpad MXCFB (5m, experimental)** now uses the connected native
+  runtime with direct framebuffer output and exclusive evdev input, without
+  opening X11. Stop either run from the device-local **Exit** button or let the
+  watchdog end it. A first MXCFB
   historical first MXCFB trial on the Paperwhite 6 exercised direct display,
   the then-current X11 touch path, and local Exit;
   remaining visual and lifecycle checks are recorded in
   `docs/archive/mxcfb-device-evidence.md`.
-- **Test MXCFB TERM cleanup (15s)** runs the normal MXCFB path with a short
-  watchdog so the launcher's `TERM` forwarding, orderly framebuffer restore,
-  and process exit can be checked without waiting five minutes. It is not a
-  benchmark.
+- **Test MXCFB TERM cleanup (15s)** runs the normal native MXCFB path with a
+  short watchdog so the launcher's `TERM` forwarding, exclusive-input release,
+  orderly framebuffer restore, and process exit can be checked without waiting
+  five minutes. It is not a benchmark.
 - **Trial MXCFB without X11 (15s)** is an opt-in, transport-free ownership
   experiment. It opens no X11 connection, uses native evdev for local Exit,
   stops itself after 15 seconds, and has a 30-second launcher watchdog. Normal

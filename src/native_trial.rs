@@ -1,4 +1,4 @@
-//! Bounded, opt-in MXCFB ownership trial that never connects to X11.
+//! Native MXCFB runtime plus bounded ownership/input trials; never connects X11.
 
 use crate::app::{Activation, AppState};
 use crate::config::PaperpadConfig;
@@ -148,11 +148,31 @@ fn run_with_input_grab(grab: bool, shutdown_requested: impl Fn() -> bool) -> Res
 }
 
 pub(crate) fn run_connected(shutdown_requested: impl Fn() -> bool) -> Result<()> {
+    run_native_runtime(Some(CONNECTED_TRIAL_DURATION), shutdown_requested)
+}
+
+pub(crate) fn run_normal(shutdown_requested: impl Fn() -> bool) -> Result<()> {
+    run_native_runtime(None, shutdown_requested)
+}
+
+fn run_native_runtime(
+    trial_duration: Option<Duration>,
+    shutdown_requested: impl Fn() -> bool,
+) -> Result<()> {
     let config = PaperpadConfig::from_env()?;
-    eprintln!(
-        "no-X11 connected trial starting duration_s={} transport=true eviocgrab=true",
-        CONNECTED_TRIAL_DURATION.as_secs(),
-    );
+    let run_label = if trial_duration.is_some() {
+        "no-X11 connected trial"
+    } else {
+        "PaperPad native runtime"
+    };
+    if let Some(duration) = trial_duration {
+        eprintln!(
+            "{run_label} starting duration_s={} transport=true eviocgrab=true",
+            duration.as_secs(),
+        );
+    } else {
+        eprintln!("{run_label} starting transport=true eviocgrab=true");
+    }
 
     let mut display = MxcfbDisplayBackend::open()?;
     let size = display.dimensions();
@@ -161,7 +181,7 @@ pub(crate) fn run_connected(shutdown_requested: impl Fn() -> bool) -> Result<()>
         Err(primary) => {
             if let Err(cleanup_error) = display.shutdown() {
                 eprintln!(
-                    "MXCFB cleanup after connected no-X11 input initialization failure also failed: {cleanup_error:#}"
+                    "MXCFB cleanup after native input initialization failure also failed: {cleanup_error:#}"
                 );
             }
             return Err(primary);
@@ -172,29 +192,36 @@ pub(crate) fn run_connected(shutdown_requested: impl Fn() -> bool) -> Result<()>
     let mut runtime = PaperpadRuntime::new(size);
 
     let mut trial_result = (|| -> Result<()> {
-        let deadline = Instant::now() + CONNECTED_TRIAL_DURATION;
-        eprintln!(
-            "no-X11 connected trial ready width={} height={} exit=local deadline_s={}",
-            size.0,
-            size.1,
-            CONNECTED_TRIAL_DURATION.as_secs(),
-        );
+        let deadline = trial_duration.map(|duration| Instant::now() + duration);
+        if let Some(duration) = trial_duration {
+            eprintln!(
+                "{run_label} ready width={} height={} exit=local deadline_s={}",
+                size.0,
+                size.1,
+                duration.as_secs(),
+            );
+        } else {
+            eprintln!(
+                "{run_label} ready width={} height={} exit=local",
+                size.0, size.1
+            );
+        }
 
         loop {
             if shutdown_requested() {
                 runtime.cancel_contact();
-                eprintln!("no-X11 connected trial stopped reason=signal");
+                eprintln!("{run_label} stopped reason=signal");
                 return Ok(());
             }
-            if Instant::now() >= deadline {
+            if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                 runtime.cancel_contact();
-                eprintln!("no-X11 connected trial stopped reason=deadline");
+                eprintln!("{run_label} stopped reason=deadline");
                 return Ok(());
             }
 
             runtime
                 .service(&mut display, &mut paperspoon)
-                .context("service connected no-X11 runtime")?;
+                .context("service native PaperPad runtime")?;
             let decoded = match input_reader.drain() {
                 Ok(decoded) => decoded,
                 Err(error) => {
@@ -202,7 +229,7 @@ pub(crate) fn run_connected(shutdown_requested: impl Fn() -> bool) -> Result<()>
                         runtime.cancel_contact();
                         eprintln!("input source=evdev action=cancel reason=reader_failure");
                     }
-                    return Err(error).context("connected no-X11 evdev reader failed");
+                    return Err(error).context("native PaperPad evdev reader failed");
                 }
             };
             for input in decoded {
@@ -218,7 +245,7 @@ pub(crate) fn run_connected(shutdown_requested: impl Fn() -> bool) -> Result<()>
                             &mut paperspoon,
                         );
                         if control == RuntimeControl::ShutdownRequested {
-                            eprintln!("no-X11 connected trial stopped reason=local_exit");
+                            eprintln!("{run_label} stopped reason=local_exit");
                             return Ok(());
                         }
                     }
@@ -240,7 +267,7 @@ pub(crate) fn run_connected(shutdown_requested: impl Fn() -> bool) -> Result<()>
     if let Err(release_error) = input_reader.release_exclusive_grab() {
         if trial_result.is_err() {
             eprintln!(
-                "EVIOCGRAB release after connected no-X11 trial failure also failed: {release_error:#}"
+                "EVIOCGRAB release after native runtime failure also failed: {release_error:#}"
             );
         } else {
             trial_result = Err(release_error);
@@ -254,9 +281,7 @@ pub(crate) fn run_connected(shutdown_requested: impl Fn() -> bool) -> Result<()>
 
     match (trial_result, cleanup_result) {
         (Err(primary), Err(cleanup_error)) => {
-            eprintln!(
-                "MXCFB cleanup after connected no-X11 trial failure also failed: {cleanup_error:#}"
-            );
+            eprintln!("MXCFB cleanup after native runtime failure also failed: {cleanup_error:#}");
             Err(primary)
         }
         (Err(primary), Ok(())) => Err(primary),
