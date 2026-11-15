@@ -5,12 +5,8 @@
       "action": "PAPERPAD_WATCHDOG_SECONDS=300 sh bin/run.sh"
     },
     {
-      "name": "Run Paperpad MXCFB (5m, experimental)",
-      "action": "PAPERPAD_WATCHDOG_SECONDS=300 PAPERPAD_DISPLAY_BACKEND=mxcfb sh bin/run.sh"
-    },
-    {
       "name": "Test MXCFB TERM cleanup (15s)",
-      "action": "PAPERPAD_WATCHDOG_SECONDS=15 PAPERPAD_DISPLAY_BACKEND=mxcfb sh bin/run.sh"
+      "action": "PAPERPAD_WATCHDOG_SECONDS=15 sh bin/run.sh"
     },
     {
       "name": "Trial exclusive input without X11 (15s)",

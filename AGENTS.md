@@ -9,11 +9,10 @@ steps an agent should follow, especially around physical-device work.
 - Rust binary (`src/`) builds for ARMv7 musl via Docker (`make build`, `make verify`).
 - Host artifact: `kindle-extension/rust_x11_hello/bin/rust_x11_hello` (untracked, rebuilt by `make build`).
 - Device extension root: `/extensions/rust_x11_hello` (MTP) = `/mnt/us/extensions/rust_x11_hello` (runtime).
-- KUAL actions: **Run Paperpad (5m)** remains the reference X11 display path;
-  **Run Paperpad MXCFB (5m, experimental)** now uses the connected native
-  runtime with direct framebuffer output and exclusive evdev input, without
-  opening X11. Stop either run from the device-local **Exit** button or let the
-  watchdog end it. A first MXCFB
+- KUAL action **Run Paperpad (5m)** uses the connected native runtime with
+  direct framebuffer output and exclusive evdev input, without opening X11.
+  Stop it from the device-local **Exit** button or let the watchdog end it. A
+  first MXCFB
   historical first MXCFB trial on the Paperwhite 6 exercised direct display,
   the then-current X11 touch path, and local Exit;
   remaining visual and lifecycle checks are recorded in
@@ -92,13 +91,11 @@ indicator must not become an application action or touch target.
 
 The dependency direction is PaperSpoon application layout/rendering/input and
 host-side JPEG decoding → transport-independent `paper-protocol` PPFB v2
-frames → PaperPad framebuffer receiver → sibling X11 or MXCFB display backend.
-JPEG bytes and paths never cross the protocol boundary. Viewport-relative
-pointer messages travel in the opposite direction from the native evdev reader
-for both normal display modes. X11 pointer events are diagnostic-only while the
-X11 window remains for screen ownership and lifecycle. Keep framebuffer
-primitives independent of transport and display backend; X11-specific bitmap
-conversion belongs in PaperPad's X11 adapter, not in `paper-protocol` or MXCFB.
+frames → PaperPad framebuffer receiver → MXCFB display backend. JPEG bytes and
+paths never cross the protocol boundary. Viewport-relative pointer messages
+travel in the opposite direction from the native evdev reader. Keep framebuffer
+primitives independent of transport and display lifecycle. The remaining X11
+code is temporary benchmark ownership/lifecycle scaffolding.
 
 ## Device deployment (MTP)
 
@@ -174,5 +171,6 @@ After a successful deploy, `mtp-rs ls /extensions/rust_x11_hello --recursive` sh
 - Match the deployed binary's SHA-256 against the host artifact before trusting a run.
 - Native-input claims require `input reader: opened` plus evdev Press/Release
   records in the authoritative Kindle log and the matching deployed checksum.
-  X11 `ButtonPress`/`ButtonRelease` records are expected to be logged as ignored
-  during normal Linux runs and are not evidence that PaperPad dispatched twice.
+  X11 `ButtonPress`/`ButtonRelease` records may be logged as ignored only by the
+  temporary benchmark lifecycle and are not evidence that PaperPad dispatched
+  twice.

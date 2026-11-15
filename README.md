@@ -12,7 +12,7 @@ for a macOS companion called PaperSpoon.
 ```text
 macOS                                      Kindle
 
-PaperSpoon -- PPFB v2 framebuffer ------> PaperPad -- X11 or MXCFB
+PaperSpoon -- PPFB v2 framebuffer ------> PaperPad -- MXCFB
            <----- pointer events ---------          -- local Exit
 ```
 
@@ -130,11 +130,9 @@ mtp-rs rm /extensions/rust_x11_hello/bin/rust_x11_hello.previous --yes
 
 KUAL provides normal run, explicit benchmark, and diagnostic actions:
 
-- **Run Paperpad (5m)** — reference X11 display backend with native evdev touch
-  and a five-minute watchdog.
-- **Run Paperpad MXCFB (5m, experimental)** — connected native runtime with
-  direct framebuffer display, exclusive evdev touch, no X11 connection, and a
-  five-minute watchdog.
+- **Run Paperpad (5m)** — connected native runtime with direct framebuffer
+  display, exclusive evdev touch, no X11 connection, and a five-minute
+  watchdog.
 - **Test MXCFB TERM cleanup (15s)** — normal MXCFB runtime with a short
   watchdog for verifying graceful `TERM`, framebuffer restoration, and clean
   process exit; it is not a benchmark.
@@ -192,15 +190,13 @@ PAPERPAD_COMPANION_PORT=5581
 ```
 
 `PAPERPAD_COMPANION_PORT` is valid only with an explicit host and must be in
-`1..=65535`. Invalid configuration fails before the X11 window opens. There is
-no hard-coded IP fallback.
+`1..=65535`. Invalid configuration fails before display and input
+initialization. There is no hard-coded IP fallback.
 
 Other runtime overrides are:
 
 | Variable | Meaning |
 | --- | --- |
-| `PAPERPAD_DISPLAY_BACKEND=x11` | Default X11 display path |
-| `PAPERPAD_DISPLAY_BACKEND=mxcfb` | Experimental direct framebuffer path |
 | `PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=gc16\|du\|a2\|du4` | Explicit benchmark waveform; defaults to GC16 |
 | `PAPERPAD_MXCFB_BENCHMARK_FRAMES=2..120` | Completed benchmark samples; defaults to 8 |
 | `PAPERPAD_MXCFB_BENCHMARK_REGION=full\|WIDTHxHEIGHT` | Centered benchmark region inside the remote viewport; defaults to full |
@@ -210,20 +206,17 @@ Other runtime overrides are:
 
 Legacy environment variable names are not read.
 
-## Display backends
+## Display runtime
 
 | Backend | Mono1 | Gray8 and JPEG | Notes |
 | --- | --- | --- | --- |
-| X11 | Yes | No | Reference display path |
-| MXCFB | Yes | Yes | Experimental; native runtime uses exclusive evdev touch and no X11 connection |
+| Native MXCFB | Yes | Yes | Exclusive evdev touch and no X11 connection |
 
 MXCFB startup requires the tested framebuffer layout and HWTCON capabilities;
-it fails rather than silently falling back to X11. Both formats currently use
-the GC16 update path. The native runtime derives fixed geometry from `/dev/fb0`,
-uses exclusive evdev input, and opens no X11 connection. The historical hybrid
-path used a backgroundless full-screen X11 InputOutput window for stacking and
-lifecycle. Direct framebuffer output, native touch, local Exit, Gray8, JPEG,
-and Apple Music Now Playing have
+unsupported devices fail during initialization. Both formats currently use the
+GC16 update path. The native runtime derives fixed geometry from `/dev/fb0`,
+uses exclusive evdev input, and opens no X11 connection. Direct framebuffer
+output, native touch, local Exit, Gray8, JPEG, and Apple Music Now Playing have
 been observed on the documented Paperwhite 6. Subsequent
 device runs completed marker-specific waits and visibly restored the original
 screen after every benchmark. Exact pixel fidelity, sleep/wake interaction,
@@ -371,9 +364,9 @@ mtp-rs rm /extensions/rust_x11_hello/rust_x11_hello.log --yes
 Match the deployed binary's SHA-256 with the host artifact before trusting a
 run. A successful host build or accepted framebuffer ioctl is not evidence of
 visible panel output. Native touch requires an `input reader: opened` record and
-evdev Press/Release records in the Kindle log. Normal Linux runs may also log X11
-button events as ignored; those records are lifecycle diagnostics, not a second
-application-input path.
+evdev Press/Release records in the Kindle log. Temporary benchmark runs may also
+log X11 button events as ignored; those records are lifecycle diagnostics, not
+a second application-input path.
 
 ## Apple Container network issues
 
@@ -400,7 +393,7 @@ network other than `default`.
 
 | Path | Responsibility |
 | --- | --- |
-| `src/` | PaperPad lifecycle, native input, networking, and display backends |
+| `src/` | PaperPad lifecycle, native input, networking, and MXCFB display |
 | `crates/paper-protocol/` | Transport-independent PPFB types and codecs |
 | `tools/paperspoon/` | Host rendering, input resolution, discovery, and actions |
 | `kindle-extension/` | KUAL package and launch scripts |

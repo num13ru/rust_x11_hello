@@ -657,3 +657,29 @@ watchdog termination, exclusive-input release, and orderly framebuffer
 restoration on the tested device. It does not establish disconnect/reconnect,
 pixel fidelity, recovery after `SIGKILL`, kernel hang, power loss, input
 failure, or descriptor-close-only grab release.
+
+## Sole native normal action (2026-11-15)
+
+The backend-selector and duplicate-normal-action removal passed the full host
+suite, ARMv7 musl build, and static verification. Independent post-deployment
+MTP readback matched the host artifact at SHA-256
+`aa0bc73c2fbafb064cdc8bc876fab1374f1c9f4ad1162774a16ad07296f6eadb`.
+The retrieved cumulative log has SHA-256
+`c798fed9cb9337caf5aa2a52a00b63371f4c095d62feef5897bec9c9fd2d63ef`;
+the status snapshot has SHA-256
+`2fead5455234aee9d2909f8525bc5dab7bc5190893b73ddc8681f97309cc15b1`
+and reports `STOPPED status=0 reason=process_exit`.
+
+The operator ran the sole **Run Paperpad (5m)** action and verified the device
+result. The final launcher session ran from
+`Sun Nov 15 12:23:12 GMT+3:0100 2026` through `12:24:08`. It records normal
+`paperpad` mode, native MXCFB startup with `eviocgrab=true`, PaperSpoon
+connection, Mono1 and Gray8 presentation, repeated evdev Press/Release pairs
+forwarded as remote Down/Up phases, device-local Exit, explicit grab release,
+restoration of the 2,157,312-byte framebuffer snapshot, and binary status 0.
+No `connected to X11` record occurs within that launcher session.
+
+This confirms that removing the runtime backend selector and duplicate KUAL
+normal action did not change the previously validated native runtime behavior
+on the tested device. The same forced-termination and input-failure limitations
+recorded for the preceding cutover remain.

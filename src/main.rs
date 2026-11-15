@@ -1,27 +1,27 @@
 //! Paperpad Kindle/KUAL process entry point.
 //!
-//! Entry point only: chooses the reference X11 or native MXCFB lifecycle, runs
-//! the event loop, and tears down. Logical UI concepts live in [`ui`].
+//! Entry point only: chooses a diagnostic, benchmark, or normal native MXCFB
+//! lifecycle and tears it down. Logical UI concepts live in [`ui`].
 
-use crate::display::DisplayBackend;
-use anyhow::{Context, Result, bail};
+#![cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
+
+#[cfg(target_os = "linux")]
+use anyhow::Context;
+use anyhow::{Result, bail};
 #[cfg(target_os = "linux")]
 use input::evdev::EvdevReader;
-#[cfg(target_os = "linux")]
-use mxcfb::MxcfbDisplayBackend;
 use std::env;
 #[cfg(target_os = "linux")]
 use std::io;
 #[cfg(target_os = "linux")]
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "linux")]
 use x11rb::rust_connection::RustConnection;
 
-use runtime::remote_viewport_size;
-use x11::X11DisplayBackend;
-use x11::display::{self as x11_display, MappedWindow, WindowMode};
+#[cfg(target_os = "linux")]
+use x11::display::{self as x11_display, WindowMode};
 #[cfg(target_os = "linux")]
 use x11::events::BenchmarkExitPoll;
-use x11::events::{EventLoopExit, event_loop};
 
 mod app;
 mod config;
@@ -118,135 +118,13 @@ fn run() -> Result<()> {
     #[cfg(target_os = "linux")]
     install_signal_handlers()?;
 
-    let display_kind = config::DisplayBackendKind::from_env()?;
-    #[cfg(target_os = "linux")]
-    if display_kind == config::DisplayBackendKind::Mxcfb {
-        return native_trial::run_normal(|| SHUTDOWN_REQUESTED.load(Ordering::Relaxed));
-    }
-    let framebuffer_size = match display_kind {
-        config::DisplayBackendKind::X11 => None,
-        config::DisplayBackendKind::Mxcfb => {
-            #[cfg(target_os = "linux")]
-            {
-                Some(mxcfb::validated_framebuffer_dimensions()?)
-            }
-            #[cfg(not(target_os = "linux"))]
-            {
-                bail!("display backend=mxcfb requires Linux and /dev/fb0");
-            }
-        }
-    };
-    let paperpad_config = config::PaperpadConfig::from_env()?;
-
-    let (conn, screen_num) = RustConnection::connect(None)
-        .context("failed to connect to X11 display; check DISPLAY and /tmp/.X11-unix/X0")?;
-
-    x11_display::print_screen_info(&conn, screen_num);
-    let window_mode = match display_kind {
-        config::DisplayBackendKind::X11 => WindowMode::Drawable,
-        config::DisplayBackendKind::Mxcfb => WindowMode::DirectFramebuffer,
-    };
-    let mapped = x11_display::setup_window(&conn, screen_num, window_mode)?;
-    let win = mapped.window;
-    let size = if let Some(framebuffer_size) = framebuffer_size {
-        anyhow::ensure!(
-            mapped.size == framebuffer_size,
-            "X11 ownership window {:?} differs from validated MXCFB framebuffer {:?}",
-            mapped.size,
-            framebuffer_size
-        );
-        framebuffer_size
-    } else {
-        mapped.size
-    };
-
-    eprintln!(
-        "window mapped id=0x{win:x} class={} x={} y={} width={} height={}",
-        mapped.mode.label(),
-        x11::display::WINDOW_X,
-        x11::display::WINDOW_Y,
-        size.0,
-        size.1
-    );
-
-    #[cfg(target_os = "linux")]
-    let mut input_reader = match EvdevReader::open(size) {
-        Ok(reader) => reader,
-        Err(primary) => {
-            if let Err(cleanup_error) = x11_display::cleanup(&conn, mapped, true) {
-                eprintln!(
-                    "X11 cleanup after input initialization failure also failed: {cleanup_error:#}"
-                );
-            }
-            return Err(primary);
-        }
-    };
-
-    let mut display_backend = match create_display_backend(display_kind, &conn, mapped) {
-        Ok(backend) => backend,
-        Err(primary) => {
-            if let Err(cleanup_error) = x11_display::cleanup(&conn, mapped, true) {
-                eprintln!(
-                    "cleanup after display initialization failure also failed: {cleanup_error:#}"
-                );
-            }
-            return Err(primary);
-        }
-    };
-    let mut paperspoon = net::Paperspoon::start(
-        paperpad_config,
-        remote_viewport_size(size),
-        display_backend.pixel_formats(),
-    );
-    #[cfg(target_os = "linux")]
-    let event_result = event_loop(
-        &conn,
-        win,
-        display_backend.as_mut(),
-        &mut paperspoon,
-        &mut input_reader,
-        || SHUTDOWN_REQUESTED.load(Ordering::Relaxed),
-    );
-    #[cfg(not(target_os = "linux"))]
-    let event_result = event_loop(&conn, win, display_backend.as_mut(), &mut paperspoon);
-
     #[cfg(target_os = "linux")]
     {
-        if input_reader.shutdown().is_some() {
-            eprintln!("input reader: shutdown canceled active contact");
-        }
-        drop(input_reader);
+        native_trial::run_normal(|| SHUTDOWN_REQUESTED.load(Ordering::Relaxed))
     }
-
-    let display_cleanup_result = display_backend.shutdown();
-    drop(display_backend);
-
-    let destroy_window = !matches!(&event_result, Ok(EventLoopExit::WindowDestroyed));
-    let cleanup_result = x11_display::cleanup(&conn, mapped, destroy_window);
-
-    match event_result {
-        Err(primary) => {
-            if let Err(cleanup_error) = display_cleanup_result {
-                eprintln!(
-                    "display cleanup after event-loop failure also failed: {cleanup_error:#}"
-                );
-            }
-            if let Err(cleanup_error) = cleanup_result {
-                eprintln!("X11 cleanup after event-loop failure also failed: {cleanup_error:#}");
-            }
-            Err(primary)
-        }
-        Ok(_) => match (display_cleanup_result, cleanup_result) {
-            (Err(primary), Err(cleanup_error)) => {
-                eprintln!(
-                    "X11 cleanup after display cleanup failure also failed: {cleanup_error:#}"
-                );
-                Err(primary)
-            }
-            (Err(primary), Ok(())) => Err(primary),
-            (Ok(()), Err(cleanup_error)) => Err(cleanup_error),
-            (Ok(()), Ok(())) => Ok(()),
-        },
+    #[cfg(not(target_os = "linux"))]
+    {
+        bail!("normal PaperPad runtime requires Linux and /dev/fb0")
     }
 }
 
@@ -358,42 +236,4 @@ fn run_connected_no_x11_trial() -> Result<()> {
 #[cfg(not(target_os = "linux"))]
 fn run_mxcfb_benchmark() -> Result<()> {
     bail!("MXCFB benchmark requires Linux and /dev/fb0")
-}
-
-fn create_display_backend<'a>(
-    kind: config::DisplayBackendKind,
-    conn: &'a RustConnection,
-    mapped: MappedWindow,
-) -> Result<Box<dyn DisplayBackend + 'a>> {
-    let win = mapped.window;
-    let size = mapped.size;
-    match kind {
-        config::DisplayBackendKind::X11 => {
-            let gc = mapped
-                .gc
-                .context("drawable X11 backend window is missing its graphics context")?;
-            Ok(Box::new(X11DisplayBackend::new(conn, win, gc, size)))
-        }
-        config::DisplayBackendKind::Mxcfb => {
-            #[cfg(target_os = "linux")]
-            {
-                anyhow::ensure!(
-                    mapped.mode == WindowMode::DirectFramebuffer && mapped.gc.is_none(),
-                    "MXCFB window must occlude lower X11 windows without a graphics context"
-                );
-                let backend = MxcfbDisplayBackend::open()?;
-                anyhow::ensure!(
-                    backend.dimensions() == size,
-                    "MXCFB framebuffer {:?} differs from X11 input window {:?}",
-                    backend.dimensions(),
-                    size
-                );
-                Ok(Box::new(backend))
-            }
-            #[cfg(not(target_os = "linux"))]
-            {
-                bail!("display backend=mxcfb requires Linux and /dev/fb0")
-            }
-        }
-    }
 }
