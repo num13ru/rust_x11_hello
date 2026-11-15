@@ -116,7 +116,7 @@ For an update, run:
 scripts/deploy-kindle-mtp.sh update
 ```
 
-When practical, stop PaperPad with its in-window **Exit** button or let the
+When practical, stop PaperPad with its device-local **Exit** button or let the
 watchdog finish before updating; MTP cannot inspect running processes. The
 update keeps the previous verified binary as
 `bin/rust_x11_hello.previous` and refuses to overwrite an existing backup. To

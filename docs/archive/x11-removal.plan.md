@@ -1,4 +1,8 @@
-# Codex Implementation Plan: Remove X11 from PaperPad
+# Archived Implementation Plan: Remove X11 from PaperPad
+
+Status: completed and device-validated on 2026-11-15. The final measurements,
+evidence boundary, and remaining failure-mode limits are recorded in
+`x11-removal-inventory.md` and `mxcfb-device-evidence.md`.
 
 Repository: https://github.com/num13ru/rust_x11_hello
 

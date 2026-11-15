@@ -138,7 +138,7 @@ waits; they are not camera-verified visual FPS. The waveform names describe
 PaperPad's requests, not independently observed panel state. In particular,
 the matching driver may substitute full GLR16 for a sufficiently large DU
 request. The maintained interpretation and current compact results are in
-[`docs/mxcfb-benchmarks.md`](../mxcfb-benchmarks.md).
+[`mxcfb-benchmarks.md`](mxcfb-benchmarks.md).
 
 ## InputOnly marker-contention trial (2026-10-25)
 

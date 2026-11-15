@@ -1,4 +1,4 @@
-//! Direct-framebuffer diagnostics and the experimental MXCFB display backend.
+//! Direct-framebuffer diagnostics and the native MXCFB display backend.
 
 #[cfg(target_os = "linux")]
 mod abi;
