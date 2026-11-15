@@ -683,3 +683,29 @@ This confirms that removing the runtime backend selector and duplicate KUAL
 normal action did not change the previously validated native runtime behavior
 on the tested device. The same forced-termination and input-failure limitations
 recorded for the preceding cutover remain.
+
+## Native benchmark lifecycle (2026-11-15)
+
+The native benchmark-lifecycle build passed the full host suite, ARMv7 musl
+build, and static verification. Independent post-deployment MTP readback
+matched the host artifact at SHA-256
+`83ac2f642bfdd5a0c418541d1bbaf55111cd0c2c9315039791511137116c399a`.
+The retrieved cumulative log has SHA-256
+`3ae4f29a332b97a30638625e7241ea81b10109d9f016b42343d48c96388b8030`;
+the status snapshot has SHA-256
+`2fead5455234aee9d2909f8525bc5dab7bc5190893b73ddc8681f97309cc15b1`
+and reports `STOPPED status=0`.
+
+The operator ran **Benchmark MXCFB GC16 (12)** to completion and confirmed
+screen restoration and post-run usability. The launcher session ran from
+`Sun Nov 15 12:34:28 GMT+3:0100 2026` through `12:34:33`. It records
+`--benchmark-mxcfb`, full-screen GC16 with 12 samples, the native lifecycle at
+1272 x 1696 with `eviocgrab=false`, capability-selected `/dev/input/event1`,
+all 12 marker-specific samples, restoration of the 2,157,312-byte framebuffer
+snapshot, and binary status 0. No `connected to X11` record occurs within that
+launcher session.
+
+This establishes native framebuffer-derived benchmark startup, bounded GC16
+completion, and orderly restoration without X11 on the tested device. It does
+not add new visual-fidelity evidence or establish local Exit, signal stop, or
+input-failure cleanup for the migrated benchmark lifecycle.

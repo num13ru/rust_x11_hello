@@ -1,5 +1,7 @@
 //! Native Linux input diagnostics and event decoding.
 
+#[cfg(target_os = "linux")]
+pub(crate) mod benchmark;
 #[cfg(any(target_os = "linux", test))]
 pub(crate) mod evdev;
 

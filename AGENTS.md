@@ -56,8 +56,8 @@ steps an agent should follow, especially around physical-device work.
   `EVIOCGRAB`.
 - The four **Benchmark MXCFB** KUAL actions are bounded, local completion tests
   for GC16, DU, A2, and DU4. They bypass PaperSpoon, use native evdev for local
-  Exit, retain X11 only for window ownership and lifecycle, and must not be
-  described as visual FPS without camera/operator evidence.
+  Exit, derive geometry from `/dev/fb0`, open no X11 connection, and must not
+  be described as visual FPS without camera/operator evidence.
 - The **Benchmark A2 512px/256px/64px** actions use centered dirty regions to
   isolate update-area scaling. They retain full-framebuffer snapshot cleanup;
   do not compare them to full-screen throughput without stating region size.
@@ -95,7 +95,7 @@ frames → PaperPad framebuffer receiver → MXCFB display backend. JPEG bytes a
 paths never cross the protocol boundary. Viewport-relative pointer messages
 travel in the opposite direction from the native evdev reader. Keep framebuffer
 primitives independent of transport and display lifecycle. The remaining X11
-code is temporary benchmark ownership/lifecycle scaffolding.
+source and dependencies are dormant removal scaffolding with no runtime caller.
 
 ## Device deployment (MTP)
 
@@ -171,6 +171,6 @@ After a successful deploy, `mtp-rs ls /extensions/rust_x11_hello --recursive` sh
 - Match the deployed binary's SHA-256 against the host artifact before trusting a run.
 - Native-input claims require `input reader: opened` plus evdev Press/Release
   records in the authoritative Kindle log and the matching deployed checksum.
-  X11 `ButtonPress`/`ButtonRelease` records may be logged as ignored only by the
-  temporary benchmark lifecycle and are not evidence that PaperPad dispatched
-  twice.
+  Archived X11 `ButtonPress`/`ButtonRelease` records are not evidence that
+  PaperPad dispatched twice; current normal and benchmark runs open no X11
+  connection.

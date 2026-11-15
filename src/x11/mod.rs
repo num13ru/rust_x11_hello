@@ -1,4 +1,4 @@
-//! Temporary X11 ownership and lifecycle integration for MXCFB benchmarks.
+//! Dormant X11 implementation retained only until native benchmark validation.
 //!
 //! Raw `x11rb::protocol::Event` values stop here. Downstream UI code works
 //! with [`crate::ui::button::PointerEvent`] instead, so the backend could be

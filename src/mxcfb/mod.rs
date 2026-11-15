@@ -35,7 +35,6 @@ mod present;
 #[cfg(target_os = "linux")]
 mod probe;
 #[cfg(target_os = "linux")]
-pub(crate) use probe::validated_framebuffer_dimensions;
 #[cfg(any(target_os = "linux", test))]
 mod region;
 // Local Exit pixels are prepared without touching /dev/fb0.

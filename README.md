@@ -152,8 +152,8 @@ KUAL provides normal run, explicit benchmark, and diagnostic actions:
   framebuffer restoration, and clean exit before watchdog escalation.
 - **Benchmark MXCFB GC16/DU/A2/DU4** — separate, explicit 12-frame local
   completion benchmarks with a one-minute watchdog. They use native evdev for
-  local Exit and retain X11 for ownership and lifecycle, but do not connect to
-  PaperSpoon; DU, A2, and DU4 are experimental fidelity/ghosting tradeoffs.
+  local Exit, derive geometry from `/dev/fb0`, and open no X11 or PaperSpoon
+  connection; DU, A2, and DU4 are experimental fidelity/ghosting tradeoffs.
 - **Benchmark A2 512px/256px/64px** — centered dirty-region completion tests
   for measuring how update area affects the fastest full-screen waveform.
 - **Inspect framebuffer metadata** — read-only diagnostics; it does not draw or
@@ -364,9 +364,9 @@ mtp-rs rm /extensions/rust_x11_hello/rust_x11_hello.log --yes
 Match the deployed binary's SHA-256 with the host artifact before trusting a
 run. A successful host build or accepted framebuffer ioctl is not evidence of
 visible panel output. Native touch requires an `input reader: opened` record and
-evdev Press/Release records in the Kindle log. Temporary benchmark runs may also
-log X11 button events as ignored; those records are lifecycle diagnostics, not
-a second application-input path.
+evdev Press/Release records in the Kindle log. Current normal and benchmark
+runs do not open X11; archived ignored X11 button records are not a second
+application-input path.
 
 ## Apple Container network issues
 

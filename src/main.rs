@@ -9,19 +9,14 @@
 use anyhow::Context;
 use anyhow::{Result, bail};
 #[cfg(target_os = "linux")]
+use input::benchmark::BenchmarkExitPoll;
+#[cfg(target_os = "linux")]
 use input::evdev::EvdevReader;
 use std::env;
 #[cfg(target_os = "linux")]
 use std::io;
 #[cfg(target_os = "linux")]
 use std::sync::atomic::{AtomicBool, Ordering};
-#[cfg(target_os = "linux")]
-use x11rb::rust_connection::RustConnection;
-
-#[cfg(target_os = "linux")]
-use x11::display::{self as x11_display, WindowMode};
-#[cfg(target_os = "linux")]
-use x11::events::BenchmarkExitPoll;
 
 mod app;
 mod config;
@@ -132,29 +127,14 @@ fn run() -> Result<()> {
 fn run_mxcfb_benchmark() -> Result<()> {
     let config = mxcfb::BenchmarkConfig::from_env()?;
     install_signal_handlers()?;
-    let (conn, screen_num) = RustConnection::connect(None)
-        .context("failed to connect to X11 display; check DISPLAY and /tmp/.X11-unix/X0")?;
-    x11_display::print_screen_info(&conn, screen_num);
-    let mapped = x11_display::setup_window(&conn, screen_num, WindowMode::DirectFramebuffer)?;
-    let win = mapped.window;
-    let size = mapped.size;
+    let mut benchmark = mxcfb::MxcfbBenchmark::open(config)?;
+    let size = benchmark.dimensions();
     eprintln!(
-        "benchmark input window mapped id=0x{win:x} class={} x={} y={} width={} height={}",
-        mapped.mode.label(),
-        x11::display::WINDOW_X,
-        x11::display::WINDOW_Y,
-        size.0,
-        size.1
+        "mxcfb benchmark native lifecycle width={} height={} eviocgrab=false",
+        size.0, size.1
     );
 
-    let benchmark_result = (|| -> Result<(mxcfb::BenchmarkOutcome, bool)> {
-        let mut benchmark = mxcfb::MxcfbBenchmark::open(config)?;
-        anyhow::ensure!(
-            benchmark.dimensions() == size,
-            "MXCFB framebuffer {:?} differs from X11 input window {:?}",
-            benchmark.dimensions(),
-            size
-        );
+    let benchmark_result = (|| -> Result<mxcfb::BenchmarkOutcome> {
         let mut input_reader = EvdevReader::open(size)?;
         let mut benchmark_exit = BenchmarkExitPoll::new(size);
         let run_result = benchmark.run(|| {
@@ -162,12 +142,11 @@ fn run_mxcfb_benchmark() -> Result<()> {
                 eprintln!("mxcfb benchmark graceful shutdown requested by signal");
                 Ok(true)
             } else {
-                benchmark_exit.poll(&mut input_reader, &conn, win)
+                benchmark_exit.poll(&mut input_reader)
             }
         });
         benchmark_exit.shutdown(&mut input_reader);
         drop(input_reader);
-        let window_destroyed = benchmark_exit.window_destroyed();
         let restore_result = benchmark.restore_initial_screen();
         match (run_result, restore_result) {
             (Err(primary), Err(restore_error)) => {
@@ -178,22 +157,14 @@ fn run_mxcfb_benchmark() -> Result<()> {
             }
             (Err(primary), Ok(())) => Err(primary),
             (Ok(_), Err(restore_error)) => Err(restore_error),
-            (Ok(outcome), Ok(())) => Ok((outcome, window_destroyed)),
+            (Ok(outcome), Ok(())) => Ok(outcome),
         }
     })();
 
-    let destroy_window = !matches!(&benchmark_result, Ok((_, true)));
-    let cleanup_result = x11_display::cleanup(&conn, mapped, destroy_window);
-
-    match (benchmark_result, cleanup_result) {
-        (Err(primary), Err(cleanup_error)) => {
-            eprintln!("cleanup after benchmark failure also failed: {cleanup_error:#}");
-            Err(primary)
-        }
-        (Err(primary), Ok(())) => Err(primary),
-        (Ok(_), Err(cleanup_error)) => Err(cleanup_error),
-        (Ok((mxcfb::BenchmarkOutcome::Completed, _)), Ok(())) => Ok(()),
-        (Ok((mxcfb::BenchmarkOutcome::Stopped { completed }, _)), Ok(())) => {
+    match benchmark_result {
+        Err(error) => Err(error),
+        Ok(mxcfb::BenchmarkOutcome::Completed) => Ok(()),
+        Ok(mxcfb::BenchmarkOutcome::Stopped { completed }) => {
             eprintln!("mxcfb benchmark exited early completed={completed}");
             Ok(())
         }
