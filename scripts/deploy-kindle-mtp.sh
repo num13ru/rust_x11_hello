@@ -11,19 +11,17 @@ REMOTE_STAGED_BIN="${REMOTE_BIN}.new"
 REMOTE_PREVIOUS_BIN="${REMOTE_BIN}.previous"
 
 MODE="${1:-}"
-CONFIRMATION="${2:-}"
 UPDATE_TMP_DIR=""
 
 usage() {
     cat <<'EOF'
 Usage:
   scripts/deploy-kindle-mtp.sh install
-  scripts/deploy-kindle-mtp.sh update --confirm-stopped
+  scripts/deploy-kindle-mtp.sh update
 
 install refuses to touch an existing /extensions/rust_x11_hello.
-update requires an explicit stopped-process confirmation and retains the
-previous binary as rust_x11_hello.previous using verified MTP readback/copy;
-it refuses to overwrite that backup.
+update retains the previous binary as rust_x11_hello.previous using verified
+MTP readback/copy; it refuses to overwrite that backup.
 EOF
 }
 
@@ -59,6 +57,7 @@ trap cleanup_local_temp EXIT
 upload_support_files() {
     mtp put "${LOCAL_EXT}/bin/run.sh" "${REMOTE_BIN_DIR}/run.sh" --replace --verify
     mtp put "${LOCAL_EXT}/bin/probe-fb.sh" "${REMOTE_BIN_DIR}/probe-fb.sh" --replace --verify
+    mtp put "${LOCAL_EXT}/bin/probe-input.sh" "${REMOTE_BIN_DIR}/probe-input.sh" --replace --verify
     mtp put "${LOCAL_EXT}/config.xml" "${REMOTE_EXT}/config.xml" --replace --verify
 }
 
@@ -79,20 +78,13 @@ publish_menu() {
     fi
 }
 
+if [[ "$#" -ne 1 ]]; then
+    usage >&2
+    exit 2
+fi
+
 case "$MODE" in
-    install)
-        if [[ -n "$CONFIRMATION" ]]; then
-            usage >&2
-            exit 2
-        fi
-        ;;
-    update)
-        if [[ "$CONFIRMATION" != "--confirm-stopped" ]]; then
-            printf 'ERROR: update requires --confirm-stopped\n' >&2
-            usage >&2
-            exit 2
-        fi
-        ;;
+    install | update) ;;
     *)
         usage >&2
         exit 2
@@ -103,6 +95,7 @@ for required_file in \
     "$LOCAL_BIN" \
     "${LOCAL_EXT}/bin/run.sh" \
     "${LOCAL_EXT}/bin/probe-fb.sh" \
+    "${LOCAL_EXT}/bin/probe-input.sh" \
     "${LOCAL_EXT}/config.xml" \
     "${LOCAL_EXT}/menu.json"
 do

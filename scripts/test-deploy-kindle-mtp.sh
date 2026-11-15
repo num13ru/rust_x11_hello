@@ -21,6 +21,7 @@ mkdir -p "${LOCAL_PACKAGE}/bin"
 printf 'new-binary' >"${LOCAL_PACKAGE}/bin/rust_x11_hello"
 printf 'run' >"${LOCAL_PACKAGE}/bin/run.sh"
 printf 'probe' >"${LOCAL_PACKAGE}/bin/probe-fb.sh"
+printf 'input-probe' >"${LOCAL_PACKAGE}/bin/probe-input.sh"
 printf 'config' >"${LOCAL_PACKAGE}/config.xml"
 printf 'menu' >"${LOCAL_PACKAGE}/menu.json"
 
@@ -43,8 +44,29 @@ run_update() {
         LOCAL_EXT="$LOCAL_PACKAGE" \
         MTP_RS_BIN="$FAKE_MTP_BIN" \
         "$@" \
-        "${REPO_ROOT}/scripts/deploy-kindle-mtp.sh" update --confirm-stopped
+        "${REPO_ROOT}/scripts/deploy-kindle-mtp.sh" update
 }
+
+EXTRA_ARG_ROOT="${TEST_TMP_DIR}/extra-arg-remote"
+EXTRA_ARG_LOG="${TEST_TMP_DIR}/extra-arg.log"
+EXTRA_ARG_OUTPUT="${TEST_TMP_DIR}/extra-arg.output"
+prepare_remote "$EXTRA_ARG_ROOT"
+if env \
+    FAKE_MTP_ROOT="$EXTRA_ARG_ROOT" \
+    FAKE_MTP_LOG="$EXTRA_ARG_LOG" \
+    LOCAL_EXT="$LOCAL_PACKAGE" \
+    MTP_RS_BIN="$FAKE_MTP_BIN" \
+    "${REPO_ROOT}/scripts/deploy-kindle-mtp.sh" update unexpected-argument \
+    >"$EXTRA_ARG_OUTPUT" 2>&1
+then
+    printf 'ERROR: unexpected update argument was accepted\n' >&2
+    exit 1
+fi
+grep -Fq 'Usage:' "$EXTRA_ARG_OUTPUT"
+printf 'old-binary' | cmp - \
+    "${EXTRA_ARG_ROOT}/extensions/rust_x11_hello/bin/rust_x11_hello"
+test ! -e \
+    "${EXTRA_ARG_ROOT}/extensions/rust_x11_hello/bin/rust_x11_hello.previous"
 
 SUCCESS_ROOT="${TEST_TMP_DIR}/success-remote"
 SUCCESS_LOG="${TEST_TMP_DIR}/success.log"
@@ -56,6 +78,8 @@ cmp "${LOCAL_PACKAGE}/bin/rust_x11_hello" \
     "${SUCCESS_ROOT}/extensions/rust_x11_hello/bin/rust_x11_hello"
 cmp "${LOCAL_PACKAGE}/bin/probe-fb.sh" \
     "${SUCCESS_ROOT}/extensions/rust_x11_hello/bin/probe-fb.sh"
+cmp "${LOCAL_PACKAGE}/bin/probe-input.sh" \
+    "${SUCCESS_ROOT}/extensions/rust_x11_hello/bin/probe-input.sh"
 cmp "${LOCAL_PACKAGE}/menu.json" \
     "${SUCCESS_ROOT}/extensions/rust_x11_hello/menu.json"
 activation_line="$(awk '$1 == "put" && $3 == "/extensions/rust_x11_hello/bin/rust_x11_hello" { print NR; exit }' "$SUCCESS_LOG")"

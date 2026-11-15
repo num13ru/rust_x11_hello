@@ -1,8 +1,8 @@
-//! Direct-framebuffer diagnostics and the experimental MXCFB display backend.
+//! Direct-framebuffer diagnostics and the native MXCFB display backend.
 
 #[cfg(target_os = "linux")]
 mod abi;
-// Selected only when PAPERPAD_DISPLAY_BACKEND=mxcfb on Linux.
+// The normal PaperPad runtime selects this backend directly on Linux.
 #[cfg(target_os = "linux")]
 mod backend;
 #[cfg(target_os = "linux")]

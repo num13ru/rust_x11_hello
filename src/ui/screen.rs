@@ -3,7 +3,7 @@
 /// Height reserved for PaperPad-owned system UI at the bottom of the screen.
 pub(crate) const SYSTEM_UI_HEIGHT: u16 = 72;
 
-/// Signed X11 window-relative coordinate received from the device.
+/// Signed physical-screen coordinate received from the active input backend.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PhysicalPoint {
     pub x: i16,
@@ -53,19 +53,15 @@ pub(crate) struct ScreenLayout {
 }
 
 impl ScreenLayout {
-    /// Partition a non-empty X11 window into remote and local ownership.
+    /// Partition a non-empty physical screen into remote and local ownership.
     ///
-    /// Dimensions are capped at X11's signed-coordinate limit, matching the
-    /// existing drawing and input geometry behavior. If the window is shorter
-    /// than the full system strip, PaperPad owns all available rows and exposes
-    /// an empty remote viewport.
+    /// If the screen is shorter than the full system strip, PaperPad owns all
+    /// available rows and exposes an empty remote viewport.
     pub(crate) fn new(width: u16, height: u16) -> Option<Self> {
         if width == 0 || height == 0 {
             return None;
         }
 
-        let width = width.min(i16::MAX as u16);
-        let height = height.min(i16::MAX as u16);
         let system_height = height.min(SYSTEM_UI_HEIGHT);
         let remote_height = height - system_height;
 

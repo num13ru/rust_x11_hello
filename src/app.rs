@@ -1,26 +1,8 @@
-//! Wire- and X11-independent PaperPad viewport and local Exit decisions.
+//! PaperPad viewport and local Exit decisions.
 
 use crate::ui::button::{PRIMARY_BUTTON_DETAIL, PointerEvent, PointerEventKind};
 use crate::ui::screen::{RemotePoint, ScreenLayout};
 use crate::ui::system::{SystemAction, SystemUi};
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct Redraw {
-    size: (u16, u16),
-}
-
-impl Redraw {
-    pub(crate) fn size(self) -> (u16, u16) {
-        self.size
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum GeometryUpdate {
-    IgnoredZero,
-    Unchanged,
-    Redraw(Redraw),
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum Activation {
@@ -78,28 +60,6 @@ impl AppState {
             height,
             remote_contact_active: false,
             system_ui: SystemUi::default(),
-        }
-    }
-
-    pub(crate) fn size(&self) -> (u16, u16) {
-        (self.width, self.height)
-    }
-
-    pub(crate) fn redraw(&self) -> Redraw {
-        Redraw { size: self.size() }
-    }
-
-    pub(crate) fn update_geometry(&mut self, reported: (u16, u16)) -> GeometryUpdate {
-        if reported.0 == 0 || reported.1 == 0 {
-            GeometryUpdate::IgnoredZero
-        } else if reported == self.size() {
-            GeometryUpdate::Unchanged
-        } else {
-            self.remote_contact_active = false;
-            self.system_ui.cancel_contact();
-            self.width = reported.0;
-            self.height = reported.1;
-            GeometryUpdate::Redraw(self.redraw())
         }
     }
 
@@ -384,35 +344,5 @@ mod tests {
         let release = state.handle_pointer(pointer(PointerEventKind::Release, point));
         assert_eq!(release.remote(), None);
         assert_eq!(release.activation(), None);
-    }
-
-    #[test]
-    fn geometry_updates_ignore_zero_and_cancel_contact_on_change() {
-        let mut state = AppState::new(SIZE);
-        let point = remote_point(SIZE);
-        assert_eq!(
-            state
-                .handle_pointer(pointer(PointerEventKind::Press, point))
-                .activation(),
-            None
-        );
-        assert_eq!(
-            state.update_geometry((0, SIZE.1)),
-            GeometryUpdate::IgnoredZero
-        );
-        assert_eq!(state.size(), SIZE);
-        assert_eq!(state.update_geometry(SIZE), GeometryUpdate::Unchanged);
-        let resized = (SIZE.0 / 2, SIZE.1 / 2);
-        assert_eq!(
-            state.update_geometry(resized),
-            GeometryUpdate::Redraw(Redraw { size: resized })
-        );
-        assert_eq!(state.size(), resized);
-        assert_eq!(
-            state
-                .handle_pointer(pointer(PointerEventKind::Release, point))
-                .activation(),
-            None
-        );
     }
 }

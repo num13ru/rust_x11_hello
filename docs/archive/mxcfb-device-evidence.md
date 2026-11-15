@@ -1,5 +1,89 @@
 # Paperwhite 6 framebuffer evidence
 
+## Nonexclusive evdev event trace (2026-11-13)
+
+The deployed trace binary independently matched the host artifact at SHA-256
+`86d4f053ff475b148969c2d3a96360cef95b8be94b6d849b0ec67d6d118b1608`.
+The operator launched **Trace input events (15s; tap)** and made ordered
+single-finger taps near top-left, center, and bottom-right. The diagnostic
+opened the capability-selected `pt_mt` device without `EVIOCGRAB`.
+
+The retrieved cumulative log SHA-256 is
+`275fcd92ec4fe6ac64dd1b652f7411c49d58b02cd01567039524086928aa1fb9`.
+Its second trace block, dated `Fri Nov 13 18:57:22 GMT+3:0100 2026`, captured
+three complete primary contacts centered approximately at `(215,180)`,
+`(639,810)`, and `(1149,1480)`. This ordering establishes that raw X increases
+left-to-right and raw Y increases top-to-bottom in the tested portrait
+orientation. The evdev ranges therefore map one-to-one to the 1272×1696
+physical coordinate space for this orientation; no swap or inversion was
+observed.
+
+Each observed contact used the type-B multitouch sequence below:
+
+1. `ABS_MT_TRACKING_ID=0`, followed by X/Y and sometimes
+   `ABS_MT_TOUCH_MAJOR`, then `SYN_REPORT`;
+2. zero or more position/touch-major changes, each committed by `SYN_REPORT`;
+3. `ABS_MT_TRACKING_ID=-1`, then `SYN_REPORT` for release.
+
+The device reused tracking ID 0 for later contacts. It emitted no `BTN_TOUCH`,
+`BTN_TOOL_FINGER`, `SYN_MT_REPORT`, or `ABS_MT_SLOT` record in these
+single-contact traces; slot 0 is the implicit initial slot. The capability
+probe still establishes support for slots 0 and 1. No `SYN_DROPPED` or
+secondary-contact sequence was exercised.
+
+Because the trace was deliberately nonexclusive and created no X11 window, the
+operator saw the original Kindle UI and the same taps invoked that UI. Neither
+of two trace blocks contains the normal completion/footer line, and a later MTP
+size check showed the log stable at 133,386 bytes. Do not describe this as a
+successfully bounded KUAL completion: the raw contacts were captured, but the
+underlying UI interaction terminated or detached the diagnostic lifecycle.
+This result confirms shared delivery without a grab and shows that a future
+interactive trace needs lifecycle isolation if its completion itself matters.
+It does not establish `EVIOCGRAB` safety.
+
+## Read-only evdev capability probe (2026-11-13)
+
+The deployed ARM binary was independently read back before the run and matched
+the host artifact at SHA-256
+`733ba1d2808391db4e8d8a1e093c82e82711ddb6f0fb8dffb7a79add7f54eea0`.
+The operator ran **Inspect input devices** through KUAL. The latest block in the
+retrieved cumulative log is dated `Fri Nov 13 18:43:30 GMT+3:0100 2026`, reports
+`event reads=false eviocgrab=false`, and ended with probe exit status 0. The
+retrieved log SHA-256 is
+`9c591b88826cfe78478c856949725e38493f9e336b30af76934382d7878a99d5`.
+
+The probe found two readable event nodes:
+
+- `/dev/input/event0`, `bd71828-pwrkey`, exposes `EV_SYN` and `EV_KEY` and is
+  not a touch candidate.
+- `/dev/input/event1`, `pt_mt`, has the direct-input property and exposes
+  `EV_SYN`, `EV_KEY`, `EV_REL`, and `EV_ABS`. It exposes no `BTN_TOUCH` or
+  `BTN_TOOL_FINGER`, but it has a complete multitouch capability set.
+
+`pt_mt` reported these absolute axes; every reported fuzz, flat, and resolution
+value was zero:
+
+| Axis | Range |
+| --- | --- |
+| `ABS_MT_SLOT` | 0..1 |
+| `ABS_MT_TOUCH_MAJOR` (`0x30`) | 0..255 |
+| `ABS_MT_POSITION_X` | 0..1271 |
+| `ABS_MT_POSITION_Y` | 0..1695 |
+| `ABS_MT_TOOL_TYPE` (`0x37`) | 0..2 |
+| `ABS_MT_TRACKING_ID` | 0..65535 |
+
+The position ranges numerically match the validated 1272×1696 framebuffer.
+Capability metadata alone does not establish axis orientation, inversion,
+rotation, touch/release encoding, `SYN_REPORT` grouping, slot transition order,
+secondary-contact behavior, or whether `EVIOCGRAB` is safe. No event records
+were read and no exclusive grab was requested in this run.
+
+The separately retrieved `rust_x11_hello.status` SHA-256 is
+`86d5c79e6082ec9b83e0e795f4daba78ebca99a5a16087dab2cc19fec8fd6336`,
+but its `STOPPED status=143 reason=watchdog` value belongs to the preceding
+normal PaperPad launch. The standalone capability probe does not update that
+status file, so it is not probe-result evidence.
+
 ## Backgroundless InputOutput occlusion trial (2026-11-13)
 
 The deployed ARM binary was independently read back over MTP before the run and
@@ -54,7 +138,7 @@ waits; they are not camera-verified visual FPS. The waveform names describe
 PaperPad's requests, not independently observed panel state. In particular,
 the matching driver may substitute full GLR16 for a sufficiently large DU
 request. The maintained interpretation and current compact results are in
-[`docs/mxcfb-benchmarks.md`](../mxcfb-benchmarks.md).
+[`mxcfb-benchmarks.md`](mxcfb-benchmarks.md).
 
 ## InputOnly marker-contention trial (2026-10-25)
 
@@ -308,3 +392,350 @@ reconnect, and Exit-strip isolation were not reported, so those details are not
 claimed as independently evidenced by this entry. Host tests cover contain
 scaling, white letterboxing, malformed and missing files, retained-pixel
 reconnects, and connection/viewport races.
+
+## Phase 2 runtime extraction smoke verification (2026-11-14)
+
+The Phase 2 PaperPad build was deployed to the Paperwhite 6 after host checks,
+ARMv7 musl build, and static verification passed. Independent MTP readback
+matched the host artifact at SHA-256
+`34b4f8330d9f135e632ad790d30141c430376f72ff063a7270927f42f58491ff`.
+The operator subsequently reported the build verified on device.
+
+No detailed device checklist or new runtime logs accompanied that report, so
+this entry records smoke acceptance only. It does not establish native evdev
+input or X11-free screen ownership; this intermediate build still uses X11 for
+event delivery and window lifecycle.
+
+## Dormant evdev decoder build smoke verification (2026-11-14)
+
+The first Phase 3 decoder build passed host checks, ARMv7 musl build, and static
+verification before deployment. Independent MTP readback matched the host
+artifact at SHA-256
+`bc7a01667e43eb116524a5923f7b51232d126ba39e994bd59b79f8d3caffe06e`.
+The operator subsequently reported the build verified on device.
+
+The decoder was not connected to normal input in this build, so this report
+establishes only that the preparatory code did not break the existing X11-driven
+runtime smoke test. Native evdev event delivery, cancellation, and device-loss
+behavior remain unverified on hardware.
+
+## Dormant evdev reader build smoke verification (2026-11-14)
+
+The nonblocking reader build passed the full host suite, ARMv7 musl build, and
+static verification before deployment. Independent MTP readback matched the
+host artifact at SHA-256
+`0f9abbde9b1730a14e63fe0666f9a257240595ca8d70d7250b1b060784b6d619`.
+The operator subsequently reported the build verified on device.
+
+Normal startup did not open the reader in this build. This report therefore
+establishes only an existing-runtime smoke check; capability selection,
+nonblocking reads, decoded pointer delivery, and cancellation remain unverified
+on hardware.
+
+## Native evdev runtime integration (2026-11-14)
+
+The normal PaperPad build passed the full host suite, ARMv7 musl build, and
+static verification before deployment. Independent MTP readback matched the
+host artifact at SHA-256
+`d248b776e12b00b9cb5bd15cb0a8cd69449d51287889da0b77ad5b88991d8500`.
+The operator then verified the run on the Paperwhite 6.
+
+The retrieved device log records the capability-selected `pt_mt` reader opened
+at `/dev/input/event1`, axis ranges `0..1271` and `0..1695`, screen geometry
+1272 x 1696, and `eviocgrab=false`. It records primary evdev Press/Release pairs
+queued to PaperSpoon while corresponding core-X11 button events were logged as
+ignored. The final evdev contact reached the device-local Exit strip and was
+followed by MXCFB restoration of the 2,157,312-byte framebuffer snapshot.
+
+This establishes the primary nonexclusive native-input path, suppression of
+duplicate X11 dispatch, remote pointer forwarding, local Exit, and normal
+framebuffer restoration for this run. It does not establish viewport-edge
+accuracy, secondary-contact cancellation, descriptor-loss recovery, exclusive
+grab behavior, or X11-free screen ownership.
+
+## Native-input benchmark completion sweep (2026-11-14)
+
+The benchmark-local native-input build passed the full host suite, ARMv7 musl
+build, and static verification. Independent MTP readback matched the host
+artifact at SHA-256
+`1710d85c72a94a061635de09e69a7db2413adfb9587be876d5fff60d08573d60`.
+The operator then ran all seven KUAL benchmark actions.
+
+The retrieved device log records successful GC16, DU4, DU, full-viewport A2,
+and 64 x 64, 256 x 256, and 512 x 512 A2 launches. Every launch opened the
+capability-selected `/dev/input/event1` reader without `EVIOCGRAB`, completed
+all 12 measured samples, exited with status 0, and restored the 2,157,312-byte
+framebuffer snapshot. This establishes 84 of 84 normal-completion samples with
+native input initialized; the latest compact timings are in
+[`mxcfb-benchmarks.md`](mxcfb-benchmarks.md).
+
+No benchmark run logged an evdev pointer record or an early stop. This sweep
+therefore does not establish benchmark-local Exit, ignored X11 duplicates
+during a benchmark contact, or signal-stop cleanup.
+
+## Framebuffer-derived startup geometry (2026-11-14)
+
+The geometry-first MXCFB build passed the full host suite, ARMv7 musl build,
+and static verification. Independent MTP readback matched the host artifact at
+SHA-256
+`3e3db7aca40a0b4a49c6cd024971354b59e4f58984be992fe6b6a8302bc3f905`.
+
+The operator verified the normal MXCFB launch. The retrieved log records
+`MXCFB startup metadata validated width=1272 height=1696 source=/dev/fb0`
+before the X11 connection, followed by a matching 1272 x 1696 ownership window,
+evdev reader, and read-write framebuffer backend. An application touch was
+forwarded, the device-local Exit activated, the 2,157,312-byte snapshot was
+restored, and the binary exited with status 0.
+
+This establishes framebuffer-derived startup geometry and mismatch-checked X11
+ownership for this run. It does not establish screen ownership without X11 or
+recovery after forced termination.
+
+## Graceful TERM cleanup (2026-11-14)
+
+The normal-runtime signal build passed the full host suite, ARMv7 musl build,
+and static verification. Independent MTP readback matched the host artifact at
+SHA-256
+`511e479fbb8d90361bc9839feb176248148c334ef1a33b00e1e2fd5b37f27b6e`.
+
+The operator ran **Test MXCFB TERM cleanup (15s)** and confirmed visible
+restoration and post-run Kindle usability. The retrieved log records the
+launcher sending `TERM` to PID 7440 at its 15-second deadline, PaperPad
+acknowledging graceful signal shutdown, restoration of the 2,157,312-byte
+snapshot, binary status 0, and watchdog end reason. No forced `KILL` was sent.
+
+This establishes normal MXCFB cleanup after launcher-forwarded `TERM` while the
+X11 ownership window remains. It does not establish cleanup after `SIGKILL`, a
+kernel hang, power loss, or a no-X11 run.
+
+## Bounded no-X11 ownership trial (2026-11-14)
+
+The bounded ownership-trial build passed the full host suite, ARMv7 musl
+build, and static verification. Independent MTP readback matched the host
+artifact at SHA-256
+`d3dabc8c95000d21abd9ff77eb58917849510c85db4c079597c855954fc95018`.
+The retrieved cumulative log has SHA-256
+`04fbca170174a9c8333ee37eb291e85974c863144845a9f16abff19991db9e00`;
+the status snapshot has SHA-256
+`2fead5455234aee9d2909f8525bc5dab7bc5190893b73ddc8681f97309cc15b1`
+and reports `STOPPED status=0`.
+
+The operator ran **Trial MXCFB without X11 (15s)** and confirmed that the
+stock UI did not overwrite the trial, the original screen visibly restored,
+and the Kindle remained usable. The final launcher session ran from
+`Sat Nov 14 19:27:14 GMT+3:0100 2026` through `19:27:30`. It records local
+mode with transport disabled, `no-X11 ownership trial starting`, the 1272 x
+1696 MXCFB geometry, `/dev/input/event1` opened with `eviocgrab=false`, the
+trial becoming ready, deadline stop, restoration of the 2,157,312-byte
+snapshot, binary status 0, and process-exit end reason. No `connected to X11`
+record occurs within that launcher session.
+
+This establishes 15 seconds of native display ownership plus deadline cleanup
+without X11, transport, or an input grab on the tested device. It does not yet
+establish a connected normal-runtime session, a longer ownership interval,
+local-Exit cleanup on the no-X11 path, or recovery after `SIGKILL`, kernel
+hang, or power loss.
+
+## Bounded no-X11 exclusive-input trial (2026-11-14)
+
+The exclusive-input trial build passed the full host suite, ARMv7 musl build,
+and static verification. Independent MTP readback matched the host artifact at
+SHA-256
+`9cacae4b635169485855368aff33f7e01c1ac06c1c1718ab0c78af39fca98c7d`.
+The retrieved cumulative log has SHA-256
+`85b98df991cb498aaf4d01c97b5d3f33e947a0eea1cde5f026b7fea9bbec8696`;
+the status snapshot has SHA-256
+`2fead5455234aee9d2909f8525bc5dab7bc5190893b73ddc8681f97309cc15b1`
+and reports `STOPPED status=0`.
+
+The operator ran **Trial exclusive input without X11 (15s)**, gestured in the
+remote area, then used local Exit. The operator confirmed that the underlying
+Kindle/KUAL UI did not react, the original screen visibly restored, and normal
+Kindle touch worked afterward. The launcher session ran from
+`Sat Nov 14 19:52:55 GMT+3:0100 2026` through `19:53:03`. It records local mode
+with transport disabled, `eviocgrab=true`, `/dev/input/event1` opening with the
+grab active, remote-area and system-strip Press/Release records, local Exit,
+explicit `EVIOCGRAB` release, restoration of the 2,157,312-byte snapshot,
+binary status 0, and process-exit end reason. No `connected to X11` record
+occurs within that launcher session.
+
+This establishes exclusive input during a bounded no-X11 run and orderly
+release on local Exit on the tested device. It does not establish release at
+the internal deadline, after a signal, after an input/read failure, or solely
+through descriptor close after abnormal control flow.
+
+## Connected no-X11 runtime trial (2026-11-14)
+
+The connected-runtime trial build passed the full host suite, ARMv7 musl
+build, and static verification. Independent MTP readback matched the host
+artifact at SHA-256
+`5173ad1a5c2b4d714c9894fabbaec188287395fdab9c76ce8ff6557fc1864781`.
+The retrieved cumulative log has SHA-256
+`c724d510c1881833ea8314b6c2f99ec1eaffc49f23e6c37baa4e853818adc453`;
+the status snapshot has SHA-256
+`2fead5455234aee9d2909f8525bc5dab7bc5190893b73ddc8681f97309cc15b1`
+and reports `STOPPED status=0`.
+
+The operator ran **Trial connected runtime without X11 (60s)** with
+PaperSpoon active. The operator confirmed that the application rendered,
+remote touches updated it, the underlying Kindle/KUAL UI did not react, local
+Exit restored the original screen, and normal Kindle touch worked afterward.
+The launcher session ran from `Sat Nov 14 20:05:01 GMT+3:0100 2026` through
+`20:05:25`. It records discovery selecting `192.168.0.10:5581`, connection to
+PaperSpoon, the connection indicator changing to connected, Mono1 frame 1
+covering the 1272 x 1624 remote viewport, multiple exclusive evdev
+Press/Release pairs forwarded as remote Down/Up phases, and subsequent Mono1
+frame submissions. Local Exit then caused explicit `EVIOCGRAB` release,
+restoration of the 2,157,312-byte snapshot, binary status 0, and process-exit
+end reason. No `connected to X11` record occurs within that launcher session.
+
+This establishes the connected transport/runtime, Mono1 presentation, remote
+touch, exclusive input isolation, local Exit, and orderly restoration without
+X11 on the tested device. It does not establish Gray8 presentation,
+disconnect/reconnect behavior, the internal deadline, launcher-forwarded
+signal cleanup, input failure, or descriptor-close-only grab release.
+
+## Connected no-X11 TERM cleanup (2026-11-14)
+
+The lifecycle action reused the independently read-back connected-runtime
+artifact at SHA-256
+`5173ad1a5c2b4d714c9894fabbaec188287395fdab9c76ce8ff6557fc1864781`.
+The full host suite, ARMv7 musl build, and static verification passed before
+the updated KUAL menu was deployed. The retrieved cumulative log has SHA-256
+`a59c83823b40627f5fedab63ea52a6dcd5313662c73dedbf8ee1b3a1c309909c`;
+the status snapshot has SHA-256
+`7b518dd1f30983840b0c2ce28fd7996f09263a71985050d6a0d66397f7d87c8e`
+and reports `STOPPED status=0 reason=watchdog`.
+
+The operator ran **Test connected no-X11 TERM cleanup (15s)** with PaperSpoon
+active and confirmed automatic visible restoration plus normal Kindle touch
+afterward. The launcher session ran from
+`Sat Nov 14 20:12:14 GMT+3:0100 2026` through `20:12:29`. It records exclusive
+evdev input, PaperSpoon discovery and connection, Mono1 frame 34 presentation,
+the launcher reaching its 15-second deadline and sending `TERM` to PID 17839,
+the native loop stopping for `signal`, explicit `EVIOCGRAB` release,
+restoration of the 2,157,312-byte snapshot, binary status 0, and watchdog end
+reason. No `KILL` escalation or `connected to X11` record occurs in the
+session.
+
+This establishes launcher-forwarded graceful signal cleanup for the connected
+no-X11 runtime on the tested device. It does not establish `SIGKILL`, kernel
+hang, power-loss, input-failure, or descriptor-close-only recovery.
+
+## Normal MXCFB action native-runtime cutover (2026-11-15)
+
+The cutover build passed the full host suite, ARMv7 musl build, and static
+verification. Independent post-deployment MTP readback matched the host artifact
+at SHA-256
+`0c286a2e91029b51c49e0bc80f7400b4a1571f4bd42d6eb018dc34a37804f845`.
+The retrieved cumulative log has SHA-256
+`28edeec12c348ae134c07370f03a5c28882983c16e7a5b4dfbd50f0d45d1e131`;
+the status snapshot has SHA-256
+`7b518dd1f30983840b0c2ce28fd7996f09263a71985050d6a0d66397f7d87c8e`
+and reports `STOPPED status=0 reason=watchdog` after the final run.
+
+The operator ran the existing **Run Paperpad MXCFB (5m, experimental)** action
+with PaperSpoon active and confirmed the device result. The first relevant
+launcher session ran from `Sun Nov 15 11:59:33 GMT+3:0100 2026` through
+`12:00:04`. It records normal `paperpad` mode, the native runtime with
+`eviocgrab=true`, `/dev/input/event1`, discovery and connection to PaperSpoon,
+Mono1 frame presentation, repeated evdev Press/Release pairs forwarded as
+remote Down/Up phases, device-local Exit, explicit grab release, restoration of
+the 2,157,312-byte framebuffer snapshot, and binary status 0. No
+`connected to X11` record occurs within that launcher session.
+
+A second normal-action session ran from `12:00:37` through `12:05:38`. It
+records the same native exclusive-input startup, PaperSpoon connection, Mono1
+and Gray8 frame presentation, the five-minute launcher watchdog sending
+`TERM`, a signal stop, explicit grab release, full-snapshot restoration, binary
+status 0, and no forced `KILL`. No `connected to X11` record occurs within that
+launcher session.
+
+This establishes the normal KUAL MXCFB action's X11-free startup, connected
+Mono1 and Gray8 presentation, remote touch forwarding, local Exit, graceful
+watchdog termination, exclusive-input release, and orderly framebuffer
+restoration on the tested device. It does not establish disconnect/reconnect,
+pixel fidelity, recovery after `SIGKILL`, kernel hang, power loss, input
+failure, or descriptor-close-only grab release.
+
+## Sole native normal action (2026-11-15)
+
+The backend-selector and duplicate-normal-action removal passed the full host
+suite, ARMv7 musl build, and static verification. Independent post-deployment
+MTP readback matched the host artifact at SHA-256
+`aa0bc73c2fbafb064cdc8bc876fab1374f1c9f4ad1162774a16ad07296f6eadb`.
+The retrieved cumulative log has SHA-256
+`c798fed9cb9337caf5aa2a52a00b63371f4c095d62feef5897bec9c9fd2d63ef`;
+the status snapshot has SHA-256
+`2fead5455234aee9d2909f8525bc5dab7bc5190893b73ddc8681f97309cc15b1`
+and reports `STOPPED status=0 reason=process_exit`.
+
+The operator ran the sole **Run Paperpad (5m)** action and verified the device
+result. The final launcher session ran from
+`Sun Nov 15 12:23:12 GMT+3:0100 2026` through `12:24:08`. It records normal
+`paperpad` mode, native MXCFB startup with `eviocgrab=true`, PaperSpoon
+connection, Mono1 and Gray8 presentation, repeated evdev Press/Release pairs
+forwarded as remote Down/Up phases, device-local Exit, explicit grab release,
+restoration of the 2,157,312-byte framebuffer snapshot, and binary status 0.
+No `connected to X11` record occurs within that launcher session.
+
+This confirms that removing the runtime backend selector and duplicate KUAL
+normal action did not change the previously validated native runtime behavior
+on the tested device. The same forced-termination and input-failure limitations
+recorded for the preceding cutover remain.
+
+## Native benchmark lifecycle (2026-11-15)
+
+The native benchmark-lifecycle build passed the full host suite, ARMv7 musl
+build, and static verification. Independent post-deployment MTP readback
+matched the host artifact at SHA-256
+`83ac2f642bfdd5a0c418541d1bbaf55111cd0c2c9315039791511137116c399a`.
+The retrieved cumulative log has SHA-256
+`3ae4f29a332b97a30638625e7241ea81b10109d9f016b42343d48c96388b8030`;
+the status snapshot has SHA-256
+`2fead5455234aee9d2909f8525bc5dab7bc5190893b73ddc8681f97309cc15b1`
+and reports `STOPPED status=0`.
+
+The operator ran **Benchmark MXCFB GC16 (12)** to completion and confirmed
+screen restoration and post-run usability. The launcher session ran from
+`Sun Nov 15 12:34:28 GMT+3:0100 2026` through `12:34:33`. It records
+`--benchmark-mxcfb`, full-screen GC16 with 12 samples, the native lifecycle at
+1272 x 1696 with `eviocgrab=false`, capability-selected `/dev/input/event1`,
+all 12 marker-specific samples, restoration of the 2,157,312-byte framebuffer
+snapshot, and binary status 0. No `connected to X11` record occurs within that
+launcher session.
+
+This establishes native framebuffer-derived benchmark startup, bounded GC16
+completion, and orderly restoration without X11 on the tested device. It does
+not add new visual-fidelity evidence or establish local Exit, signal stop, or
+input-failure cleanup for the migrated benchmark lifecycle.
+
+## Final native-only normal runtime (2026-11-15)
+
+The final cleanup build passed the full host suite, ARMv7 musl build, and static
+verification. A fresh post-run MTP readback matched the deployed artifact at
+SHA-256
+`ff451df482520ae579ad2b54108a52b8adaf19b7d34d025bc8eae2cbd26c5364`.
+The retrieved cumulative log has SHA-256
+`2a4bd17a90ab98ab9f6f1cd0cdba9c18c6f99eba2e984518c787c50bccc9d43a`;
+the status snapshot has SHA-256
+`2fead5455234aee9d2909f8525bc5dab7bc5190893b73ddc8681f97309cc15b1`
+and reports `STOPPED status=0 reason=process_exit`.
+
+The operator ran **Run Paperpad (5m)** and confirmed connected rendering,
+responsive touch, device-local Exit, visible stock-screen restoration, and
+normal Kindle usability afterward. The matching launcher session ran from
+`Sun Nov 15 19:35:33 GMT+3:0100 2026` through `19:36:26`. It records native
+MXCFB startup at 1272 x 1696, exclusive `/dev/input/event1` (`pt_mt`) input,
+discovery of `192.168.0.10:5581`, and connection to PaperSpoon. The session
+contains 26 evdev Press/Release pairs: 25 matching remote Down/Up pairs and one
+final device-local Exit pair. It also records 47 Mono1 and two Gray8 frame
+submissions, explicit `EVIOCGRAB` release, restoration of the 2,157,312-byte
+framebuffer snapshot, and binary exit status 0.
+
+This establishes the final native-only artifact's connected normal path,
+Mono1 and Gray8 presentation, remote pointer forwarding, device-local Exit,
+exclusive-input release, orderly framebuffer restoration, and post-run device
+usability on the tested PW6. It does not newly establish disconnect/reconnect,
+pixel fidelity, `SIGKILL`, kernel-hang or power-loss recovery, input-failure
+cleanup, or descriptor-close-only grab release.

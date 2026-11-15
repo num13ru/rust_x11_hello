@@ -1,13 +1,11 @@
-//! Experimental MXCFB sibling of the X11 display backend.
+//! Native MXCFB display backend.
 
 use std::fs::File;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result};
 
-use crate::display::{
-    CachedFrameMetadata, DisplayBackend, RedrawCause, RemoteFrame, RemoteFrameCache,
-};
+use crate::display::{RemoteFrame, RemoteFrameCache};
 
 use super::controller;
 use super::dirty::changed_region;
@@ -196,26 +194,16 @@ impl MxcfbDisplayBackend {
     }
 }
 
-impl DisplayBackend for MxcfbDisplayBackend {
-    fn dimensions(&self) -> (u16, u16) {
+impl MxcfbDisplayBackend {
+    pub(crate) fn dimensions(&self) -> (u16, u16) {
         self.opened.info.screen.physical_size()
     }
 
-    fn pixel_formats(&self) -> paper_protocol::V2PixelFormats {
+    pub(crate) fn pixel_formats(&self) -> paper_protocol::V2PixelFormats {
         paper_protocol::V2PixelFormats::MONO1.with(paper_protocol::PixelFormat::Gray8)
     }
 
-    fn set_dimensions(&mut self, dimensions: (u16, u16)) -> Result<Option<CachedFrameMetadata>> {
-        ensure!(
-            dimensions == self.dimensions(),
-            "MXCFB X11 window geometry {:?} differs from framebuffer {:?}",
-            dimensions,
-            self.dimensions()
-        );
-        Ok(None)
-    }
-
-    fn display_remote_frame(&mut self, frame: RemoteFrame<'_>) {
+    pub(crate) fn display_remote_frame(&mut self, frame: RemoteFrame<'_>) {
         let viewport = self.opened.info.screen.remote_viewport;
         if (frame.width(), frame.height()) != (viewport.width, viewport.height) {
             eprintln!(
@@ -302,55 +290,7 @@ impl DisplayBackend for MxcfbDisplayBackend {
         }
     }
 
-    fn redraw_cached_frame(&mut self, cause: RedrawCause) {
-        let Some(cached) = self.remote_frame_cache.current() else {
-            return;
-        };
-        let (width, height) = cached.dimensions();
-        let frame = match RemoteFrame::new(
-            cached.frame_id(),
-            width,
-            height,
-            cached.pixel_format(),
-            cached.stride(),
-            cached.payload(),
-            0,
-        ) {
-            Ok(frame) => frame,
-            Err(error) => {
-                eprintln!(
-                    "mxcfb cached frame invalid id={}: {error:#}",
-                    cached.frame_id()
-                );
-                return;
-            }
-        };
-        self.screen_modified = true;
-        match present_remote_with(
-            &mut self.opened,
-            &mut self.markers,
-            frame,
-            self.submit_update,
-        ) {
-            Ok(submitted) => eprintln!(
-                "mxcfb frame restored id={} format={:?} cause={cause:?} marker={} region=({},{} {}x{})",
-                frame.frame_id(),
-                frame.pixel_format(),
-                submitted.marker,
-                submitted.region.x,
-                submitted.region.y,
-                submitted.region.width,
-                submitted.region.height
-            ),
-            Err(error) => eprintln!(
-                "mxcfb frame restore failed id={} format={:?} cause={cause:?}: {error:#}",
-                frame.frame_id(),
-                frame.pixel_format()
-            ),
-        }
-    }
-
-    fn draw_system_ui(&mut self, connected: bool) -> Result<()> {
+    pub(crate) fn draw_system_ui(&mut self, connected: bool) -> Result<()> {
         self.screen_modified = true;
         let submitted = present_system_ui_with(
             &mut self.opened,
@@ -370,7 +310,7 @@ impl DisplayBackend for MxcfbDisplayBackend {
         Ok(())
     }
 
-    fn maintain(&mut self) -> Result<()> {
+    pub(crate) fn maintain(&mut self) -> Result<()> {
         let Some(refresh_at) = self.startup_refresh_at else {
             return Ok(());
         };
@@ -400,7 +340,7 @@ impl DisplayBackend for MxcfbDisplayBackend {
         Ok(())
     }
 
-    fn shutdown(&mut self) -> Result<()> {
+    pub(crate) fn shutdown(&mut self) -> Result<()> {
         self.restore_initial_screen()
     }
 }
@@ -583,16 +523,12 @@ mod tests {
             backend.remote_frame_cache.current().unwrap().payload(),
             &gray8_pixels
         );
-        backend.redraw_cached_frame(RedrawCause::SurfaceDamage);
-        assert_eq!(backend.remote_frame_cache.current().unwrap().frame_id(), 3);
     }
 
     #[test]
     fn fixed_geometry_and_local_exit_failures_are_explicit() {
         let mut backend = fake_backend(accept_update);
         assert_eq!(backend.dimensions(), (64, 73));
-        assert_eq!(backend.set_dimensions((64, 73)).unwrap(), None);
-        assert!(backend.set_dimensions((65, 73)).is_err());
         backend.draw_system_ui(false).unwrap();
         backend.submit_update = reject_update;
         assert!(backend.draw_system_ui(true).is_err());

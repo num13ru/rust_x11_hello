@@ -5,8 +5,8 @@ use super::RemoteFrame;
 /// Payload from the most recent remote frame that a display backend presented
 /// successfully.
 ///
-/// The payload is deliberately generic: an X11 backend may retain a prepared
-/// bitmap while another backend may retain a different backend-private value.
+/// The payload is deliberately generic so cache policy remains independent of
+/// framebuffer-native pixel storage.
 pub(crate) struct CachedRemoteFrame<T> {
     frame_id: u64,
     width: u16,

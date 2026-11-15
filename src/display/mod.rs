@@ -3,7 +3,7 @@
 mod cache;
 
 use anyhow::{Result, ensure};
-use paper_protocol::{PixelFormat, V2PixelFormats, validate_gray8_pixels, validate_mono1_pixels};
+use paper_protocol::{PixelFormat, validate_gray8_pixels, validate_mono1_pixels};
 
 pub(crate) use cache::RemoteFrameCache;
 
@@ -74,80 +74,6 @@ impl<'a> RemoteFrame<'a> {
 
     pub(crate) fn receive_decode_us(self) -> u128 {
         self.receive_decode_us
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct CachedFrameMetadata {
-    frame_id: u64,
-    dimensions: (u16, u16),
-    pixel_format: PixelFormat,
-    stride: usize,
-}
-
-impl CachedFrameMetadata {
-    pub(crate) fn new(
-        frame_id: u64,
-        dimensions: (u16, u16),
-        pixel_format: PixelFormat,
-        stride: usize,
-    ) -> Self {
-        Self {
-            frame_id,
-            dimensions,
-            pixel_format,
-            stride,
-        }
-    }
-
-    pub(crate) fn frame_id(self) -> u64 {
-        self.frame_id
-    }
-
-    pub(crate) fn dimensions(self) -> (u16, u16) {
-        self.dimensions
-    }
-
-    pub(crate) fn pixel_format(self) -> PixelFormat {
-        self.pixel_format
-    }
-
-    pub(crate) fn stride(self) -> usize {
-        self.stride
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum RedrawCause {
-    SurfaceDamage,
-    GeometryChange,
-}
-
-/// Operations the PaperPad runtime needs from any display implementation.
-///
-/// Remote-frame conversion and presentation failures remain non-fatal and are
-/// diagnosed by the backend. Local system-UI failures are returned because the
-/// device-owned Exit control must remain renderable independently of PaperSpoon.
-pub(crate) trait DisplayBackend {
-    fn dimensions(&self) -> (u16, u16);
-    fn pixel_formats(&self) -> V2PixelFormats;
-
-    fn set_dimensions(&mut self, dimensions: (u16, u16)) -> Result<Option<CachedFrameMetadata>>;
-
-    fn display_remote_frame(&mut self, frame: RemoteFrame<'_>);
-
-    fn redraw_cached_frame(&mut self, cause: RedrawCause);
-
-    fn draw_system_ui(&mut self, connected: bool) -> Result<()>;
-
-    /// Perform backend-owned periodic work from the shared event loop.
-    fn maintain(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    /// Restore backend-owned display state before platform window teardown.
-    fn shutdown(&mut self) -> Result<()> {
-        Ok(())
     }
 }
 

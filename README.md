@@ -12,7 +12,7 @@ for a macOS companion called PaperSpoon.
 ```text
 macOS                                      Kindle
 
-PaperSpoon -- PPFB v2 framebuffer ------> PaperPad -- X11 or MXCFB
+PaperSpoon -- PPFB v2 framebuffer ------> PaperPad -- MXCFB
            <----- pointer events ---------          -- local Exit
 ```
 
@@ -110,15 +110,15 @@ For a fresh install, after confirming the canonical extension does not exist:
 scripts/deploy-kindle-mtp.sh install
 ```
 
-For an update, first stop PaperPad with its in-window **Exit** button or let the
-watchdog finish, confirm the window is gone, then run:
+For an update, run:
 
 ```sh
-scripts/deploy-kindle-mtp.sh update --confirm-stopped
+scripts/deploy-kindle-mtp.sh update
 ```
 
-MTP cannot inspect running processes; `--confirm-stopped` is the operator's
-assertion. The update keeps the previous verified binary as
+When practical, stop PaperPad with its device-local **Exit** button or let the
+watchdog finish before updating; MTP cannot inspect running processes. The
+update keeps the previous verified binary as
 `bin/rust_x11_hello.previous` and refuses to overwrite an existing backup. To
 clear that backup explicitly before a later retry:
 
@@ -130,19 +130,27 @@ mtp-rs rm /extensions/rust_x11_hello/bin/rust_x11_hello.previous --yes
 
 KUAL provides normal run, explicit benchmark, and diagnostic actions:
 
-- **Run Paperpad (5m)** — reference X11 display backend with a five-minute watchdog.
-- **Run Paperpad MXCFB (5m, experimental)** — direct framebuffer display with
-  a five-minute watchdog and X11 still providing touch and lifecycle events.
+- **Run Paperpad (5m)** — connected native runtime with direct framebuffer
+  display, exclusive evdev touch, no X11 connection, and a five-minute
+  watchdog.
+- **Test MXCFB TERM cleanup (15s)** — normal MXCFB runtime with a short
+  watchdog for verifying graceful `TERM`, framebuffer restoration, and clean
+  process exit; it is not a benchmark.
 - **Benchmark MXCFB GC16/DU/A2/DU4** — separate, explicit 12-frame local
-  completion benchmarks with a one-minute watchdog. They do not connect to
-  PaperSpoon; DU, A2, and DU4 are experimental fidelity/ghosting tradeoffs.
+  completion benchmarks with a one-minute watchdog. They use native evdev for
+  local Exit, derive geometry from `/dev/fb0`, and open no X11 or PaperSpoon
+  connection; DU, A2, and DU4 are experimental fidelity/ghosting tradeoffs.
 - **Benchmark A2 512px/256px/64px** — centered dirty-region completion tests
   for measuring how update area affects the fastest full-screen waveform.
 - **Inspect framebuffer metadata** — read-only diagnostics; it does not draw or
   submit an e-ink refresh.
+- **Inspect input devices** — read-only evdev capability and absolute-axis
+  metadata; it does not consume events or request an exclusive grab.
+- **Trace input events (15s; tap)** — bounded raw evdev record capture for
+  controlled touch diagnostics; it does not request an exclusive grab.
 
-The full-screen window covers KUAL. Stop it with PaperPad's **Exit** button or
-wait for the watchdog. The launcher serializes runs and escalates from `TERM`
+PaperPad's direct framebuffer view covers KUAL. Stop it with the **Exit** button
+or wait for the watchdog. The launcher serializes runs and escalates from `TERM`
 to `KILL` only after revalidating the recorded PaperPad process.
 
 ## Connection configuration
@@ -168,15 +176,13 @@ PAPERPAD_COMPANION_PORT=5581
 ```
 
 `PAPERPAD_COMPANION_PORT` is valid only with an explicit host and must be in
-`1..=65535`. Invalid configuration fails before the X11 window opens. There is
-no hard-coded IP fallback.
+`1..=65535`. Invalid configuration fails before display and input
+initialization. There is no hard-coded IP fallback.
 
 Other runtime overrides are:
 
 | Variable | Meaning |
 | --- | --- |
-| `PAPERPAD_DISPLAY_BACKEND=x11` | Default X11 display path |
-| `PAPERPAD_DISPLAY_BACKEND=mxcfb` | Experimental direct framebuffer path |
 | `PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=gc16\|du\|a2\|du4` | Explicit benchmark waveform; defaults to GC16 |
 | `PAPERPAD_MXCFB_BENCHMARK_FRAMES=2..120` | Completed benchmark samples; defaults to 8 |
 | `PAPERPAD_MXCFB_BENCHMARK_REGION=full\|WIDTHxHEIGHT` | Centered benchmark region inside the remote viewport; defaults to full |
@@ -186,20 +192,21 @@ Other runtime overrides are:
 
 Legacy environment variable names are not read.
 
-## Display backends
+## Display runtime
 
 | Backend | Mono1 | Gray8 and JPEG | Notes |
 | --- | --- | --- | --- |
-| X11 | Yes | No | Reference display path |
-| MXCFB | Yes | Yes | Experimental; uses a backgroundless X11 InputOutput window for input and clipping |
+| Native MXCFB | Yes | Yes | Exclusive evdev touch and no X11 connection |
+
+PaperPad has no X11 source modules or client dependencies. The historical
+`rust_x11_hello` package and extension names remain for deployment
+compatibility; they are not runtime dependencies.
 
 MXCFB startup requires the tested framebuffer layout and HWTCON capabilities;
-it fails rather than silently falling back to X11. Both formats currently use
-the GC16 update path. The MXCFB window is a full-screen X11 InputOutput window
-but requests no X11 background pixel or pixmap and creates no graphics context.
-Its mapped stacking footprint clips lower Kindle/KUAL X11 windows, while
-Expose events ask the MXCFB backend to redraw cached content. Direct framebuffer
-output, X11 touch, local Exit, Gray8, JPEG, and Apple Music Now Playing have
+unsupported devices fail during initialization. Both formats currently use the
+GC16 update path. The native runtime derives fixed geometry from `/dev/fb0`,
+uses exclusive evdev input, and opens no X11 connection. Direct framebuffer
+output, native touch, local Exit, Gray8, JPEG, and Apple Music Now Playing have
 been observed on the documented Paperwhite 6. Subsequent
 device runs completed marker-specific waits and visibly restored the original
 screen after every benchmark. Exact pixel fidelity, sleep/wake interaction,
@@ -216,7 +223,7 @@ completion. On the tested Paperwhite 6, none approached the 60 updates/s
 software budget; A2 was the fastest at about 9 updates/s. These are
 kernel-timed completion results, not camera-verified visual FPS.
 
-See [MXCFB benchmarks](docs/mxcfb-benchmarks.md) for the current results,
+See [MXCFB benchmarks](docs/archive/mxcfb-benchmarks.md) for the current results,
 methodology, commands, operating conditions, cleanup behavior, and waveform
 limitations.
 
@@ -263,7 +270,7 @@ evidence.
 
 ## Touch and Mac actions
 
-PaperPad forwards only primary core-X11 contacts (`detail=1`) inside the remote
+PaperPad forwards only primary native evdev contacts (`detail=1`) inside the remote
 viewport. PaperSpoon fills a grid button while its contact is armed and restores
 it before dispatching the action. It activates a button only when a matching
 release remains inside the button that was pressed. Gaps, unmatched releases,
@@ -346,9 +353,10 @@ mtp-rs rm /extensions/rust_x11_hello/rust_x11_hello.log --yes
 
 Match the deployed binary's SHA-256 with the host artifact before trusting a
 run. A successful host build or accepted framebuffer ioctl is not evidence of
-visible panel output. Likewise, missing `ButtonPress`/`ButtonRelease` records
-after checksum, event-mask, window, and geometry checks means touch remains
-unverified on that configuration; it does not mean the Rust build failed.
+visible panel output. Native touch requires an `input reader: opened` record and
+evdev Press/Release records in the Kindle log. Current normal and benchmark
+runs do not open X11; archived ignored X11 button records are not a second
+application-input path.
 
 ## Apple Container network issues
 
@@ -375,7 +383,7 @@ network other than `default`.
 
 | Path | Responsibility |
 | --- | --- |
-| `src/` | PaperPad lifecycle, X11 input, networking, and display backends |
+| `src/` | PaperPad lifecycle, native input, networking, and MXCFB display |
 | `crates/paper-protocol/` | Transport-independent PPFB types and codecs |
 | `tools/paperspoon/` | Host rendering, input resolution, discovery, and actions |
 | `kindle-extension/` | KUAL package and launch scripts |

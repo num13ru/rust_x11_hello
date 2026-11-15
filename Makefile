@@ -11,6 +11,7 @@ WORKDIR := /work
 CONTAINER_BACKEND := $(notdir $(CONTAINER_CLI))
 CARGO_CACHE_DIR ?= $(CURDIR)/.cache/cargo/$(CONTAINER_BACKEND)
 IMAGE_STAMP := target/.container-image-$(CONTAINER_BACKEND)
+MENU_JSON := kindle-extension/rust_x11_hello/menu.json
 
 CONTAINER_PROXY_BUILD_ARGS :=
 CONTAINER_PROXY_RUN_ARGS :=
@@ -38,20 +39,24 @@ endif
 endif
 
 .PHONY: check
+.PHONY: check-menu
 
-check:
+check: check-menu
 	cargo fmt --all --check
 	cargo check --workspace
 	cargo clippy --workspace --all-targets -- -D warnings
 	cargo test --workspace
 	sh -n kindle-extension/rust_x11_hello/bin/run.sh
 	sh -n kindle-extension/rust_x11_hello/bin/probe-fb.sh
+	sh -n kindle-extension/rust_x11_hello/bin/probe-input.sh
 	bash -n scripts/build-kindle-armv7hf.sh
 	bash -n scripts/deploy-kindle-mtp.sh
 	python3 scripts/apple-container-proxy.py --help >/dev/null
+	python3 scripts/test-analyze-latency.py
 	bash scripts/test-deploy-kindle-mtp.sh
-	jq -e '.items == [{"name":"Run Paperpad (5m)","action":"PAPERPAD_WATCHDOG_SECONDS=300 sh bin/run.sh"},{"name":"Run Paperpad MXCFB (5m, experimental)","action":"PAPERPAD_WATCHDOG_SECONDS=300 PAPERPAD_DISPLAY_BACKEND=mxcfb sh bin/run.sh"},{"name":"Benchmark MXCFB GC16 (12)","action":"PAPERPAD_WATCHDOG_SECONDS=60 PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=gc16 PAPERPAD_MXCFB_BENCHMARK_FRAMES=12 sh bin/run.sh --benchmark-mxcfb"},{"name":"Benchmark MXCFB DU (12, experimental)","action":"PAPERPAD_WATCHDOG_SECONDS=60 PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=du PAPERPAD_MXCFB_BENCHMARK_FRAMES=12 sh bin/run.sh --benchmark-mxcfb"},{"name":"Benchmark MXCFB A2 (12, experimental)","action":"PAPERPAD_WATCHDOG_SECONDS=60 PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=a2 PAPERPAD_MXCFB_BENCHMARK_FRAMES=12 sh bin/run.sh --benchmark-mxcfb"},{"name":"Benchmark A2 512px (12, experimental)","action":"PAPERPAD_WATCHDOG_SECONDS=60 PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=a2 PAPERPAD_MXCFB_BENCHMARK_REGION=512x512 PAPERPAD_MXCFB_BENCHMARK_FRAMES=12 sh bin/run.sh --benchmark-mxcfb"},{"name":"Benchmark A2 256px (12, experimental)","action":"PAPERPAD_WATCHDOG_SECONDS=60 PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=a2 PAPERPAD_MXCFB_BENCHMARK_REGION=256x256 PAPERPAD_MXCFB_BENCHMARK_FRAMES=12 sh bin/run.sh --benchmark-mxcfb"},{"name":"Benchmark A2 64px (12, experimental)","action":"PAPERPAD_WATCHDOG_SECONDS=60 PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=a2 PAPERPAD_MXCFB_BENCHMARK_REGION=64x64 PAPERPAD_MXCFB_BENCHMARK_FRAMES=12 sh bin/run.sh --benchmark-mxcfb"},{"name":"Benchmark MXCFB DU4 (12, experimental)","action":"PAPERPAD_WATCHDOG_SECONDS=60 PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=du4 PAPERPAD_MXCFB_BENCHMARK_FRAMES=12 sh bin/run.sh --benchmark-mxcfb"},{"name":"Inspect framebuffer metadata","action":"sh bin/probe-fb.sh"}]' \
-		kindle-extension/rust_x11_hello/menu.json >/dev/null
+
+check-menu:
+	sh scripts/check-menu.sh "$(MENU_JSON)"
 
 .PHONY: image
 .PHONY: _image
