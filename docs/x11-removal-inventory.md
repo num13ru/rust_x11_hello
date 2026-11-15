@@ -1,8 +1,9 @@
 # X11 removal inventory and feasibility checkpoint
 
-Status: Phase 6 X11 source/dependency deletion complete and obsolete cutover
-trials retired; host checks, ARM verification, and deployment readback passed;
-runtime validation of the deployed artifact is pending, 2026-11-15.
+Status: Phase 7 repository cleanup complete through removal of the generic
+display-backend abstraction; host checks, ARM verification, and deployment
+readback passed. Runtime validation of the deployed artifact is pending,
+2026-11-15.
 
 This document records the repository state and existing Paperwhite 6 evidence.
 Removing the dormant source does not expand the existing device claims; the
@@ -31,6 +32,31 @@ The package, binary, extension directory, and KUAL identifier still contain
 `rust_x11_hello`. Those names are not an X11 runtime dependency. Renaming them
 would expand deployment and rollback risk and is not required by the removal
 plan.
+
+## Complexity report
+
+The baseline is `c95876e`, the commit immediately before the X11-removal plan.
+Line and module measurements cover tracked Rust files under `src/`; dependency
+measurements use the root `rust_x11_hello` package's normal `cargo tree`.
+
+| Metric | Baseline | Native-only result |
+| --- | ---: | ---: |
+| PaperPad Rust lines | 10,871 | 10,623 |
+| Rust diff | — | 1,947 added, 2,195 removed; net −248 |
+| Active module declarations | 40 | 40 |
+| Root direct dependencies, including local `paper-protocol` | 4 | 3 |
+| Unique normal dependency closure, excluding the root package | 9 | 3 |
+| Transitive-only packages in that closure | 5 | 0 |
+| Final static ARMv7 binary | not retained as a tracked baseline artifact | 1,179,564 bytes |
+
+The unchanged module count reflects composition rather than a retained
+fallback: six X11 declarations were removed and six native input/runtime
+declarations were added. The remaining platform boundary is explicit: eight
+Rust files contain `target_os = "linux"` gates, isolating MXCFB, evdev/input
+probing, the native runtime, and Linux entry/service paths. There are no X11
+source modules, client dependencies, or runtime backend selectors. These
+complexity measurements do not establish display fidelity, touch correctness,
+cleanup behavior, or performance on hardware.
 
 ## Existing MXCFB work that can be reused
 
@@ -128,7 +154,8 @@ binary readback verification, and a physical PW6 capability run. The compact
 result is recorded in `docs/archive/mxcfb-device-evidence.md`.
 
 1. Run the normal PaperPad action and confirm display, input, and cleanup against
-   the matching deployed hash.
+   deployed SHA-256
+   `ff451df482520ae579ad2b54108a52b8adaf19b7d34d025bc8eae2cbd26c5364`.
 2. Retrieve the authoritative device log before expanding runtime claims.
 
 No additional one-off KUAL test actions are planned.
