@@ -1,14 +1,13 @@
 # X11 removal inventory and feasibility checkpoint
 
-Status: Phase 7 repository cleanup complete through removal of the generic
-display-backend abstraction; host checks, ARM verification, and deployment
-readback passed. Runtime validation of the deployed artifact is pending,
-2026-11-15.
+Status: Phase 7 repository cleanup complete. Host checks, ARM verification,
+deployment readback, and final normal-runtime device validation passed on the
+Paperwhite 6, 2026-11-15.
 
 This document records the repository state and existing Paperwhite 6 evidence.
-Removing the dormant source does not expand the existing device claims; the
-deployed artifact is byte-for-byte verified, while runtime behavior still
-requires matching operator and device evidence.
+The final deployed artifact is byte-for-byte verified and has matching
+operator and device-log evidence for the connected normal runtime. Claims
+remain limited to the checks recorded here and in the evidence archive.
 
 ## Current dependency and responsibility inventory
 
@@ -146,19 +145,14 @@ GC16 run validated the framebuffer-derived, X11-free benchmark lifecycle.
 | Runtime extraction changes latest-frame or failure semantics | Medium: stale/invalid content becomes authoritative | Preserve mailbox polling, successful-presentation cache policy, reconnect behavior, and tests before changing input. |
 | Benchmark migration changes measurement meaning | Medium: invalid comparisons | Preserve bounded frames, region, waveform, marker waits, and full-snapshot cleanup; continue to avoid visual-FPS claims without camera evidence. |
 
-## Next smallest evidence steps
+## Remaining evidence limits
 
-The read-only `--inspect-input` diagnostic and **Inspect input devices** KUAL
-action passed host checks, the ARMv7 musl build, static verification, deployed
-binary readback verification, and a physical PW6 capability run. The compact
-result is recorded in `docs/archive/mxcfb-device-evidence.md`.
-
-1. Run the normal PaperPad action and confirm display, input, and cleanup against
-   deployed SHA-256
-   `ff451df482520ae579ad2b54108a52b8adaf19b7d34d025bc8eae2cbd26c5364`.
-2. Retrieve the authoritative device log before expanding runtime claims.
-
-No additional one-off KUAL test actions are planned.
+No additional one-off KUAL test actions are planned for the X11 removal. The
+final deployed artifact's connected normal path, native input, local Exit,
+Mono1 and Gray8 presentation, and orderly restoration are device-validated.
+Deferred failure-mode gaps remain explicit in the risk report: disconnect and
+reconnect, `SIGKILL`, kernel hang, power loss, input failure, and
+descriptor-close-only grab release are not established by the final run.
 
 The target architecture works only if the PW6 exposes a readable, identifiable
 touchscreen event device with stable coordinate metadata, PaperPad can obtain

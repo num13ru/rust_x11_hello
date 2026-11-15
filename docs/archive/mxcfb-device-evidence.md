@@ -709,3 +709,33 @@ This establishes native framebuffer-derived benchmark startup, bounded GC16
 completion, and orderly restoration without X11 on the tested device. It does
 not add new visual-fidelity evidence or establish local Exit, signal stop, or
 input-failure cleanup for the migrated benchmark lifecycle.
+
+## Final native-only normal runtime (2026-11-15)
+
+The final cleanup build passed the full host suite, ARMv7 musl build, and static
+verification. A fresh post-run MTP readback matched the deployed artifact at
+SHA-256
+`ff451df482520ae579ad2b54108a52b8adaf19b7d34d025bc8eae2cbd26c5364`.
+The retrieved cumulative log has SHA-256
+`2a4bd17a90ab98ab9f6f1cd0cdba9c18c6f99eba2e984518c787c50bccc9d43a`;
+the status snapshot has SHA-256
+`2fead5455234aee9d2909f8525bc5dab7bc5190893b73ddc8681f97309cc15b1`
+and reports `STOPPED status=0 reason=process_exit`.
+
+The operator ran **Run Paperpad (5m)** and confirmed connected rendering,
+responsive touch, device-local Exit, visible stock-screen restoration, and
+normal Kindle usability afterward. The matching launcher session ran from
+`Sun Nov 15 19:35:33 GMT+3:0100 2026` through `19:36:26`. It records native
+MXCFB startup at 1272 x 1696, exclusive `/dev/input/event1` (`pt_mt`) input,
+discovery of `192.168.0.10:5581`, and connection to PaperSpoon. The session
+contains 26 evdev Press/Release pairs: 25 matching remote Down/Up pairs and one
+final device-local Exit pair. It also records 47 Mono1 and two Gray8 frame
+submissions, explicit `EVIOCGRAB` release, restoration of the 2,157,312-byte
+framebuffer snapshot, and binary exit status 0.
+
+This establishes the final native-only artifact's connected normal path,
+Mono1 and Gray8 presentation, remote pointer forwarding, device-local Exit,
+exclusive-input release, orderly framebuffer restoration, and post-run device
+usability on the tested PW6. It does not newly establish disconnect/reconnect,
+pixel fidelity, `SIGKILL`, kernel-hang or power-loss recovery, input-failure
+cleanup, or descriptor-close-only grab release.
