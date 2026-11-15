@@ -3,7 +3,7 @@
 mod cache;
 
 use anyhow::{Result, ensure};
-use paper_protocol::{PixelFormat, V2PixelFormats, validate_gray8_pixels, validate_mono1_pixels};
+use paper_protocol::{PixelFormat, validate_gray8_pixels, validate_mono1_pixels};
 
 pub(crate) use cache::RemoteFrameCache;
 
@@ -74,30 +74,6 @@ impl<'a> RemoteFrame<'a> {
 
     pub(crate) fn receive_decode_us(self) -> u128 {
         self.receive_decode_us
-    }
-}
-
-/// Operations the PaperPad runtime needs from any display implementation.
-///
-/// Remote-frame conversion and presentation failures remain non-fatal and are
-/// diagnosed by the backend. Local system-UI failures are returned because the
-/// device-owned Exit control must remain renderable independently of PaperSpoon.
-pub(crate) trait DisplayBackend {
-    fn dimensions(&self) -> (u16, u16);
-    fn pixel_formats(&self) -> V2PixelFormats;
-
-    fn display_remote_frame(&mut self, frame: RemoteFrame<'_>);
-
-    fn draw_system_ui(&mut self, connected: bool) -> Result<()>;
-
-    /// Perform backend-owned periodic work from the shared event loop.
-    fn maintain(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    /// Restore backend-owned display state during orderly shutdown.
-    fn shutdown(&mut self) -> Result<()> {
-        Ok(())
     }
 }
 

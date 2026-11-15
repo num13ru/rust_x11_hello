@@ -1,7 +1,6 @@
 //! Normal native MXCFB PaperPad runtime.
 
 use crate::config::PaperpadConfig;
-use crate::display::DisplayBackend;
 use crate::input::evdev::{DecodedInput, EvdevReader};
 use crate::latency;
 use crate::mxcfb::MxcfbDisplayBackend;

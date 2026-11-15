@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
-use crate::display::{DisplayBackend, RemoteFrame, RemoteFrameCache};
+use crate::display::{RemoteFrame, RemoteFrameCache};
 
 use super::controller;
 use super::dirty::changed_region;
@@ -194,16 +194,16 @@ impl MxcfbDisplayBackend {
     }
 }
 
-impl DisplayBackend for MxcfbDisplayBackend {
-    fn dimensions(&self) -> (u16, u16) {
+impl MxcfbDisplayBackend {
+    pub(crate) fn dimensions(&self) -> (u16, u16) {
         self.opened.info.screen.physical_size()
     }
 
-    fn pixel_formats(&self) -> paper_protocol::V2PixelFormats {
+    pub(crate) fn pixel_formats(&self) -> paper_protocol::V2PixelFormats {
         paper_protocol::V2PixelFormats::MONO1.with(paper_protocol::PixelFormat::Gray8)
     }
 
-    fn display_remote_frame(&mut self, frame: RemoteFrame<'_>) {
+    pub(crate) fn display_remote_frame(&mut self, frame: RemoteFrame<'_>) {
         let viewport = self.opened.info.screen.remote_viewport;
         if (frame.width(), frame.height()) != (viewport.width, viewport.height) {
             eprintln!(
@@ -290,7 +290,7 @@ impl DisplayBackend for MxcfbDisplayBackend {
         }
     }
 
-    fn draw_system_ui(&mut self, connected: bool) -> Result<()> {
+    pub(crate) fn draw_system_ui(&mut self, connected: bool) -> Result<()> {
         self.screen_modified = true;
         let submitted = present_system_ui_with(
             &mut self.opened,
@@ -310,7 +310,7 @@ impl DisplayBackend for MxcfbDisplayBackend {
         Ok(())
     }
 
-    fn maintain(&mut self) -> Result<()> {
+    pub(crate) fn maintain(&mut self) -> Result<()> {
         let Some(refresh_at) = self.startup_refresh_at else {
             return Ok(());
         };
@@ -340,7 +340,7 @@ impl DisplayBackend for MxcfbDisplayBackend {
         Ok(())
     }
 
-    fn shutdown(&mut self) -> Result<()> {
+    pub(crate) fn shutdown(&mut self) -> Result<()> {
         self.restore_initial_screen()
     }
 }

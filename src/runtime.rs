@@ -1,8 +1,10 @@
 //! PaperPad application runtime.
 
 use crate::app::{Activation, AppState, RemotePointerEvent};
-use crate::display::{DisplayBackend, RemoteFrame};
+use crate::display::RemoteFrame;
 use crate::latency::{self, Stamp};
+#[cfg(target_os = "linux")]
+use crate::mxcfb::MxcfbDisplayBackend;
 use crate::net::Paperspoon;
 use crate::ui::button::{PointerEvent, PointerEventKind};
 use crate::ui::screen::ScreenLayout;
@@ -45,9 +47,10 @@ impl PaperpadRuntime {
         }
     }
 
+    #[cfg(target_os = "linux")]
     pub(crate) fn service(
         &mut self,
-        display: &mut dyn DisplayBackend,
+        display: &mut MxcfbDisplayBackend,
         paperspoon: &mut Paperspoon,
     ) -> Result<()> {
         let connected = paperspoon.is_connected();
