@@ -17,14 +17,21 @@ fi
 jq -e '
     type == "object" and
     (keys == ["items"]) and
-    (.items | type == "array" and length > 0) and
-    all(
-        .items[];
+    (.items | type == "array" and length == 1) and
+    (.items[0] |
         type == "object" and
-        (keys == ["action", "name"]) and
+        (keys == ["items", "name", "priority"]) and
         (.name | type == "string" and length > 0) and
-        (.action | type == "string" and length > 0)
-    ) and
-    ([.items[].name] | length == (unique | length)) and
-    ([.items[].action] | length == (unique | length))
+        (.priority | type == "number") and
+        (.items | type == "array" and length > 0) and
+        all(
+            .items[];
+            type == "object" and
+            (keys == ["action", "name"]) and
+            (.name | type == "string" and length > 0) and
+            (.action | type == "string" and length > 0)
+        ) and
+        ([.items[].name] | length == (unique | length)) and
+        ([.items[].action] | length == (unique | length))
+    )
 ' "$MENU_JSON" >/dev/null
