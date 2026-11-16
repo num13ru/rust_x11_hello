@@ -90,14 +90,16 @@ impl ConnectionState {
         if !Arc::ptr_eq(token, &candidate.token.0) {
             return false;
         }
-        self.disconnect();
-        true
+        self.disconnect()
     }
 
-    pub(super) fn disconnect(&mut self) {
+    pub(super) fn disconnect(&mut self) -> bool {
         let previous = std::mem::replace(self, Self::Disconnected);
         if let Self::Connected { stream, .. } = previous {
             let _ = stream.shutdown(Shutdown::Both);
+            true
+        } else {
+            false
         }
     }
 }

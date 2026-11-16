@@ -6,6 +6,7 @@ use crate::latency;
 use crate::mxcfb::MxcfbDisplayBackend;
 use crate::net::Paperspoon;
 use crate::runtime::{PaperpadRuntime, RuntimeControl, RuntimePointerInput, remote_viewport_size};
+use crate::runtime_wait::RuntimeWait;
 use anyhow::{Context, Result};
 use std::time::Duration;
 
@@ -29,8 +30,31 @@ pub(crate) fn run(shutdown_requested: impl Fn() -> bool) -> Result<()> {
             return Err(primary);
         }
     };
-    let mut paperspoon =
-        Paperspoon::start(config, remote_viewport_size(size), display.pixel_formats());
+    let (runtime_wait, runtime_notifier) = match RuntimeWait::new(input_reader.raw_fd()) {
+        Ok(pair) => pair,
+        Err(error) => {
+            let primary = anyhow::Error::new(error)
+                .context("initialize native PaperPad runtime readiness wait");
+            if let Err(release_error) = input_reader.release_exclusive_grab() {
+                eprintln!(
+                    "EVIOCGRAB release after runtime waiter initialization failure also failed: {release_error:#}"
+                );
+            }
+            drop(input_reader);
+            if let Err(cleanup_error) = display.shutdown() {
+                eprintln!(
+                    "MXCFB cleanup after runtime waiter initialization failure also failed: {cleanup_error:#}"
+                );
+            }
+            return Err(primary);
+        }
+    };
+    let mut paperspoon = Paperspoon::start(
+        config,
+        remote_viewport_size(size),
+        display.pixel_formats(),
+        runtime_notifier,
+    );
     let mut runtime = PaperpadRuntime::new(size);
 
     let mut run_result = (|| -> Result<()> {
@@ -102,6 +126,7 @@ pub(crate) fn run(shutdown_requested: impl Fn() -> bool) -> Result<()> {
     }
     drop(input_reader);
     drop(paperspoon);
+    drop(runtime_wait);
 
     let cleanup_result = display.shutdown();
     drop(display);

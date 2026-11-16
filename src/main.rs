@@ -29,6 +29,8 @@ mod mxcfb;
 mod native_runtime;
 mod net;
 mod runtime;
+#[cfg(target_os = "linux")]
+mod runtime_wait;
 mod ui;
 
 #[cfg(target_os = "linux")]
