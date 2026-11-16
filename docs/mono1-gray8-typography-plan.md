@@ -1,6 +1,7 @@
 # PaperSpoon typography migration: Mono1 monospace and Gray8 proportional OpenType
 
-Status: Proposed  
+Status: Implemented on host; physical e-ink validation pending
+
 Scope: PaperSpoon host rendering (`tools/paperspoon/`)  
 Target: Kindle Paperwhite 6 remote viewport via existing PPFB v2 frames  
 Implementation: Small, independently verifiable stages; no PaperPad protocol or display changes
@@ -246,27 +247,54 @@ At implementation time, read `AGENTS.md`, `README.md`, the relevant current sour
 
 ## Stage 4 — Remove legacy renderer and document the result
 
-- [ ] Remove remaining callers of `font5x7`, then remove `font5x7.rs` and unused imports/tests. Do not leave parallel production text implementations without a concrete reason.
-- [ ] Update `tools/paperspoon/Cargo.toml` and `Cargo.lock`; remove unused packages and avoid adding platform dependencies to the ARM PaperPad binary.
-- [ ] Document the shipped font families, licenses, font roles, pixel sizes, Mono1 threshold, Gray8 blending, fallback behavior, and why pixel format does not select waveform.
-- [ ] Add a concise note to `README.md` if operator-visible behavior or build prerequisites change. Keep detailed design and validation in `docs/` according to `AGENTS.md`.
-- [ ] Confirm the default build does not require access to installed macOS fonts, user font directories, or external network services at runtime.
+- [x] Remove remaining callers of `font5x7`, then remove `font5x7.rs` and unused imports/tests. Do not leave parallel production text implementations without a concrete reason.
+- [x] Update `tools/paperspoon/Cargo.toml` and `Cargo.lock`; remove unused packages and avoid adding platform dependencies to the ARM PaperPad binary.
+- [x] Document the shipped font families, licenses, font roles, pixel sizes, Mono1 threshold, Gray8 blending, fallback behavior, and why pixel format does not select waveform.
+- [x] Add a concise note to `README.md` if operator-visible behavior or build prerequisites change. Keep detailed design and validation in `docs/` according to `AGENTS.md`.
+- [x] Confirm the default build does not require access to installed macOS fonts, user font directories, or external network services at runtime.
 
 **Gate:** One production typography path remains; no `font5x7` production references remain; the intended files and licenses are included.
+
+### Stage 4 result (2026-11-16)
+
+- Removed both legacy canvas text methods, their exact-bitmap tests, the
+  `font5x7` module declaration, and `font5x7.rs`. A repository-wide reference
+  search now finds only the shared OpenType `TextRenderer` production path.
+- The shipped Mono1 face is IBM Plex Mono Medium under SIL OFL 1.1. Application
+  title and status roles use 18 px glyphs on 24 px lines; button labels use
+  28 px glyphs on 36 px lines. Coverage at or above 128 becomes the requested
+  one-bit foreground color, with no antialiasing or dithering.
+- The shipped Gray8 face is Inter Variable Regular under SIL OFL 1.1. Now
+  Playing title uses 42/52 px glyph/line sizing, metadata uses 28/36, and state
+  uses 24/32. Coverage is composed as rounded source-over luminance:
+  `(destination * (255 - coverage) + foreground * coverage + 127) / 255`.
+- IBM Plex Mono may fall back only to bundled Inter; Inter has no further
+  fallback. Unsupported glyphs and missing, corrupt, or wrong-family assets
+  return contextual errors. Exact pinned revisions, SHA-256 values, and full
+  license notices remain under `tools/paperspoon/assets/fonts/`.
+- Auditing `tools/paperspoon/Cargo.toml` found every direct dependency still in
+  use, so no lockfile or manifest churn was needed in this cleanup. Typography
+  dependencies remain confined to the host-side `paperspoon` package and add
+  no dependency to the ARM PaperPad binary.
+- The explicit in-memory font database loads only bundled bytes, fixes locale
+  to `en-US`, and performs no system-font discovery or runtime network access.
+  `README.md` now states the embedded-font behavior and keeps pixel format
+  separate from MXCFB waveform choice: Mono1 versus Gray8 controls frame
+  representation, not GC16/DU/A2/DU4 selection.
 
 ## Verification
 
 ### Automated host checks
 
-- [ ] Run `cargo fmt --all -- --check`.
-- [ ] Run `cargo test --workspace`.
-- [ ] Run `cargo clippy --workspace --all-targets -- -D warnings` (if the repository's current lint baseline allows it; document unrelated pre-existing failures).
-- [ ] Run `make check` and `git diff --check`, applying the repository's current `AGENTS.md` verification expectations.
-- [ ] For Mono1, assert that pixels are only black/white, encoded in the existing bit order, and that non-byte-aligned trailing bits remain valid.
-- [ ] For Gray8, assert that coverage blending produces intermediate luminance values where expected and respects clipping, alpha, and foreground/background inversion.
-- [ ] Test empty metadata, long single words, narrow viewports, unknown glyphs, missing/corrupt font data, and repeated frames without uncontrolled cache growth.
-- [ ] Compare screenshots and layout metrics against committed fixtures generated with the **pinned** fonts, not whatever Helvetica happens to be installed locally.
-- [ ] Verify that only `paperspoon` gains new font dependencies. Do not rebuild or redeploy PaperPad merely for host-only rendering changes.
+- [x] Run `cargo fmt --all -- --check`.
+- [x] Run `cargo test --workspace`.
+- [x] Run `cargo clippy --workspace --all-targets -- -D warnings` (if the repository's current lint baseline allows it; document unrelated pre-existing failures).
+- [x] Run `make check` and `git diff --check`, applying the repository's current `AGENTS.md` verification expectations.
+- [x] For Mono1, assert that pixels are only black/white, encoded in the existing bit order, and that non-byte-aligned trailing bits remain valid.
+- [x] For Gray8, assert that coverage blending produces intermediate luminance values where expected and respects clipping, alpha, and foreground/background inversion.
+- [x] Test empty metadata, long single words, narrow viewports, unknown glyphs, missing/corrupt font data, and repeated frames without uncontrolled cache growth.
+- [x] Compare screenshots and layout metrics against committed fixtures generated with the **pinned** fonts, not whatever Helvetica happens to be installed locally.
+- [x] Verify that only `paperspoon` gains new font dependencies. Do not rebuild or redeploy PaperPad merely for host-only rendering changes.
 
 ### Manual host / physical-device validation
 

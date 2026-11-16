@@ -28,6 +28,11 @@ changes, pointer phases, and frames. Mono1 is row-major and MSB-first (`0` is
 white); Gray8 uses one byte per pixel (`0` is black and `255` is white).
 Payloads are capped at 16 MiB and validated before becoming authoritative.
 
+PaperSpoon embeds pinned IBM Plex Mono and Inter font assets, so host UI
+rendering does not depend on installed macOS fonts or network access. Mono1
+controls use thresholded IBM Plex Mono; Gray8 Now Playing text uses
+antialiased Inter. Pixel format does not select the Kindle update waveform.
+
 PaperPad retains only a successfully displayed frame. Invalid dimensions,
 unsupported formats, decode errors, or failed display updates do not replace
 it. A matching reconnect receives PaperSpoon's last authoritative frame;
