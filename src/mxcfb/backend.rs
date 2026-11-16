@@ -310,6 +310,10 @@ impl MxcfbDisplayBackend {
         Ok(())
     }
 
+    pub(crate) fn next_maintenance_deadline(&self) -> Option<Instant> {
+        self.startup_refresh_at
+    }
+
     pub(crate) fn maintain(&mut self) -> Result<()> {
         let Some(refresh_at) = self.startup_refresh_at else {
             return Ok(());
@@ -572,10 +576,12 @@ mod tests {
             .fill_solid_region(viewport, 0, spec)
             .unwrap();
 
-        backend.startup_refresh_at = Some(Instant::now());
+        let deadline = Instant::now();
+        backend.startup_refresh_at = Some(deadline);
+        assert_eq!(backend.next_maintenance_deadline(), Some(deadline));
         backend.maintain().unwrap();
         assert_eq!(backend.opened.mapping.snapshot_visible().unwrap(), expected);
-        assert!(backend.startup_refresh_at.is_none());
+        assert_eq!(backend.next_maintenance_deadline(), None);
 
         backend
             .opened

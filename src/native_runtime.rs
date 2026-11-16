@@ -6,13 +6,13 @@ use crate::latency;
 use crate::mxcfb::MxcfbDisplayBackend;
 use crate::net::Paperspoon;
 use crate::runtime::{PaperpadRuntime, RuntimeControl, RuntimePointerInput, remote_viewport_size};
-use crate::runtime_wait::RuntimeWait;
+use crate::runtime_wait::{RuntimeNotifier, RuntimeWait};
 use anyhow::{Context, Result};
-use std::time::Duration;
 
-const POLL_INTERVAL: Duration = Duration::from_millis(50);
-
-pub(crate) fn run(shutdown_requested: impl Fn() -> bool) -> Result<()> {
+pub(crate) fn run(
+    shutdown_requested: impl Fn() -> bool,
+    register_shutdown_wake: impl FnOnce(RuntimeNotifier) -> Result<()>,
+) -> Result<()> {
     let config = PaperpadConfig::from_env()?;
     let run_label = "PaperPad native runtime";
     eprintln!("{run_label} starting transport=true eviocgrab=true");
@@ -49,6 +49,22 @@ pub(crate) fn run(shutdown_requested: impl Fn() -> bool) -> Result<()> {
             return Err(primary);
         }
     };
+    if let Err(error) = register_shutdown_wake(runtime_notifier.clone()) {
+        let primary = error.context("register native PaperPad shutdown wake");
+        if let Err(release_error) = input_reader.release_exclusive_grab() {
+            eprintln!(
+                "EVIOCGRAB release after shutdown wake registration failure also failed: {release_error:#}"
+            );
+        }
+        drop(runtime_wait);
+        drop(input_reader);
+        if let Err(cleanup_error) = display.shutdown() {
+            eprintln!(
+                "MXCFB cleanup after shutdown wake registration failure also failed: {cleanup_error:#}"
+            );
+        }
+        return Err(primary);
+    }
     let mut paperspoon = Paperspoon::start(
         config,
         remote_viewport_size(size),
@@ -63,7 +79,25 @@ pub(crate) fn run(shutdown_requested: impl Fn() -> bool) -> Result<()> {
             size.0, size.1
         );
 
+        if shutdown_requested() {
+            runtime.cancel_contact();
+            eprintln!("{run_label} stopped reason=signal");
+            return Ok(());
+        }
+        runtime
+            .service(&mut display, &mut paperspoon)
+            .context("service initial native PaperPad state")?;
+
         loop {
+            if shutdown_requested() {
+                runtime.cancel_contact();
+                eprintln!("{run_label} stopped reason=signal");
+                return Ok(());
+            }
+
+            let ready = runtime_wait
+                .wait(display.next_maintenance_deadline())
+                .context("wait for native PaperPad runtime readiness")?;
             if shutdown_requested() {
                 runtime.cancel_contact();
                 eprintln!("{run_label} stopped reason=signal");
@@ -73,41 +107,56 @@ pub(crate) fn run(shutdown_requested: impl Fn() -> bool) -> Result<()> {
             runtime
                 .service(&mut display, &mut paperspoon)
                 .context("service native PaperPad runtime")?;
-            let decoded = match input_reader.drain() {
-                Ok(decoded) => decoded,
-                Err(error) => {
-                    if error.cancel_contact() {
-                        runtime.cancel_contact();
-                        eprintln!("input source=evdev action=cancel reason=reader_failure");
-                    }
-                    return Err(error).context("native PaperPad evdev reader failed");
-                }
-            };
-            for input in decoded {
-                match input {
-                    DecodedInput::Pointer(event) => {
-                        let input_stamp = latency::stamp();
-                        eprintln!(
-                            "input source=evdev type={:?} detail={} physical_x={} physical_y={}",
-                            event.kind, event.detail, event.point.x, event.point.y,
-                        );
-                        let control = runtime.handle_pointer(
-                            RuntimePointerInput::new(event, input_stamp, None),
-                            &mut paperspoon,
-                        );
-                        if control == RuntimeControl::ShutdownRequested {
-                            eprintln!("{run_label} stopped reason=local_exit");
-                            return Ok(());
+
+            if ready.input.readable {
+                let decoded = match input_reader.drain() {
+                    Ok(decoded) => decoded,
+                    Err(error) => {
+                        if error.cancel_contact() {
+                            runtime.cancel_contact();
+                            eprintln!("input source=evdev action=cancel reason=reader_failure");
                         }
+                        return Err(error).context("native PaperPad evdev reader failed");
                     }
-                    DecodedInput::CancelContact => {
-                        runtime.cancel_contact();
-                        eprintln!("input source=evdev action=cancel reason=decoder_state");
+                };
+                for input in decoded {
+                    match input {
+                        DecodedInput::Pointer(event) => {
+                            let input_stamp = latency::stamp();
+                            eprintln!(
+                                "input source=evdev type={:?} detail={} physical_x={} physical_y={}",
+                                event.kind, event.detail, event.point.x, event.point.y,
+                            );
+                            let control = runtime.handle_pointer(
+                                RuntimePointerInput::new(event, input_stamp, None),
+                                &mut paperspoon,
+                            );
+                            if control == RuntimeControl::ShutdownRequested {
+                                eprintln!("{run_label} stopped reason=local_exit");
+                                return Ok(());
+                            }
+                        }
+                        DecodedInput::CancelContact => {
+                            runtime.cancel_contact();
+                            eprintln!("input source=evdev action=cancel reason=decoder_state");
+                        }
                     }
                 }
             }
 
-            std::thread::sleep(POLL_INTERVAL);
+            if ready.input.error || ready.input.hung_up || ready.input.invalid {
+                runtime.cancel_contact();
+                eprintln!(
+                    "input source=evdev action=cancel reason=poll_terminal error={} hangup={} invalid={}",
+                    ready.input.error, ready.input.hung_up, ready.input.invalid
+                );
+                return Err(anyhow::anyhow!(
+                    "native PaperPad evdev readiness failed: error={} hangup={} invalid={}",
+                    ready.input.error,
+                    ready.input.hung_up,
+                    ready.input.invalid
+                ));
+            }
         }
     })();
 
@@ -124,9 +173,9 @@ pub(crate) fn run(shutdown_requested: impl Fn() -> bool) -> Result<()> {
             run_result = Err(release_error);
         }
     }
-    drop(input_reader);
     drop(paperspoon);
     drop(runtime_wait);
+    drop(input_reader);
 
     let cleanup_result = display.shutdown();
     drop(display);

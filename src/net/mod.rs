@@ -32,14 +32,13 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TryRecvError, TrySendError};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 const TCP_CONNECT_TIMEOUT: Duration = Duration::from_millis(150);
 const TCP_WRITE_TIMEOUT: Duration = Duration::from_millis(150);
 const STARTUP_RETRY_INTERVAL: Duration = Duration::from_secs(2);
-const STARTUP_STOP_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const OUTBOUND_QUEUE_CAPACITY: usize = 16;
 type StartupResult = Result<(SocketAddr, TcpStream)>;
 
@@ -72,6 +71,44 @@ impl RuntimeWake {
     }
 }
 
+#[derive(Debug, Default)]
+struct StopSignal {
+    requested: AtomicBool,
+    wait_lock: Mutex<()>,
+    wait_condvar: Condvar,
+}
+
+impl StopSignal {
+    fn is_requested(&self) -> bool {
+        self.requested.load(Ordering::Acquire)
+    }
+
+    fn request(&self) {
+        let _guard = self
+            .wait_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.requested.store(true, Ordering::Release);
+        self.wait_condvar.notify_all();
+    }
+
+    /// Wait for the retry deadline. Returns `false` when shutdown interrupts it.
+    fn wait_retry(&self, delay: Duration) -> bool {
+        if self.is_requested() {
+            return false;
+        }
+        let guard = self
+            .wait_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (_guard, _timeout) = self
+            .wait_condvar
+            .wait_timeout_while(guard, delay, |_| !self.is_requested())
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        !self.is_requested()
+    }
+}
+
 enum StartupUpdate {
     Connected {
         addr: SocketAddr,
@@ -95,20 +132,6 @@ fn connect_stream(addr: SocketAddr) -> Result<TcpStream> {
         .context("failed to connect to PaperSpoon")?;
     configure_stream(&stream)?;
     Ok(stream)
-}
-
-fn wait_for_startup_retry(stopping: &AtomicBool, delay: Duration) -> bool {
-    let deadline = Instant::now() + delay;
-    loop {
-        if stopping.load(Ordering::Acquire) {
-            return false;
-        }
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            return true;
-        }
-        std::thread::sleep(remaining.min(STARTUP_STOP_POLL_INTERVAL));
-    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -234,7 +257,7 @@ pub struct Paperspoon {
     frames: FrameMailbox,
     outbound_tx: Option<SyncSender<QueuedOutbound>>,
     wake_tx: Option<Sender<()>>,
-    stopping: Arc<AtomicBool>,
+    stopping: Arc<StopSignal>,
     writer: Option<JoinHandle<()>>,
     reconnector: Option<JoinHandle<()>>,
     startup_rx: Option<Receiver<StartupUpdate>>,
@@ -305,16 +328,16 @@ fn write_outbound(
 fn spawn_writer(
     connection: Arc<Mutex<ConnectionState>>,
     outbound_rx: Receiver<QueuedOutbound>,
-    stopping: Arc<AtomicBool>,
+    stopping: Arc<StopSignal>,
     runtime_wake: RuntimeWake,
 ) -> JoinHandle<()> {
     std::thread::spawn(move || {
         while let Ok(outbound) = outbound_rx.recv() {
-            if stopping.load(Ordering::Acquire) {
+            if stopping.is_requested() {
                 break;
             }
             match write_outbound(&connection, &outbound, &runtime_wake) {
-                Err(error) if !stopping.load(Ordering::Acquire) => {
+                Err(error) if !stopping.is_requested() => {
                     eprintln!("transport error: {error:#}");
                 }
                 _ => {}
@@ -467,7 +490,7 @@ impl Paperspoon {
             frames: FrameMailbox::with_runtime_wake(runtime_wake),
             outbound_tx: None,
             wake_tx: None,
-            stopping: Arc::new(AtomicBool::new(false)),
+            stopping: Arc::new(StopSignal::default()),
             writer: None,
             reconnector: None,
             startup_rx: None,
@@ -533,7 +556,7 @@ impl Paperspoon {
         // a late result is dropped when this receiver no longer exists.
         drop(std::thread::spawn(move || {
             loop {
-                if worker_stopping.load(Ordering::Acquire) {
+                if worker_stopping.is_requested() {
                     break;
                 }
                 match connect() {
@@ -560,7 +583,7 @@ impl Paperspoon {
                         let Some(delay) = retry_interval else {
                             break;
                         };
-                        if !wait_for_startup_retry(&worker_stopping, delay) {
+                        if !worker_stopping.wait_retry(delay) {
                             break;
                         }
                     }
@@ -626,7 +649,7 @@ impl Paperspoon {
         // Reconnector: wake on EOF, clear slot, retry connect until success,
         // install fresh socket + reader, then wait for the next EOF.
         let worker_connection = Arc::clone(&connection);
-        let stopping = Arc::new(AtomicBool::new(false));
+        let stopping = Arc::new(StopSignal::default());
         let writer = spawn_writer(
             Arc::clone(&connection),
             outbound_rx,
@@ -654,11 +677,11 @@ impl Paperspoon {
                 if disconnected {
                     worker_runtime_wake.notify();
                 }
-                if worker_stopping.load(Ordering::Acquire) {
+                if worker_stopping.is_requested() {
                     break;
                 }
                 loop {
-                    if worker_stopping.load(Ordering::Acquire) {
+                    if worker_stopping.is_requested() {
                         break 'reconnector;
                     }
                     match TcpStream::connect_timeout(&addr, TCP_CONNECT_TIMEOUT) {
@@ -679,7 +702,7 @@ impl Paperspoon {
                             {
                                 let mut guard =
                                     worker_connection.lock().expect("shared stream lock");
-                                if worker_stopping.load(Ordering::Acquire) {
+                                if worker_stopping.is_requested() {
                                     let _ = new_stream.shutdown(Shutdown::Both);
                                     break 'reconnector;
                                 }
@@ -833,7 +856,7 @@ impl Paperspoon {
 
 impl Drop for Paperspoon {
     fn drop(&mut self) {
-        self.stopping.store(true, Ordering::Release);
+        self.stopping.request();
         self.startup_rx.take();
 
         self.connection
@@ -870,6 +893,38 @@ mod tests {
         let frame = paper_protocol::Mono1Frame::new(width, height, pixels).expect("valid Mono1");
         let encoded = paper_protocol::encode_v2_frame(frame_id, &frame).expect("encode Frame");
         read_v2_frame(&mut Cursor::new(encoded)).expect("decode Frame")
+    }
+
+    #[test]
+    fn startup_retry_wait_is_interruptible_without_polling() {
+        let stopping = Arc::new(StopSignal::default());
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let (result_tx, result_rx) = mpsc::channel();
+        let worker_stopping = Arc::clone(&stopping);
+        let worker_barrier = Arc::clone(&barrier);
+        let worker = std::thread::spawn(move || {
+            worker_barrier.wait();
+            result_tx
+                .send(worker_stopping.wait_retry(Duration::from_secs(10)))
+                .expect("send retry result");
+        });
+
+        barrier.wait();
+        stopping.request();
+        assert!(
+            !result_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("startup retry did not wake")
+        );
+        worker.join().expect("startup retry worker panicked");
+    }
+
+    #[test]
+    fn startup_retry_wait_reaches_real_deadline() {
+        let stopping = StopSignal::default();
+        let started = Instant::now();
+        assert!(stopping.wait_retry(Duration::from_millis(10)));
+        assert!(started.elapsed() >= Duration::from_millis(10));
     }
 
     #[cfg(target_os = "linux")]

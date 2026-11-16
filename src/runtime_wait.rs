@@ -347,6 +347,13 @@ mod tests {
         );
     }
 
+    fn read_byte(fd: RawFd) {
+        let mut value = [0_u8];
+        // SAFETY: the one-byte buffer is live and the test owns `fd`.
+        let read = unsafe { libc::read(fd, value.as_mut_ptr().cast(), value.len()) };
+        assert_eq!(read, 1, "pipe read failed: {}", io::Error::last_os_error());
+    }
+
     fn write_eventfd_value(fd: RawFd, value: u64) {
         // SAFETY: eventfd accepts one aligned native-endian u64 and the test
         // keeps the shared descriptor alive.
@@ -439,6 +446,25 @@ mod tests {
         assert!(!ready.input.error);
         assert!(ready.notified);
         assert!(!ready.deadline_elapsed);
+    }
+
+    #[test]
+    fn input_remains_ready_until_source_is_drained() {
+        let (input, input_writer) = pipe_pair();
+        let (waiter, _notifier) = RuntimeWait::new(input.as_raw_fd()).expect("create waiter");
+        write_byte(input_writer.as_raw_fd());
+        write_byte(input_writer.as_raw_fd());
+
+        let first = waiter
+            .wait(Some(Instant::now() + Duration::from_secs(1)))
+            .expect("wait for first input readiness");
+        assert!(first.input.readable);
+        read_byte(input.as_raw_fd());
+
+        let second = waiter
+            .wait(Some(Instant::now() + Duration::from_secs(1)))
+            .expect("wait for remaining input readiness");
+        assert!(second.input.readable);
     }
 
     #[test]

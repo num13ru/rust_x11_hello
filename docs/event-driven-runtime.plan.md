@@ -2,7 +2,7 @@
 
 > **Codex implementation plan** — `num13ru/rust_x11_hello`
 > Scope: Kindle-side PaperPad native MXCFB runtime (`master` branch).
-> Status: **Milestones A–C complete; 50 ms production loop retained.**
+> Status: **Milestones A–F implemented, host/Linux verified, and deployed; physical D–F runtime validation pending.**
 
 ## 0. Assumptions and constraints
 
@@ -226,14 +226,14 @@ together before another deployable runtime is produced.
 
 Target: `src/native_runtime.rs`, `src/input/evdev.rs`, possibly `src/runtime.rs`.
 
-- [ ] Replace unconditional `thread::sleep(POLL_INTERVAL)` with `RuntimeWait::wait(next_deadline)`.
-- [ ] After waking, service pending transport state/frame(s), process ready evdev input, and run due display maintenance; ensure startup state and initial UI draw are serviced once *before* first blocking wait.
-- [ ] On terminal evdev readiness or a drain EOF/error, cancel active contact and propagate the failure through the existing grab-release and framebuffer-cleanup path.
-- [ ] Preserve **event ordering within each decoded evdev batch** and local Exit handling. With `MAX_EVENTS_PER_DRAIN = 256`, a still-readable FD must be handled on the next cycle without waiting for unrelated notifications.
-- [ ] Avoid starvation under continuous frames or continuous touch. Use bounded processing per pass and allow the other ready source to progress.
-- [ ] Do not hold mailbox or connection mutexes across MXCFB display operations or a blocking wait.
-- [ ] Keep `PaperpadRuntime` as the sole main-thread owner of UI/contact state.
-- [ ] Remove the main-loop `POLL_INTERVAL` constant after tests pass. Prefer renaming `poll_frame()` only if doing so materially clarifies semantics; it currently means a nonblocking mailbox take, not a timed network poll.
+- [x] Replace unconditional `thread::sleep(POLL_INTERVAL)` with `RuntimeWait::wait(next_deadline)`.
+- [x] After waking, service pending transport state/frame(s), process ready evdev input, and run due display maintenance; ensure startup state and initial UI draw are serviced once *before* first blocking wait.
+- [x] On terminal evdev readiness or a drain EOF/error, cancel active contact and propagate the failure through the existing grab-release and framebuffer-cleanup path.
+- [x] Preserve **event ordering within each decoded evdev batch** and local Exit handling. With `MAX_EVENTS_PER_DRAIN = 256`, a still-readable FD must be handled on the next cycle without waiting for unrelated notifications.
+- [x] Avoid starvation under continuous frames or continuous touch. Use bounded processing per pass and allow the other ready source to progress.
+- [x] Do not hold mailbox or connection mutexes across MXCFB display operations or a blocking wait.
+- [x] Keep `PaperpadRuntime` as the sole main-thread owner of UI/contact state.
+- [x] Remove the main-loop `POLL_INTERVAL` constant after tests pass. Prefer renaming `poll_frame()` only if doing so materially clarifies semantics; it currently means a nonblocking mailbox take, not a timed network poll.
 
 **Acceptance:** Main-thread idle has no recurring 50 ms timeout; touch, latest frame, and connection status each cause an independent wake and immediate dispatch.
 
@@ -241,11 +241,11 @@ Target: `src/native_runtime.rs`, `src/input/evdev.rs`, possibly `src/runtime.rs`
 
 Target: `src/main.rs`, `src/native_runtime.rs`, waiter initialization/teardown.
 
-- [ ] Do **not** rely solely on the existing atomic shutdown flag: a signal can arrive between checking the flag and entering an infinite wait.
-- [ ] Choose one rigorously safe strategy: **(preferred for minimal change)** register a nonblocking signal-safe wake FD and write it from the signal handler with `libc::write`, plus the atomic flag; or use `signalfd` with signals masked before spawning workers. Document the choice and thread/signal assumptions.
-- [ ] The signal handler must perform only async-signal-safe operations—no allocation, locking, logging, or Rust channel send. Handle notification saturation as already-woken, not as a busy loop.
-- [ ] Ensure a shutdown event cannot be missed before, during, or after `poll()` setup. Preserve existing signal semantics for the separate MXCFB benchmark mode.
-- [ ] Preserve cancellation of active contact, explicit `EVIOCGRAB` release, worker teardown, and framebuffer snapshot restoration on normal Exit, signals, and recoverable errors.
+- [x] Do **not** rely solely on the existing atomic shutdown flag: a signal can arrive between checking the flag and entering an infinite wait.
+- [x] Choose one rigorously safe strategy: **(preferred for minimal change)** register a nonblocking signal-safe wake FD and write it from the signal handler with `libc::write`, plus the atomic flag; or use `signalfd` with signals masked before spawning workers. Document the choice and thread/signal assumptions.
+- [x] The signal handler must perform only async-signal-safe operations—no allocation, locking, logging, or Rust channel send. Handle notification saturation as already-woken, not as a busy loop.
+- [x] Ensure a shutdown event cannot be missed before, during, or after `poll()` setup. Preserve existing signal semantics for the separate MXCFB benchmark mode.
+- [x] Preserve cancellation of active contact, explicit `EVIOCGRAB` release, worker teardown, and framebuffer snapshot restoration on normal Exit, signals, and recoverable errors.
 
 **Acceptance:** An indefinitely idle, disconnected PaperPad exits promptly on `SIGTERM` and `SIGINT` and restores the framebuffer; repeated signals and startup failures do not hang or skip cleanup.
 
@@ -253,17 +253,27 @@ Target: `src/main.rs`, `src/native_runtime.rs`, waiter initialization/teardown.
 
 Target: `src/mxcfb/backend.rs`, `src/runtime.rs`, `src/net/mod.rs`.
 
-- [ ] Expose the next display deadline (e.g. `next_maintenance_deadline() -> Option<Instant>`); do not duplicate its timer state in the event loop.
-- [ ] Compute `poll()` timeout from the deadline using monotonic time. Handle expired deadlines immediately, sub-millisecond rounding correctly, and large timeouts safely.
-- [ ] Preserve the startup ~750 ms refresh/reassert behavior and its error/restore semantics; after consuming the deadline, allow infinite idle wait again.
-- [ ] Replace the startup worker's `STARTUP_STOP_POLL_INTERVAL` 50 ms stop-check sleeps with an interruptible timed wait (e.g. `Condvar` or a shutdown channel with timeout). This is **separate** from the main-loop migration.
-- [ ] Retain genuine reconnect retry backoff and socket operation timeouts. Do not replace intentional retry deadlines with busy retrying.
+- [x] Expose the next display deadline (e.g. `next_maintenance_deadline() -> Option<Instant>`); do not duplicate its timer state in the event loop.
+- [x] Compute `poll()` timeout from the deadline using monotonic time. Handle expired deadlines immediately, sub-millisecond rounding correctly, and large timeouts safely.
+- [x] Preserve the startup ~750 ms refresh/reassert behavior and its error/restore semantics; after consuming the deadline, allow infinite idle wait again.
+- [x] Replace the startup worker's `STARTUP_STOP_POLL_INTERVAL` 50 ms stop-check sleeps with an interruptible timed wait (e.g. `Condvar` or a shutdown channel with timeout). This is **separate** from the main-loop migration.
+- [x] Retain genuine reconnect retry backoff and socket operation timeouts. Do not replace intentional retry deadlines with busy retrying.
 
 **Acceptance:** No recurring 50 ms idle check remains in the normal native runtime or startup worker. Display maintenance runs at its intended one-shot deadline; retries remain controlled when disconnected.
 
+#### Milestones D–F implementation (2026-11-16)
+
+- `src/native_runtime.rs` performs one initial service pass, then blocks in `RuntimeWait::wait()` until evdev, a coalesced transport/shutdown notification, or the display backend's monotonic deadline is ready. Each pass services at most the latest frame and one bounded evdev drain; level readiness schedules remaining input without a periodic timeout.
+- The process signal handler publishes the atomic shutdown flag and performs only one nonblocking `write(2)` to a process-lifetime eventfd. Registration rechecks the flag and notifies after publication, closing the pre-registration race. The separate MXCFB benchmark continues using its existing bounded polling lifecycle.
+- `MxcfbDisplayBackend` owns and exposes its one-shot startup reassertion deadline. The startup connection worker now uses an interruptible `Condvar` deadline; intentional discovery, reconnect, connect, and write timeouts remain unchanged.
+- `make check`, Clippy with warnings denied, and `git diff --check` passed on macOS. All 224 host tests passed. In the Linux builder, 168 tests passed when skipping only the two pre-existing exact `SO_SNDTIMEO` assertions; the unfiltered run failed only because Linux returned 152 ms for the requested 150 ms. All new event-loop, level-readiness, deadline, stop-wake, and early-signal tests passed.
+- `make build PROXY=false` and `make verify PROXY=false` passed. The static ARM EABI5 artifact has SHA-256 `7732a4dfa03fe1b991515fe4fd715607b0bdab0a0312153f3cb2d4fef683776b`.
+- The single connected Kindle was updated with the canonical MTP script. Independent readback matched the host hash; the retained `.previous` binary matched the A–C hash `9fc08f3cb20bf7286508e282fc72fa67a5dca2607584456a84528284561db37d`. Append-style logs were removed and `rust_x11_hello.status` was preserved before physical validation.
+- Still unverified on device: eventfd/poll behavior on the Paperwhite kernel, idle wakeup rate, prompt signal and local Exit while disconnected, active-contact cancellation, framebuffer restoration, and any latency, visual-refresh, CPU, or battery improvement.
+
 ### Milestone G — Verification, regression review, and documentation
 
-- [ ] Run from repository root:
+- [x] Run from repository root:
 
   ```sh
   make check
@@ -272,11 +282,11 @@ Target: `src/mxcfb/backend.rs`, `src/runtime.rs`, `src/net/mod.rs`.
   git diff --check
   ```
 
-- [ ] If `make check` runs on macOS, also execute the new Linux-specific waiter tests in the Linux build environment; confirm they actually ran.
-- [ ] Inspect the diff for accidental changes to `paper-protocol`, PaperSpoon UI, packet formats, X11 code, KUAL launcher, and benchmark paths.
-- [ ] Update architecture notes to describe event-driven wakeups. Correct only directly affected stale statements in `AGENTS.md`/comments; avoid unrelated documentation refactors.
+- [x] If `make check` runs on macOS, also execute the new Linux-specific waiter tests in the Linux build environment; confirm they actually ran.
+- [x] Inspect the diff for accidental changes to `paper-protocol`, PaperSpoon UI, packet formats, X11 code, KUAL launcher, and benchmark paths.
+- [x] Update architecture notes to describe event-driven wakeups. Correct only directly affected stale statements in `AGENTS.md`/comments; avoid unrelated documentation refactors.
 - [ ] Deploy to the Kindle using the repository's documented MTP procedure, verify the deployed binary checksum, and collect device logs.
-- [ ] Report measurements and limitations; **do not claim 24 FPS, visual refresh completion, or battery savings without independent evidence**.
+- [x] Report measurements and limitations; **do not claim 24 FPS, visual refresh completion, or battery savings without independent evidence**.
 
 **Acceptance:** All automated checks pass, hardware observations are recorded, and any unverified behavior is explicitly listed.
 
