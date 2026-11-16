@@ -270,7 +270,8 @@ Target: `src/mxcfb/backend.rs`, `src/runtime.rs`, `src/net/mod.rs`.
 - `make build PROXY=false` and `make verify PROXY=false` passed. The static ARM EABI5 artifact has SHA-256 `7732a4dfa03fe1b991515fe4fd715607b0bdab0a0312153f3cb2d4fef683776b`.
 - The single connected Kindle was updated with the canonical MTP script. Independent readback matched the host hash; the retained `.previous` binary matched the A–C hash `9fc08f3cb20bf7286508e282fc72fa67a5dca2607584456a84528284561db37d`. Append-style logs were removed and `rust_x11_hello.status` was preserved before physical validation.
 - The connected **Test MXCFB TERM cleanup (15s)** run stopped through the signal path, released `EVIOCGRAB`, restored the full framebuffer snapshot, and exited 0; the operator confirmed the stock UI returned. The log also contains native evdev Press/Release pairs for the matching deployment. See `docs/archive/mxcfb-device-evidence.md`.
-- Still unverified on device: disconnected idle wake latency, repeated-signal behavior, local Exit on this event-driven build, active-contact cancellation, input-failure cleanup, idle wakeup rate, and any latency, driver visual-completion, CPU, or battery improvement.
+- A second run with PaperSpoon stopped remained disconnected through repeated discovery failures. TERM produced `stopped reason=signal` before the in-flight discovery attempt completed, followed by explicit grab release, full-snapshot restoration, exit 0, and operator-confirmed stock UI return.
+- Still unverified on device: numeric signal-wake latency, repeated-signal behavior, local Exit on this event-driven build, active-contact cancellation, input-failure cleanup, idle wakeup rate, and any latency, driver visual-completion, CPU, or battery improvement.
 
 ### Milestone G — Verification, regression review, and documentation
 

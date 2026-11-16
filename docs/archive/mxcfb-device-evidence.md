@@ -771,3 +771,29 @@ event-driven build while connected. It does not establish disconnected idle
 wake latency, repeated-signal behavior, local Exit on this build,
 active-contact cancellation, input-failure cleanup, driver visual completion,
 idle wakeup rate, CPU or battery improvement.
+
+### Disconnected TERM wake
+
+The operator then fully stopped PaperSpoon, reran **Test MXCFB TERM cleanup
+(15s)** without touching the screen, and confirmed the stock Kindle UI returned.
+The session ended at `Mon Nov 16 10:48:22 GMT+3:0100 2026`; retrieved log
+SHA-256 was
+`31c3ccf58c2ceae5775a828f6bfdf7b8344d20c01bbf31ede60dad30f42f0543`,
+and the unchanged status SHA-256 was
+`7b518dd1f30983840b0c2ce28fd7996f09263a71985050d6a0d66397f7d87c8e`.
+
+The authoritative log records `connected=false`, repeated bounded discovery
+failures, no `transport: connected`, and no evdev pointer records. At the
+deadline the launcher sent `TERM`; the main runtime immediately logged
+`stopped reason=signal` before the in-flight discovery attempt finished. It
+then explicitly released `EVIOCGRAB`, restored the 2,157,312-byte framebuffer
+snapshot, and exited 0 without forced `KILL`. The restoration wait was 287,979
+us; driver and visual completion remain unproven as recorded in the log.
+
+This establishes that the deployed event-driven build observes TERM while
+disconnected and retrying discovery, then completes orderly input/display
+cleanup and returns visibly to the stock UI. It does not provide a numeric
+signal-wake latency because individual log records are not timestamped, and it
+does not establish repeated-signal behavior, local Exit on this build,
+active-contact cancellation, input-failure cleanup, idle wakeup rate, CPU or
+battery improvement.
