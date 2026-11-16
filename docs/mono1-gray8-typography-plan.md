@@ -1,6 +1,6 @@
 # PaperSpoon typography migration: Mono1 monospace and Gray8 proportional OpenType
 
-Status: Implemented on host; physical e-ink validation pending
+Status: Implemented; core rendering visually verified on Paperwhite 6
 
 Scope: PaperSpoon host rendering (`tools/paperspoon/`)  
 Target: Kindle Paperwhite 6 remote viewport via existing PPFB v2 frames  
@@ -298,12 +298,35 @@ At implementation time, read `AGENTS.md`, `README.md`, the relevant current sour
 
 ### Manual host / physical-device validation
 
-- [ ] Render `ui 1272x1624` and `frame nowplaying` locally, and inspect representative short and long text.
-- [ ] On a connected Paperwhite 6, check Mono1 glyph legibility, button-label centering, inverted pressed labels, top/bottom clipping, and that the PaperPad Exit strip stays intact.
-- [ ] Check Gray8 antialiasing, title/metadata hierarchy, artwork/progress placement, Cyrillic/accents, and visible contrast on the actual e-ink panel.
+- [x] Render `ui 1272x1624` and `frame nowplaying` locally, and inspect representative short and long text.
+- [x] On a connected Paperwhite 6, check Mono1 glyph legibility, button-label centering, top/bottom clipping, and that the PaperPad Exit strip stays intact.
+- [ ] Check inverted pressed-button labels on the physical panel.
+- [x] Check Gray8 title/metadata hierarchy, artwork/progress placement, and visible contrast on the actual e-ink panel.
+- [ ] Check Cyrillic/accents on the physical panel; host coverage alone is not physical evidence.
 - [ ] If testing multiple waveforms, record requested waveform, physical observations, and ghosting **separately** from font quality; do not make unverified claims about panel FPS or exact colors from host screenshots.
 - [ ] Check reconnect and failed-Now-Playing behavior: the previous authoritative frame should remain valid when a replacement cannot be rendered.
-- [ ] Record concise, dated evidence in the appropriate `docs/` file. If no Kindle is accessible, mark physical rendering **not verified** rather than passing it by inference.
+- [x] Record concise, dated evidence in the appropriate `docs/` file. If no Kindle is accessible, mark physical rendering **not verified** rather than passing it by inference.
+
+### Device validation result (2026-11-16)
+
+- Operator-supplied photographs `IMG_3268.jpeg` and `IMG_3269.jpeg` show the
+  current typography on the documented Paperwhite 6. The photographs were
+  provided as task evidence and were not copied into the repository.
+- The Gray8 Now Playing photograph shows readable proportional title,
+  artist/album metadata, playback state, duration, and progress layout beneath
+  a grayscale artwork image. Visual hierarchy and contrast are clear, content
+  remains inside the remote viewport, and the PaperPad connection indicator
+  and device-local Exit strip remain visible and intact.
+- The Mono1 application photograph shows a readable monospaced title and all
+  nine labels centered within the unchanged button grid. No top/bottom text
+  clipping is visible, and the PaperPad connection indicator and Exit strip
+  remain intact.
+- The photographs establish normal-state physical readability and layout for
+  both profiles. They do not establish pressed-label inversion,
+  Cyrillic/accent rendering, reconnect/failure retention, a requested
+  waveform, ghosting comparisons, or exact panel luminance levels. Exact
+  one-bit packing and intermediate Gray8 values remain established by host
+  tests rather than inferred from the camera images.
 
 ## Acceptance criteria
 

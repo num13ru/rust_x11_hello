@@ -823,3 +823,29 @@ the deployed event-driven build, including native input dispatch and orderly
 input/display cleanup. It does not establish repeated-signal behavior,
 active-contact cancellation, input-failure cleanup, idle wakeup rate, CPU or
 battery improvement.
+
+## Typography device photographs (2026-11-16)
+
+The operator reported the completed Mono1/Gray8 typography migration verified
+on the documented Paperwhite 6 and supplied two photographs as task evidence:
+`IMG_3268.jpeg` (Gray8 Now Playing) and `IMG_3269.jpeg` (Mono1 application
+grid). The source photographs remain outside the repository.
+
+The Now Playing photograph visibly shows grayscale artwork followed by a
+readable proportional title, artist, album, paused state, progress bar, and
+duration. The hierarchy and contrast are legible on the panel, the content
+stays inside the negotiated remote viewport, and PaperPad's filled connection
+indicator and device-local Exit strip remain intact. The application-grid
+photograph visibly shows a readable monospaced title and labels 1-9 centered in
+the unchanged button rectangles, again with the local connection indicator and
+Exit strip intact.
+
+This is physical visual evidence for normal-state typography readability,
+centering, hierarchy, artwork/progress placement, viewport separation, and the
+continued presence of PaperPad-owned local UI. It is not evidence for pressed
+label inversion, Cyrillic/accent rendering on-panel, reconnect or failed-frame
+retention, any specific requested waveform, comparative ghosting, exact panel
+luminance, or camera-verified refresh rate. No device log or deployed-binary
+checksum was supplied with these photographs; exact Mono1 packing and Gray8
+intermediate luminance remain supported by the host tests recorded in
+`docs/mono1-gray8-typography-plan.md`.
