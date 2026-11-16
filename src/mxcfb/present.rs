@@ -35,10 +35,21 @@ pub(super) fn present_remote(
     present_remote_with(opened, markers, frame, controller::submit_update)
 }
 
+#[cfg(test)]
 pub(super) fn present_remote_with(
     opened: &mut OpenedFramebuffer,
     markers: &mut UpdateMarkerSequence,
     frame: RemoteFrame<'_>,
+    submit: impl FnMut(&File, &mut UpdateDataMtk, u32, u32) -> Result<()>,
+) -> Result<SubmittedUpdate> {
+    present_remote_with_waveform(opened, markers, frame, MxcfbWaveform::Gc16, submit)
+}
+
+pub(super) fn present_remote_with_waveform(
+    opened: &mut OpenedFramebuffer,
+    markers: &mut UpdateMarkerSequence,
+    frame: RemoteFrame<'_>,
+    waveform: MxcfbWaveform,
     submit: impl FnMut(&File, &mut UpdateDataMtk, u32, u32) -> Result<()>,
 ) -> Result<SubmittedUpdate> {
     let region = ScreenRect {
@@ -47,9 +58,10 @@ pub(super) fn present_remote_with(
         width: frame.width(),
         height: frame.height(),
     };
-    present_remote_region_with_waveform(opened, markers, frame, region, MxcfbWaveform::Gc16, submit)
+    present_remote_region_with_waveform(opened, markers, frame, region, waveform, submit)
 }
 
+#[cfg(test)]
 pub(super) fn present_remote_region_with(
     opened: &mut OpenedFramebuffer,
     markers: &mut UpdateMarkerSequence,
@@ -60,7 +72,7 @@ pub(super) fn present_remote_region_with(
     present_remote_region_with_waveform(opened, markers, frame, region, MxcfbWaveform::Gc16, submit)
 }
 
-fn present_remote_region_with_waveform(
+pub(super) fn present_remote_region_with_waveform(
     opened: &mut OpenedFramebuffer,
     markers: &mut UpdateMarkerSequence,
     frame: RemoteFrame<'_>,

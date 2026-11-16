@@ -1,16 +1,19 @@
 //! Native MXCFB display backend.
 
+use std::env;
 use std::fs::File;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 
 use crate::display::{RemoteFrame, RemoteFrameCache};
 
 use super::controller;
 use super::dirty::changed_region;
 use super::opened::OpenedFramebuffer;
-use super::present::{present_remote_region_with, present_remote_with, present_system_ui_with};
+use super::present::{
+    present_remote_region_with_waveform, present_remote_with_waveform, present_system_ui_with,
+};
 use super::update_abi::UpdateDataMtk;
 use super::update_marker::UpdateMarkerSequence;
 use super::update_request::{MxcfbWaveform, next_full_screen_gc16_request, next_remote_request};
@@ -19,6 +22,7 @@ type SubmitUpdate = fn(&File, &mut UpdateDataMtk, u32, u32) -> Result<()>;
 type WaitUpdate = fn(&File, u32) -> Result<()>;
 const WHITE: u8 = 0xff;
 const STARTUP_REASSERT_DELAY: Duration = Duration::from_millis(750);
+const WAVEFORM_ENV: &str = "PAPERPAD_MXCFB_WAVEFORM";
 
 pub(crate) struct MxcfbDisplayBackend {
     opened: OpenedFramebuffer,
@@ -26,6 +30,7 @@ pub(crate) struct MxcfbDisplayBackend {
     remote_frame_cache: RemoteFrameCache<Vec<u8>>,
     submit_update: SubmitUpdate,
     wait_update: WaitUpdate,
+    remote_waveform: MxcfbWaveform,
     initial_screen: Option<Vec<u8>>,
     screen_modified: bool,
     startup_refresh_at: Option<Instant>,
@@ -34,11 +39,13 @@ pub(crate) struct MxcfbDisplayBackend {
 
 impl MxcfbDisplayBackend {
     pub(crate) fn open() -> Result<Self> {
+        let remote_waveform = waveform_from_env()?;
         let opened = OpenedFramebuffer::open().context("initialize MXCFB display backend")?;
         let mut backend = Self::from_opened(
             opened,
             controller::submit_update,
             controller::wait_for_update_complete,
+            remote_waveform,
         )?;
         backend
             .clear_remote_viewport()
@@ -51,6 +58,7 @@ impl MxcfbDisplayBackend {
         opened: OpenedFramebuffer,
         submit_update: SubmitUpdate,
         wait_update: WaitUpdate,
+        remote_waveform: MxcfbWaveform,
     ) -> Result<Self> {
         let spec = opened.info.spec;
         let initial_screen = opened
@@ -58,7 +66,7 @@ impl MxcfbDisplayBackend {
             .snapshot_visible()
             .context("snapshot framebuffer before MXCFB PaperPad")?;
         eprintln!(
-            "display backend=mxcfb width={} height={} bpp={} line_length={} visual={} xoffset={} yoffset={} snapshot_bytes={}",
+            "display backend=mxcfb width={} height={} bpp={} line_length={} visual={} xoffset={} yoffset={} snapshot_bytes={} remote_waveform={}",
             spec.visible_width,
             spec.visible_height,
             spec.bits_per_pixel,
@@ -66,7 +74,8 @@ impl MxcfbDisplayBackend {
             spec.visual,
             spec.xoffset,
             spec.yoffset,
-            initial_screen.len()
+            initial_screen.len(),
+            remote_waveform.name()
         );
         Ok(Self {
             opened,
@@ -74,6 +83,7 @@ impl MxcfbDisplayBackend {
             remote_frame_cache: RemoteFrameCache::default(),
             submit_update,
             wait_update,
+            remote_waveform,
             initial_screen: Some(initial_screen),
             screen_modified: false,
             startup_refresh_at: None,
@@ -174,10 +184,11 @@ impl MxcfbDisplayBackend {
         .context("reconstruct cached MXCFB remote frame")?;
 
         self.screen_modified = true;
-        let submitted = present_remote_with(
+        let submitted = present_remote_with_waveform(
             &mut self.opened,
             &mut self.markers,
             frame,
+            self.remote_waveform,
             self.submit_update,
         )?;
         eprintln!(
@@ -259,11 +270,12 @@ impl MxcfbDisplayBackend {
         };
 
         self.screen_modified = true;
-        match present_remote_region_with(
+        match present_remote_region_with_waveform(
             &mut self.opened,
             &mut self.markers,
             frame,
             dirty,
+            self.remote_waveform,
             self.submit_update,
         ) {
             Ok(submitted) => {
@@ -349,6 +361,23 @@ impl MxcfbDisplayBackend {
     }
 }
 
+fn waveform_from_env() -> Result<MxcfbWaveform> {
+    match env::var(WAVEFORM_ENV) {
+        Ok(value) => parse_waveform(Some(&value)),
+        Err(env::VarError::NotPresent) => parse_waveform(None),
+        Err(env::VarError::NotUnicode(_)) => bail!("{WAVEFORM_ENV} is not valid Unicode"),
+    }
+}
+
+fn parse_waveform(value: Option<&str>) -> Result<MxcfbWaveform> {
+    match value {
+        None => Ok(MxcfbWaveform::Gc16),
+        Some(name) => MxcfbWaveform::from_name(name).with_context(|| {
+            format!("invalid {WAVEFORM_ENV}={name:?}; expected gc16, du, a2, or du4")
+        }),
+    }
+}
+
 impl Drop for MxcfbDisplayBackend {
     fn drop(&mut self) {
         if let Err(error) = self.restore_initial_screen() {
@@ -367,6 +396,22 @@ mod tests {
     use crate::mxcfb::metadata::FramebufferInfo;
     use crate::mxcfb::pixels::FramebufferSpec;
     use crate::ui::screen::ScreenLayout;
+
+    #[test]
+    fn runtime_waveform_defaults_to_gc16_and_accepts_supported_modes() {
+        assert_eq!(parse_waveform(None).unwrap(), MxcfbWaveform::Gc16);
+        for (name, expected) in [
+            ("gc16", MxcfbWaveform::Gc16),
+            ("du", MxcfbWaveform::Du),
+            ("a2", MxcfbWaveform::A2),
+            ("du4", MxcfbWaveform::Du4),
+        ] {
+            assert_eq!(parse_waveform(Some(name)).unwrap(), expected);
+        }
+
+        let error = parse_waveform(Some("auto")).unwrap_err();
+        assert!(format!("{error:#}").contains(WAVEFORM_ENV));
+    }
 
     fn fake_backend(submit_update: SubmitUpdate) -> MxcfbDisplayBackend {
         let file = OpenOptions::new()
@@ -416,6 +461,7 @@ mod tests {
             },
             submit_update,
             accept_wait,
+            MxcfbWaveform::Gc16,
         )
         .unwrap()
     }

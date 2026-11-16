@@ -134,9 +134,12 @@ mtp-rs rm /extensions/rust_x11_hello/bin/rust_x11_hello.previous --yes
 
 KUAL provides normal run, explicit benchmark, and diagnostic actions:
 
-- **Run Paperpad (5m)** — connected native runtime with direct framebuffer
-  display, exclusive evdev touch, no X11 connection, and a five-minute
-  watchdog.
+- **Run Paperpad GC16/DU/A2/DU4 (5m)** — connected native runtime with an
+  explicit remote-frame waveform, direct framebuffer display, exclusive evdev
+  touch, no X11 connection, and a five-minute watchdog. GC16 is the
+  conservative default; DU, A2, and DU4 are experimental fidelity/ghosting
+  tradeoffs. Local system UI, startup clearing, and framebuffer restoration
+  remain GC16 in every mode.
 - **Test MXCFB TERM cleanup (15s)** — normal MXCFB runtime with a short
   watchdog for verifying graceful `TERM`, framebuffer restoration, and clean
   process exit; it is not a benchmark.
@@ -187,6 +190,7 @@ Other runtime overrides are:
 
 | Variable | Meaning |
 | --- | --- |
+| `PAPERPAD_MXCFB_WAVEFORM=gc16\|du\|a2\|du4` | Normal runtime remote-frame waveform; defaults to GC16 |
 | `PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=gc16\|du\|a2\|du4` | Explicit benchmark waveform; defaults to GC16 |
 | `PAPERPAD_MXCFB_BENCHMARK_FRAMES=2..120` | Completed benchmark samples; defaults to 8 |
 | `PAPERPAD_MXCFB_BENCHMARK_REGION=full\|WIDTHxHEIGHT` | Centered benchmark region inside the remote viewport; defaults to full |
