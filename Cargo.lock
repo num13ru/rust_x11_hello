@@ -978,6 +978,7 @@ dependencies = [
  "media-remote",
  "paper-protocol",
  "unicode-script",
+ "unicode-segmentation",
 ]
 
 [[package]]

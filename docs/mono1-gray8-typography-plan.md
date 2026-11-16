@@ -108,15 +108,43 @@ At implementation time, read `AGENTS.md`, `README.md`, the relevant current sour
 
 ## Stage 1 — Text subsystem without UI migration
 
-- [ ] Introduce an appropriately named module, e.g. `tools/paperspoon/src/text_renderer.rs`, and keep the public API small.
-- [ ] Define explicit text styles/roles, font face/weight, pixel size, baseline metrics, bounded layout width, horizontal alignment, and a measured result.
-- [ ] Load the pinned font faces once per long-lived renderer, with lazy or explicit initialization and descriptive failure handling. Reuse font and glyph caches across frames when possible; do not initialize a font database for each glyph or line.
-- [ ] Expose positioned glyph coverage or an equivalent intermediate mask that can be drawn into either canvas. Keep output pixel-format rules out of the shaping module.
-- [ ] Support clipping against both a requested text rectangle and the canvas bounds; define behavior for empty strings, unsupported characters, invalid dimensions, and very long UTF-8 input.
-- [ ] Establish line-breaking and ellipsis behavior based on **measured shaped width**, not number of Unicode scalar values. Avoid splitting grapheme clusters. Full bidirectional or complex-script support must be documented accurately rather than implied by ASCII tests.
-- [ ] Add host unit tests using pinned font assets for measured advance, baseline, whitespace, kerning/proportional behavior, monospaced advance, Unicode fallback, and cache reuse.
+- [x] Introduce an appropriately named module, e.g. `tools/paperspoon/src/text_renderer.rs`, and keep the public API small.
+- [x] Define explicit text styles/roles, font face/weight, pixel size, baseline metrics, bounded layout width, horizontal alignment, and a measured result.
+- [x] Load the pinned font faces once per long-lived renderer, with lazy or explicit initialization and descriptive failure handling. Reuse font and glyph caches across frames when possible; do not initialize a font database for each glyph or line.
+- [x] Expose positioned glyph coverage or an equivalent intermediate mask that can be drawn into either canvas. Keep output pixel-format rules out of the shaping module.
+- [x] Support clipping against both a requested text rectangle and the canvas bounds; define behavior for empty strings, unsupported characters, invalid dimensions, and very long UTF-8 input.
+- [x] Establish line-breaking and ellipsis behavior based on **measured shaped width**, not number of Unicode scalar values. Avoid splitting grapheme clusters. Full bidirectional or complex-script support must be documented accurately rather than implied by ASCII tests.
+- [x] Add host unit tests using pinned font assets for measured advance, baseline, whitespace, kerning/proportional behavior, monospaced advance, Unicode fallback, and cache reuse.
 
 **Gate:** The text engine can measure and rasterize both profiles without importing `MonoCanvas`, `GrayCanvas`, network code, or Kindle code.
+
+### Stage 1 result (2026-11-16)
+
+- Added `tools/paperspoon/src/text_renderer.rs` as a canvas-, protocol-,
+  network-, and Kindle-independent subsystem. Its public API exposes semantic
+  roles, stable role styles, a baseline-anchored request, horizontal alignment,
+  clip/ellipsis overflow, measured metrics, and a clipped coverage mask.
+- `TextRenderer` explicitly loads both pinned faces once, fixes locale to
+  `en-US`, retains its shaping and glyph caches across calls, and permits only
+  bundled Inter as fallback from IBM Plex Mono. It never calls system-font
+  discovery. Missing or wrong-family font assets fail initialization.
+- The bounded input contract is single-line: controls including newlines become
+  spaces. Clip preserves the shaped line; ellipsis uses shaped width and Unicode
+  grapheme boundaries. Input over 16 KiB, zero dimensions, coordinate overflow,
+  unsupported glyphs, corrupt assets, and allocation failures return contextual
+  errors. Full bidirectional and complex-script coverage is not claimed.
+- Coverage is clipped to the intersection of the requested rectangle and canvas
+  bounds before composition. The subsystem contains no Mono1 threshold or Gray8
+  luminance rule; those remain Stage 2/3 compositor responsibilities.
+- Eleven focused unit tests cover explicit styles, baseline and whitespace
+  metrics, monospaced/proportional advance, Inter kerning, embedded Unicode
+  fallback, cache reuse, alignment, negative origins, descenders, canvas edges,
+  empty/off-canvas output, grapheme-safe ellipsis, oversized input, unsupported
+  glyphs, coordinate overflow, and corrupt or wrong-family fonts.
+- `make check` passed, including workspace formatting, strict Clippy, all host
+  tests, menu validation, and deployment-script mocks. The suite requires local
+  loopback socket permission. No production text caller has migrated yet, and
+  role sizes plus physical e-ink quality remain provisional and **unverified**.
 
 ## Stage 2 — Mono1 migration
 

@@ -9,3 +9,4 @@ pub mod gray_renderer;
 pub mod mono_renderer;
 pub mod now_playing;
 pub mod now_playing_renderer;
+pub mod text_renderer;
