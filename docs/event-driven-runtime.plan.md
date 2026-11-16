@@ -2,7 +2,7 @@
 
 > **Codex implementation plan** — `num13ru/rust_x11_hello`
 > Scope: Kindle-side PaperPad native MXCFB runtime (`master` branch).
-> Status: **Milestones A–F implemented, host/Linux verified, and deployed; physical D–F runtime validation pending.**
+> Status: **Milestones A–G complete for the scoped event-driven cutover; unmeasured performance and fault-injection limitations remain listed below.**
 
 ## 0. Assumptions and constraints
 
