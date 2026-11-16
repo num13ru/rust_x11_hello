@@ -4,8 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+cosmic-text = { version = "=0.19.0", default-features = false, features = ["std", "swash"] }
 image = { version = "=0.25.8", default-features = false, features = ["jpeg"] }
 paper-protocol = { path = "../../crates/paper-protocol" }
+unicode-script = "=0.5.9"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Exact crates.io v0.5.2: exports NowPlayingPerl, embeds mediaremote-adapter,
