@@ -271,7 +271,8 @@ Target: `src/mxcfb/backend.rs`, `src/runtime.rs`, `src/net/mod.rs`.
 - The single connected Kindle was updated with the canonical MTP script. Independent readback matched the host hash; the retained `.previous` binary matched the A–C hash `9fc08f3cb20bf7286508e282fc72fa67a5dca2607584456a84528284561db37d`. Append-style logs were removed and `rust_x11_hello.status` was preserved before physical validation.
 - The connected **Test MXCFB TERM cleanup (15s)** run stopped through the signal path, released `EVIOCGRAB`, restored the full framebuffer snapshot, and exited 0; the operator confirmed the stock UI returned. The log also contains native evdev Press/Release pairs for the matching deployment. See `docs/archive/mxcfb-device-evidence.md`.
 - A second run with PaperSpoon stopped remained disconnected through repeated discovery failures. TERM produced `stopped reason=signal` before the in-flight discovery attempt completed, followed by explicit grab release, full-snapshot restoration, exit 0, and operator-confirmed stock UI return.
-- Still unverified on device: numeric signal-wake latency, repeated-signal behavior, local Exit on this event-driven build, active-contact cancellation, input-failure cleanup, idle wakeup rate, and any latency, driver visual-completion, CPU, or battery improvement.
+- A disconnected **Run Paperpad (5m)** run recorded a bottom-strip Press/Release pair, `ui action=activate system=exit`, and `stopped reason=local_exit`, followed by explicit grab release, full-snapshot restoration, exit 0, and operator-confirmed stock UI return.
+- Still unverified on device: numeric signal-wake latency, repeated-signal behavior, active-contact cancellation, input-failure cleanup, idle wakeup rate, and any latency, driver visual-completion, CPU, or battery improvement.
 
 ### Milestone G — Verification, regression review, and documentation
 

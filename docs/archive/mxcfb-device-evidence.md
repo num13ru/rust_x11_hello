@@ -797,3 +797,29 @@ signal-wake latency because individual log records are not timestamped, and it
 does not establish repeated-signal behavior, local Exit on this build,
 active-contact cancellation, input-failure cleanup, idle wakeup rate, CPU or
 battery improvement.
+
+### Disconnected local Exit
+
+With PaperSpoon still stopped, the operator ran **Run Paperpad (5m)**, tapped
+the device-local Exit button, and confirmed the stock Kindle UI returned. The
+session ended at `Mon Nov 16 17:05:01 GMT+3:0100 2026`; retrieved log SHA-256
+was `5b5587d75e5f4d753003d0300e132a20e94873dc70c1ad6de330a0a14aa684aa`,
+and status SHA-256 was
+`2fead5455234aee9d2909f8525bc5dab7bc5190893b73ddc8681f97309cc15b1`.
+The status reports `STOPPED status=0 reason=process_exit`.
+
+The authoritative log records `connected=false`, three discovery probe
+windows ending without a valid PaperSpoon response, and the intentional
+2,000 ms startup retry. It then records the bottom-strip evdev Press/Release
+pair at physical coordinates `(717,1677)` and `(717,1673)`, followed by
+`ui action=activate system=exit` and `stopped reason=local_exit`. PaperPad
+explicitly released `EVIOCGRAB`, restored the 2,157,312-byte framebuffer
+snapshot, and exited 0 without TERM or forced `KILL`. The restoration wait was
+287,900 us; `ioctl_completion_proven=false` and
+`visual_completion_verified=false` remain explicit limitations.
+
+This establishes that device-local Exit remains independent of PaperSpoon in
+the deployed event-driven build, including native input dispatch and orderly
+input/display cleanup. It does not establish repeated-signal behavior,
+active-contact cancellation, input-failure cleanup, idle wakeup rate, CPU or
+battery improvement.
