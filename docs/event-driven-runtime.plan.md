@@ -269,7 +269,8 @@ Target: `src/mxcfb/backend.rs`, `src/runtime.rs`, `src/net/mod.rs`.
 - `make check`, Clippy with warnings denied, and `git diff --check` passed on macOS. All 224 host tests passed. In the Linux builder, 168 tests passed when skipping only the two pre-existing exact `SO_SNDTIMEO` assertions; the unfiltered run failed only because Linux returned 152 ms for the requested 150 ms. All new event-loop, level-readiness, deadline, stop-wake, and early-signal tests passed.
 - `make build PROXY=false` and `make verify PROXY=false` passed. The static ARM EABI5 artifact has SHA-256 `7732a4dfa03fe1b991515fe4fd715607b0bdab0a0312153f3cb2d4fef683776b`.
 - The single connected Kindle was updated with the canonical MTP script. Independent readback matched the host hash; the retained `.previous` binary matched the A–C hash `9fc08f3cb20bf7286508e282fc72fa67a5dca2607584456a84528284561db37d`. Append-style logs were removed and `rust_x11_hello.status` was preserved before physical validation.
-- Still unverified on device: eventfd/poll behavior on the Paperwhite kernel, idle wakeup rate, prompt signal and local Exit while disconnected, active-contact cancellation, framebuffer restoration, and any latency, visual-refresh, CPU, or battery improvement.
+- The connected **Test MXCFB TERM cleanup (15s)** run stopped through the signal path, released `EVIOCGRAB`, restored the full framebuffer snapshot, and exited 0; the operator confirmed the stock UI returned. The log also contains native evdev Press/Release pairs for the matching deployment. See `docs/archive/mxcfb-device-evidence.md`.
+- Still unverified on device: disconnected idle wake latency, repeated-signal behavior, local Exit on this event-driven build, active-contact cancellation, input-failure cleanup, idle wakeup rate, and any latency, driver visual-completion, CPU, or battery improvement.
 
 ### Milestone G — Verification, regression review, and documentation
 
@@ -285,7 +286,7 @@ Target: `src/mxcfb/backend.rs`, `src/runtime.rs`, `src/net/mod.rs`.
 - [x] If `make check` runs on macOS, also execute the new Linux-specific waiter tests in the Linux build environment; confirm they actually ran.
 - [x] Inspect the diff for accidental changes to `paper-protocol`, PaperSpoon UI, packet formats, X11 code, KUAL launcher, and benchmark paths.
 - [x] Update architecture notes to describe event-driven wakeups. Correct only directly affected stale statements in `AGENTS.md`/comments; avoid unrelated documentation refactors.
-- [ ] Deploy to the Kindle using the repository's documented MTP procedure, verify the deployed binary checksum, and collect device logs.
+- [x] Deploy to the Kindle using the repository's documented MTP procedure, verify the deployed binary checksum, and collect device logs.
 - [x] Report measurements and limitations; **do not claim 24 FPS, visual refresh completion, or battery savings without independent evidence**.
 
 **Acceptance:** All automated checks pass, hardware observations are recorded, and any unverified behavior is explicitly listed.

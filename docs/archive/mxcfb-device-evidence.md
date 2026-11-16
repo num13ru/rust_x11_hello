@@ -739,3 +739,35 @@ exclusive-input release, orderly framebuffer restoration, and post-run device
 usability on the tested PW6. It does not newly establish disconnect/reconnect,
 pixel fidelity, `SIGKILL`, kernel-hang or power-loss recovery, input-failure
 cleanup, or descriptor-close-only grab release.
+
+## Event-driven TERM cleanup (2026-11-16)
+
+The event-driven cutover commit `03bdf11` passed the host/Linux and ARMv7
+verification recorded in `docs/event-driven-runtime.plan.md`. Independent MTP
+readback before the run matched the deployed artifact SHA-256
+`7732a4dfa03fe1b991515fe4fd715607b0bdab0a0312153f3cb2d4fef683776b`.
+
+The operator ran **Test MXCFB TERM cleanup (15s)** and confirmed the stock
+Kindle UI returned normally. The bounded launcher session ended at
+`Mon Nov 16 10:44:00 GMT+3:0100 2026`; retrieved log SHA-256 was
+`bf98fa2765c46aae13fceb3b83c9d38f2bbce6ccb02c7c2155ec127ff6d3c27a`,
+and status SHA-256 was
+`7b518dd1f30983840b0c2ce28fd7996f09263a71985050d6a0d66397f7d87c8e`.
+The status reports `STOPPED status=0 reason=watchdog`.
+
+The authoritative log records the normal native runtime opening
+`/dev/input/event1` with `eviocgrab=true`, connecting to PaperSpoon, and
+dispatching two evdev Press/Release pairs. At the deadline the launcher sent
+`TERM`; PaperPad stopped with `reason=signal`, explicitly released
+`EVIOCGRAB`, restored the 2,157,312-byte framebuffer snapshot, and exited with
+status 0 without forced `KILL`. The restoration wait was 287,968 us. The log
+correctly records `ioctl_completion_proven=false` and
+`visual_completion_verified=false`; the operator observation establishes only
+that the stock UI visibly returned after this run.
+
+This establishes signal-path shutdown, native-input dispatch, explicit grab
+release, snapshot restoration, and clean watchdog completion for the deployed
+event-driven build while connected. It does not establish disconnected idle
+wake latency, repeated-signal behavior, local Exit on this build,
+active-contact cancellation, input-failure cleanup, driver visual completion,
+idle wakeup rate, CPU or battery improvement.
