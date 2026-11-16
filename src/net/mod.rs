@@ -1349,6 +1349,15 @@ mod tests {
             .expect("read write timeout")
     }
 
+    fn assert_transport_write_timeout_is_bounded(paperspoon: &Paperspoon) {
+        let actual = transport_write_timeout(paperspoon).expect("configured write timeout");
+        let rounded_upper_bound = TCP_WRITE_TIMEOUT + Duration::from_millis(20);
+        assert!(
+            (TCP_WRITE_TIMEOUT..=rounded_upper_bound).contains(&actual),
+            "configured write timeout {actual:?} is outside {TCP_WRITE_TIMEOUT:?}..={rounded_upper_bound:?}"
+        );
+    }
+
     #[test]
     fn explicit_host_resolves_directly() {
         let addr = paperspoon_addr(Some("127.0.0.1"), 6000).expect("explicit host must resolve");
@@ -1362,10 +1371,7 @@ mod tests {
             Paperspoon::connect_to(listener.local_addr().expect("addr"), TEST_VIEWPORT)
                 .expect("connect");
         let _peer = accept_before(&listener, Duration::from_secs(2));
-        assert_eq!(
-            transport_write_timeout(&paperspoon),
-            Some(TCP_WRITE_TIMEOUT)
-        );
+        assert_transport_write_timeout_is_bounded(&paperspoon);
     }
 
     #[test]
@@ -1715,10 +1721,7 @@ mod tests {
         );
 
         // Drop must stop and join the reader even while its peer remains idle.
-        assert_eq!(
-            transport_write_timeout(&paperspoon),
-            Some(TCP_WRITE_TIMEOUT)
-        );
+        assert_transport_write_timeout_is_bounded(&paperspoon);
         reconnected_peer
             .set_read_timeout(Some(Duration::from_secs(2)))
             .expect("set peer deadline");
