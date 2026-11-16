@@ -849,3 +849,17 @@ luminance, or camera-verified refresh rate. No device log or deployed-binary
 checksum was supplied with these photographs; exact Mono1 packing and Gray8
 intermediate luminance remain supported by the host tests recorded in
 `docs/mono1-gray8-typography-plan.md`.
+
+### Follow-up manual typography checks (2026-11-16)
+
+The operator subsequently reported successful manual verification of the four
+remaining typography checks on the same documented Paperwhite 6 and current
+build: white-on-black pressed-label inversion, Cyrillic and accented text,
+reconnect/failure handling with retention of the previous authoritative frame,
+and waveform/ghosting comparisons.
+
+This operator attestation completes the planned manual typography checklist.
+No additional photographs, logs, deployed-binary checksum, requested waveform
+names, or per-mode qualitative observations accompanied the follow-up. The
+record therefore supports successful completion of those checks but does not
+support a mode-specific ghosting, latency, refresh-rate, or exact-color claim.

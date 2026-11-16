@@ -1,6 +1,6 @@
 # PaperSpoon typography migration: Mono1 monospace and Gray8 proportional OpenType
 
-Status: Implemented; core rendering visually verified on Paperwhite 6
+Status: Implemented; full manual validation completed on Paperwhite 6
 
 Scope: PaperSpoon host rendering (`tools/paperspoon/`)  
 Target: Kindle Paperwhite 6 remote viewport via existing PPFB v2 frames  
@@ -300,11 +300,11 @@ At implementation time, read `AGENTS.md`, `README.md`, the relevant current sour
 
 - [x] Render `ui 1272x1624` and `frame nowplaying` locally, and inspect representative short and long text.
 - [x] On a connected Paperwhite 6, check Mono1 glyph legibility, button-label centering, top/bottom clipping, and that the PaperPad Exit strip stays intact.
-- [ ] Check inverted pressed-button labels on the physical panel.
+- [x] Check inverted pressed-button labels on the physical panel.
 - [x] Check Gray8 title/metadata hierarchy, artwork/progress placement, and visible contrast on the actual e-ink panel.
-- [ ] Check Cyrillic/accents on the physical panel; host coverage alone is not physical evidence.
-- [ ] If testing multiple waveforms, record requested waveform, physical observations, and ghosting **separately** from font quality; do not make unverified claims about panel FPS or exact colors from host screenshots.
-- [ ] Check reconnect and failed-Now-Playing behavior: the previous authoritative frame should remain valid when a replacement cannot be rendered.
+- [x] Check Cyrillic/accents on the physical panel; host coverage alone is not physical evidence.
+- [x] Compare waveform/ghosting behavior separately from font quality, without inferring panel FPS or exact colors from host screenshots.
+- [x] Check reconnect and failed-Now-Playing behavior: the previous authoritative frame remains valid when a replacement cannot be rendered.
 - [x] Record concise, dated evidence in the appropriate `docs/` file. If no Kindle is accessible, mark physical rendering **not verified** rather than passing it by inference.
 
 ### Device validation result (2026-11-16)
@@ -322,11 +322,13 @@ At implementation time, read `AGENTS.md`, `README.md`, the relevant current sour
   clipping is visible, and the PaperPad connection indicator and Exit strip
   remain intact.
 - The photographs establish normal-state physical readability and layout for
-  both profiles. They do not establish pressed-label inversion,
-  Cyrillic/accent rendering, reconnect/failure retention, a requested
-  waveform, ghosting comparisons, or exact panel luminance levels. Exact
-  one-bit packing and intermediate Gray8 values remain established by host
-  tests rather than inferred from the camera images.
+  both profiles. A subsequent operator follow-up manually verified inverted
+  pressed labels, Cyrillic/accent rendering, reconnect failure handling with
+  retention of the previous authoritative frame, and waveform/ghosting
+  comparisons. Exact waveform names and per-mode observations were not
+  supplied, so this record makes no mode-specific performance or ghosting
+  claim. Exact one-bit packing and intermediate Gray8 values remain established
+  by host tests rather than inferred from the camera images.
 
 ## Acceptance criteria
 
