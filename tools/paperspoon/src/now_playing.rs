@@ -22,6 +22,7 @@ const HELPER_RESPONSE_TIMEOUT: std::time::Duration = std::time::Duration::from_s
 const HELPER_MAGIC: [u8; 4] = *b"PNP1";
 const HELPER_HEADER_LEN: usize = 9;
 const HELPER_ERROR_LIMIT: usize = 64 * 1024;
+const HELPER_TIMING_ENV: &str = "PAPERSPOON_NOW_PLAYING_TIMING";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct NowPlayingSnapshot {
@@ -54,13 +55,18 @@ pub fn load_now_playing_frame(width: u16, height: u16) -> Result<Gray8Frame, Str
 
     let executable = std::env::current_exe()
         .map_err(|error| format!("failed to locate PaperSpoon executable: {error}"))?;
+    let helper_stderr = if std::env::var_os(HELPER_TIMING_ENV).is_some() {
+        Stdio::inherit()
+    } else {
+        Stdio::null()
+    };
     let mut child = Command::new(executable)
         .arg(HELPER_ARGUMENT)
         .arg(width.to_string())
         .arg(height.to_string())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(helper_stderr)
         .process_group(0)
         .spawn()
         .map_err(|error| format!("failed to start Now Playing helper: {error}"))?;
@@ -133,10 +139,46 @@ pub fn load_now_playing_frame(_width: u16, _height: u16) -> Result<Gray8Frame, S
 /// Internal helper entry point. The parent intentionally terminates this
 /// process group after reading the response, which also stops the Perl child.
 pub fn run_helper(width: u16, height: u16) -> ! {
+    run_helper_response(acquire_snapshot(), width, height)
+}
+
+/// Deterministic snapshot entry point used only by the host preview example.
+#[doc(hidden)]
+pub fn run_preview_helper(width: u16, height: u16) -> ! {
+    run_helper_response(
+        Ok(NowPlayingSnapshot {
+            title: "Café Музыка e\u{301}".to_string(),
+            artist: Some("Pinned Inter preview".to_string()),
+            album: Some("PaperSpoon typography".to_string()),
+            is_playing: Some(true),
+            elapsed_time: Some(83.0),
+            duration: Some(257.0),
+            bundle_id: Some("org.paperspoon.preview".to_string()),
+            bundle_name: Some("PaperSpoon Preview".to_string()),
+            artwork: None,
+        }),
+        width,
+        height,
+    )
+}
+
+fn run_helper_response(snapshot: Result<NowPlayingSnapshot, String>, width: u16, height: u16) -> ! {
     use std::io::Write;
 
-    let response = acquire_snapshot().and_then(|snapshot| {
-        crate::now_playing_renderer::render_now_playing(&snapshot, width, height)
+    let response = snapshot.and_then(|snapshot| {
+        let initialization_started = std::time::Instant::now();
+        let mut renderer = crate::now_playing_renderer::NowPlayingRenderer::new()?;
+        let initialization_elapsed = initialization_started.elapsed();
+        let rendering_started = std::time::Instant::now();
+        let frame = renderer.render(&snapshot, width, height)?;
+        if std::env::var_os(HELPER_TIMING_ENV).is_some() {
+            eprintln!(
+                "paperspoon Now Playing typography: init_us={} render_us={}",
+                initialization_elapsed.as_micros(),
+                rendering_started.elapsed().as_micros()
+            );
+        }
+        Ok(frame)
     });
     let (status, payload) = match response {
         Ok(frame) => (0_u8, frame.pixels().to_vec()),

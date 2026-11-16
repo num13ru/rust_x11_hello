@@ -195,15 +195,54 @@ At implementation time, read `AGENTS.md`, `README.md`, the relevant current sour
 
 ## Stage 3 — Gray8 and Now Playing migration
 
-- [ ] Add Gray8 glyph compositing to `gray_renderer.rs` using alpha/coverage and destination luminance, including correct dark text on white and non-white backgrounds. Do not use one-bit thresholding for this profile.
-- [ ] Migrate `now_playing_renderer.rs` to the Inter proportional text profile. Use actual font metrics and measured widths instead of `scale`-based 5x7 dimensions and fixed `14 * scale` line heights.
-- [ ] Define hierarchy and wrapping/truncation: title is primary; artist, album, playback state, and duration are secondary. Keep artwork, progress bar, and labels within the viewport, including short/wide layouts and exceptionally long metadata.
-- [ ] Preserve existing metadata sanitation and input-size bounds, adding grapheme-safe truncation as needed. Test Latin accents, Cyrillic, combining characters, punctuation, and missing/unsupported glyphs.
-- [ ] Preserve the existing Now Playing helper lifecycle, termination, deadlines, failure semantics, and wire response. Measure the extra font initialization cost **inside the short-lived helper** rather than assuming cache reuse across helper launches.
-- [ ] If initialization materially threatens the helper timeout, record evidence and address it in a separately scoped change; do not casually move MediaRemote acquisition or alter helper process boundaries in this typography migration.
-- [ ] Add deterministic host-side Gray8 pixel/golden-image tests using the pinned fonts. Ensure output uses the existing Gray8 protocol and payload cap.
+- [x] Add Gray8 glyph compositing to `gray_renderer.rs` using alpha/coverage and destination luminance, including correct dark text on white and non-white backgrounds. Do not use one-bit thresholding for this profile.
+- [x] Migrate `now_playing_renderer.rs` to the Inter proportional text profile. Use actual font metrics and measured widths instead of `scale`-based 5x7 dimensions and fixed `14 * scale` line heights.
+- [x] Define hierarchy and wrapping/truncation: title is primary; artist, album, playback state, and duration are secondary. Keep artwork, progress bar, and labels within the viewport, including short/wide layouts and exceptionally long metadata.
+- [x] Preserve existing metadata sanitation and input-size bounds, adding grapheme-safe truncation as needed. Test Latin accents, Cyrillic, combining characters, punctuation, and missing/unsupported glyphs.
+- [x] Preserve the existing Now Playing helper lifecycle, termination, deadlines, failure semantics, and wire response. Measure the extra font initialization cost **inside the short-lived helper** rather than assuming cache reuse across helper launches.
+- [x] If initialization materially threatens the helper timeout, record evidence and address it in a separately scoped change; do not casually move MediaRemote acquisition or alter helper process boundaries in this typography migration.
+- [x] Add deterministic host-side Gray8 pixel/golden-image tests using the pinned fonts. Ensure output uses the existing Gray8 protocol and payload cap.
 
 **Gate:** Now Playing renders readable proportional text without clipping or malformed luminance; helper timeout/error behavior is preserved and tested.
+
+### Stage 3 result (2026-11-16)
+
+- Added rounded source-over coverage blending to `GrayCanvas`. Zero coverage
+  preserves destination luminance, full coverage selects the foreground, and
+  partial coverage produces exact intermediate Gray8 values. Tests cover dark
+  text on white and non-white destinations, light-on-dark composition, and
+  clipping at the canvas edge; no Mono1 threshold or dithering is involved.
+- Replaced Now Playing's scaled `font5x7` calls and character-count layout with
+  Inter semantic roles, shaped measurement, font baselines, and grapheme-safe
+  ellipsis. The title remains primary; artist, album, state, progress, and
+  duration follow in decreasing layout priority. Short/wide and tiny viewports
+  omit lower rows when a full metric line no longer fits rather than overlap or
+  draw a partial line.
+- Retained the existing 256-character display sanitation bound while refusing
+  to split a grapheme cluster and replacing control characters with spaces.
+  Tests cover Latin accents, Cyrillic, combining marks, long metadata, absent
+  metadata/artwork, invalid progress, and an unsupported glyph. Missing glyphs
+  return a role-specific error and no partial frame escapes the renderer.
+- The helper still acquires MediaRemote state first, returns the same binary
+  response, parks after flushing, and is terminated as a process group by the
+  parent under the existing four-second response timeout. Opt-in stderr timing
+  does not alter the default response. A deterministic fixture in the actual
+  short-lived helper process measured 1.092 ms for font initialization,
+  2.824 ms for rendering, and 24.633 ms for the complete spawn/read/termination
+  preview path at 1272x1624 in an optimized host build. This fixture bypassed
+  MediaRemote acquisition because no live Now Playing source was available;
+  the measurements show no material typography threat to the timeout but are
+  not a worst-case latency guarantee.
+- A pinned-font full-frame checksum, exact compositor assertions, repeated
+  render/cache checks, odd-size cases, and the existing protocol/payload tests
+  make host output drift explicit. `make check` passed, including formatting,
+  strict Clippy, all workspace tests, and script checks.
+- The project-local PGM/PNG preview showed proportional hierarchy, centered
+  artwork placeholder, Cyrillic/combining text, progress, and duration within
+  the viewport. Physical e-ink antialiasing, contrast, and readability remain
+  **unverified**. This stage works when bundled Inter contains every requested
+  glyph and the nonzero Gray8 viewport fits the PPFB payload cap; otherwise it
+  returns a contextual error without changing the transport format.
 
 ## Stage 4 — Remove legacy renderer and document the result
 

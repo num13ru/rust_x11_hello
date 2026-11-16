@@ -5,6 +5,7 @@ use image::imageops::FilterType;
 use paper_protocol::{Gray8Frame, V2_FRAME_PREFIX_LEN, V2_MAX_PAYLOAD_LEN};
 
 use crate::font5x7;
+use crate::text_renderer::CoverageMask;
 
 pub const MAX_SOURCE_IMAGE_BYTES: usize = 256 * 1024 * 1024;
 
@@ -90,6 +91,40 @@ impl GrayCanvas {
                 height - 2,
                 luminance,
             );
+        }
+    }
+
+    /// Alpha-blend a clipped glyph coverage mask over the existing luminance.
+    ///
+    /// Coverage zero preserves the destination; coverage 255 replaces it with
+    /// `foreground_luminance`. Intermediate values use rounded source-over
+    /// blending and remain Gray8 rather than being thresholded.
+    pub fn draw_coverage(&mut self, mask: &CoverageMask, foreground_luminance: u8) {
+        let (origin_x, origin_y) = mask.origin();
+        let (width, height) = mask.dimensions();
+        for y in 0..height {
+            for x in 0..width {
+                let coverage = mask.pixels()[usize::from(y) * usize::from(width) + usize::from(x)];
+                if coverage == 0 {
+                    continue;
+                }
+                let Some(target_x) = origin_x.checked_add(x) else {
+                    continue;
+                };
+                let Some(target_y) = origin_y.checked_add(y) else {
+                    continue;
+                };
+                if target_x >= self.width || target_y >= self.height {
+                    continue;
+                }
+
+                let index = usize::from(target_y) * usize::from(self.width) + usize::from(target_x);
+                let destination = u32::from(self.pixels[index]);
+                let foreground = u32::from(foreground_luminance);
+                let alpha = u32::from(coverage);
+                self.pixels[index] =
+                    ((destination * (255 - alpha) + foreground * alpha + 127) / 255) as u8;
+            }
         }
     }
 
@@ -226,6 +261,19 @@ mod tests {
         assert_eq!((frame.width(), frame.height(), frame.stride()), (7, 9, 7));
         assert!(frame.pixels()[3 * 7 + 1..5 * 7 + 6].contains(&0));
         assert_eq!(frame.pixels()[8], u8::MAX);
+    }
+
+    #[test]
+    fn coverage_blends_exact_luminance_and_clips_at_canvas_edge() {
+        let mask = CoverageMask::for_test(1, 0, 4, 2, vec![0, 64, 128, 255, 255, 128, 64, 0]);
+        let mut canvas = GrayCanvas::new(4, 2).expect("canvas");
+        canvas.fill_rect(0, 1, 4, 1, 100);
+        canvas.draw_coverage(&mask, 0);
+        assert_eq!(canvas.pixels(), &[255, 255, 191, 127, 100, 0, 50, 75]);
+
+        canvas.fill_rect(0, 0, 4, 2, 0);
+        canvas.draw_coverage(&mask, u8::MAX);
+        assert_eq!(canvas.pixels(), &[0, 0, 64, 128, 0, 255, 128, 64]);
     }
 
     #[test]
