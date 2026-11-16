@@ -167,6 +167,24 @@ impl CoverageMask {
             pixels: Vec::new(),
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        origin_x: u16,
+        origin_y: u16,
+        width: u16,
+        height: u16,
+        pixels: Vec<u8>,
+    ) -> Self {
+        assert_eq!(pixels.len(), usize::from(width) * usize::from(height));
+        Self {
+            origin_x,
+            origin_y,
+            width,
+            height,
+            pixels,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

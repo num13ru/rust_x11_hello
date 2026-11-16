@@ -1,7 +1,12 @@
 //! Deterministic software drawing primitives for protocol-native Mono1 frames.
 
 use crate::font5x7;
+use crate::text_renderer::CoverageMask;
 use paper_protocol::{Mono1Frame, Mono1FrameError, Mono1Pixel, mono1_payload_len, mono1_stride};
+
+/// Coverage at or above this value becomes foreground ink. No dithering is
+/// applied.
+pub const MONO_TEXT_THRESHOLD: u8 = 128;
 
 /// Mutable one-bit canvas using the protocol's MSB-first row representation.
 #[derive(Debug, Eq, PartialEq)]
@@ -99,6 +104,28 @@ impl MonoCanvas {
                     height - 2,
                     color,
                 );
+            }
+        }
+    }
+
+    /// Composite a clipped glyph coverage mask without changing pixels below
+    /// the threshold.
+    pub fn draw_coverage(&mut self, mask: &CoverageMask, threshold: u8, color: Mono1Pixel) {
+        let (origin_x, origin_y) = mask.origin();
+        let (width, height) = mask.dimensions();
+        for y in 0..height {
+            for x in 0..width {
+                let coverage = mask.pixels()[usize::from(y) * usize::from(width) + usize::from(x)];
+                if coverage < threshold {
+                    continue;
+                }
+                let Some(target_x) = origin_x.checked_add(x) else {
+                    continue;
+                };
+                let Some(target_y) = origin_y.checked_add(y) else {
+                    continue;
+                };
+                self.set_pixel(target_x, target_y, color);
             }
         }
     }
@@ -232,5 +259,21 @@ mod tests {
         assert_eq!(frame.pixel(19, 0), Some(Mono1Pixel::Black));
         assert_eq!(frame.pixel(18, 12), Some(Mono1Pixel::White));
         assert_eq!(frame.pixel(20, 12), Some(Mono1Pixel::Black));
+    }
+
+    #[test]
+    fn coverage_threshold_is_msb_first_and_preserves_padding_and_background() {
+        let mask = CoverageMask::for_test(6, 0, 3, 2, vec![127, 128, 255, 255, 1, 128]);
+        let mut canvas = MonoCanvas::new(9, 2).expect("canvas");
+        canvas.draw_coverage(&mask, MONO_TEXT_THRESHOLD, Mono1Pixel::Black);
+        assert_eq!(canvas.pixels(), &[0x01, 0x80, 0x02, 0x80]);
+
+        canvas.clear(Mono1Pixel::Black);
+        canvas.draw_coverage(&mask, MONO_TEXT_THRESHOLD, Mono1Pixel::White);
+        assert_eq!(canvas.pixels(), &[0xfe, 0x00, 0xfd, 0x00]);
+        let frame = canvas.into_frame().expect("valid padding bits");
+        assert_eq!(frame.pixel(6, 0), Some(Mono1Pixel::Black));
+        assert_eq!(frame.pixel(7, 0), Some(Mono1Pixel::White));
+        assert_eq!(frame.pixel(8, 0), Some(Mono1Pixel::White));
     }
 }

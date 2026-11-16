@@ -148,14 +148,50 @@ At implementation time, read `AGENTS.md`, `README.md`, the relevant current sour
 
 ## Stage 2 — Mono1 migration
 
-- [ ] Add a Mono1 text compositing path to `mono_renderer.rs`. Convert glyph coverage to exactly one bit using a documented threshold; do not apply grayscale antialiasing or spatial dithering to the initial implementation.
-- [ ] Handle both black-on-white and white-on-black (pressed button) foregrounds without altering unrelated pixels. Clip safely, including negative bearings, descenders, partial glyphs, right/bottom borders, and non-byte-aligned canvas widths.
-- [ ] Migrate `application_renderer.rs` to the monospaced text profile. Replace font-specific offsets in `application_ui.rs` with measured positioning (especially button-label centering), keeping the hit-test rectangle unchanged.
-- [ ] Preserve the top title and status bar layout for small as well as 1272x1624 viewports. Ensure long status messages are clipped or ellipsized without overlapping other UI or wrapping unexpectedly.
-- [ ] Update exact-pixel tests that encode the old `font5x7` glyph pattern. Preserve geometry, active-button inversion, protocol encoding, valid viewport, and status-region assertions.
-- [ ] Add dedicated tests for white-on-black labels, Mono1 MSB-first packing, padding bits, clipping, and narrow viewports.
+- [x] Add a Mono1 text compositing path to `mono_renderer.rs`. Convert glyph coverage to exactly one bit using a documented threshold; do not apply grayscale antialiasing or spatial dithering to the initial implementation.
+- [x] Handle both black-on-white and white-on-black (pressed button) foregrounds without altering unrelated pixels. Clip safely, including negative bearings, descenders, partial glyphs, right/bottom borders, and non-byte-aligned canvas widths.
+- [x] Migrate `application_renderer.rs` to the monospaced text profile. Replace font-specific offsets in `application_ui.rs` with measured positioning (especially button-label centering), keeping the hit-test rectangle unchanged.
+- [x] Preserve the top title and status bar layout for small as well as 1272x1624 viewports. Ensure long status messages are clipped or ellipsized without overlapping other UI or wrapping unexpectedly.
+- [x] Update exact-pixel tests that encode the old `font5x7` glyph pattern. Preserve geometry, active-button inversion, protocol encoding, valid viewport, and status-region assertions.
+- [x] Add dedicated tests for white-on-black labels, Mono1 MSB-first packing, padding bits, clipping, and narrow viewports.
 
 **Gate:** `ui WIDTHxHEIGHT` produces a valid, legible Mono1 frame; button positions and interaction semantics have not changed; host tests pass. Keep the old `font5x7` path until Gray8 has also migrated.
+
+### Stage 2 result (2026-11-16)
+
+- Added coverage-mask composition to `MonoCanvas` with the fixed threshold
+  `coverage >= 128`. It writes only the requested foreground color, applies no
+  antialiasing or dithering, and leaves sub-threshold pixels unchanged. Exact
+  tests cover black-on-white and white-on-black output, MSB-first packing,
+  right-edge clipping, and zeroed padding bits for a non-byte-aligned width.
+- Replaced application `font5x7` drawing with a long-lived
+  `ApplicationRenderer` using the IBM Plex Mono semantic roles. The sender
+  initializes it lazily and retains its glyph cache across application frames;
+  repeated rendering is deterministic and does not grow the cache once the
+  used glyphs are warm.
+- Application text layout now describes a rectangle, semantic role, measured
+  horizontal alignment, overflow policy, and baseline or metric-centered
+  vertical placement. The nine button rectangles—and therefore hit testing—are
+  unchanged. Labels are centered from font metrics, pressed labels invert to
+  white on black, and long status text ellipsizes inside the existing 40-pixel
+  status region.
+- Host tests cover the existing 1272x1624 geometry, protocol round trips,
+  active-button inversion, odd and narrow viewports down to 1x1, status
+  confinement, cache reuse, and unsupported glyph errors. A sender-level
+  regression test proves a rendering error writes no frame and preserves the
+  frame ID, authoritative-frame marker, and last successfully sent application
+  frame.
+- `make check` passed, including formatting, workspace checks, strict Clippy,
+  all host tests, menu validation, shell syntax checks, and deployment-script
+  mocks. It requires permission to bind local loopback sockets. A pinned-font
+  1272x1624 PBM host preview was inspected for title, label, grid, and status
+  placement; it is not evidence of physical e-ink legibility.
+- This stage works for nonzero viewports whose Mono1 frame fits the PPFB payload
+  cap and for text covered by bundled IBM Plex Mono or its explicit bundled
+  Inter fallback. Missing/corrupt assets, unsupported glyphs, zero dimensions,
+  and oversized frames return contextual errors without replacing the last
+  authoritative frame. The old `font5x7` path remains only for the unmigrated
+  Gray8 renderer until Stage 3/4.
 
 ## Stage 3 — Gray8 and Now Playing migration
 

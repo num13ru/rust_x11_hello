@@ -33,7 +33,7 @@ use paper_protocol::{
     encode_v2_frame,
 };
 use paperspoon::{
-    application_input::ApplicationInput, application_renderer::render_application_bounded,
+    application_input::ApplicationInput, application_renderer::ApplicationRenderer,
     application_ui::ApplicationUi, now_playing::load_now_playing_frame,
 };
 
@@ -179,6 +179,7 @@ struct FrameSenderState {
     next_frame_id: u64,
     authoritative: Option<AuthoritativeFrame>,
     last_application_frame: Option<Mono1Frame>,
+    application_renderer: Option<ApplicationRenderer>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -257,6 +258,7 @@ impl FrameSender {
                 next_frame_id: 1,
                 authoritative: None,
                 last_application_frame: None,
+                application_renderer: None,
             })),
         }
     }
@@ -439,7 +441,14 @@ impl FrameSender {
         viewport: (u16, u16),
         suppress_unchanged: bool,
     ) -> Result<ApplicationSend, String> {
-        let candidate = render_application_bounded(ui, viewport.0, viewport.1)?;
+        if state.application_renderer.is_none() {
+            state.application_renderer = Some(ApplicationRenderer::new()?);
+        }
+        let candidate = state
+            .application_renderer
+            .as_mut()
+            .ok_or_else(|| "application renderer initialization was lost".to_string())?
+            .render_bounded(ui, viewport.0, viewport.1)?;
         if !self.current.is_active() {
             return Ok(ApplicationSend::NoConnection);
         }
@@ -1786,6 +1795,50 @@ mod tests {
         };
         assert_eq!(changed.frame_id, 2);
         assert_ne!(read_sent_frame(&mut peer, changed).2, first_pixels);
+    }
+
+    #[test]
+    fn application_render_failure_preserves_authoritative_frame_and_id() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind listener");
+        let current = CurrentConnection::default();
+        let frame_sender = FrameSender::new(current.clone());
+        let (_token, mut peer) = install_connection(&listener, &current);
+        let mut ui = ApplicationUi::default();
+
+        let ApplicationSend::Sent(first) = frame_sender
+            .send_application(&ui, (128, 128))
+            .expect("first application render")
+        else {
+            panic!("first application frame must be sent");
+        };
+        read_sent_frame(&mut peer, first);
+        let baseline = {
+            let state = frame_sender.state.lock().expect("frame sender lock");
+            (
+                state.next_frame_id,
+                state.authoritative.clone(),
+                state.last_application_frame.clone(),
+            )
+        };
+
+        peer.set_nonblocking(true).expect("nonblocking peer");
+        ui.set_status("unsupported 😀");
+        let error = frame_sender
+            .send_application(&ui, (128, 128))
+            .expect_err("unsupported glyph must reject replacement frame");
+        assert!(error.contains("Status"));
+        assert!(error.contains("no bundled glyph"));
+        assert_eq!(
+            peer.read(&mut [0; 1])
+                .expect_err("render failure must not write a frame")
+                .kind(),
+            io::ErrorKind::WouldBlock
+        );
+
+        let state = frame_sender.state.lock().expect("frame sender lock");
+        assert_eq!(state.next_frame_id, baseline.0);
+        assert_eq!(state.authoritative, baseline.1);
+        assert_eq!(state.last_application_frame, baseline.2);
     }
 
     #[test]
