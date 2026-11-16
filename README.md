@@ -35,6 +35,10 @@ pointer events that occur while disconnected are not replayed. Disconnecting
 does not clear the retained application frame; only the local connection
 indicator changes state.
 
+The normal PaperPad runtime is event-driven: Linux `poll(2)` blocks on native
+touch input and a coalescing `eventfd` for transport or shutdown work, using a
+timeout only while a real display-maintenance deadline is pending.
+
 ## Build and run
 
 ### 1. Verify and build the Kindle package

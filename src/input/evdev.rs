@@ -16,7 +16,7 @@ use std::io;
 #[cfg(target_os = "linux")]
 use std::io::Read;
 #[cfg(target_os = "linux")]
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, RawFd};
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::OpenOptionsExt;
 #[cfg(target_os = "linux")]
@@ -350,6 +350,14 @@ impl EvdevReader {
 
     pub(crate) fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Borrow the touchscreen descriptor for readiness polling.
+    ///
+    /// The descriptor remains valid only while this reader is alive. The
+    /// caller must not close it or transfer ownership from the returned value.
+    pub(crate) fn raw_fd(&self) -> RawFd {
+        self.file.as_raw_fd()
     }
 
     /// Drain at most `MAX_EVENTS_PER_DRAIN` currently available records.

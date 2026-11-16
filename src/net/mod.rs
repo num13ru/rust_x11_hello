@@ -24,22 +24,90 @@ pub mod discover;
 
 use crate::config::PaperpadConfig;
 use crate::latency;
+#[cfg(target_os = "linux")]
+use crate::runtime_wait::RuntimeNotifier;
 use anyhow::{Context, Result};
-use connection::{ConnectionState, ConnectionToken};
+use connection::{ConnectionState, ConnectionStream, ConnectionToken};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender, TryRecvError, TrySendError};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 const TCP_CONNECT_TIMEOUT: Duration = Duration::from_millis(150);
 const TCP_WRITE_TIMEOUT: Duration = Duration::from_millis(150);
 const STARTUP_RETRY_INTERVAL: Duration = Duration::from_secs(2);
-const STARTUP_STOP_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const OUTBOUND_QUEUE_CAPACITY: usize = 16;
 type StartupResult = Result<(SocketAddr, TcpStream)>;
+
+/// Main-runtime wakeup, separate from the reader-to-reconnector channel.
+#[derive(Clone, Debug, Default)]
+struct RuntimeWake {
+    #[cfg(target_os = "linux")]
+    notifier: Option<RuntimeNotifier>,
+}
+
+impl RuntimeWake {
+    #[cfg(target_os = "linux")]
+    fn new(notifier: RuntimeNotifier) -> Self {
+        Self {
+            notifier: Some(notifier),
+        }
+    }
+
+    fn notify(&self) {
+        #[cfg(target_os = "linux")]
+        match self.notifier.as_ref().map(RuntimeNotifier::notify) {
+            Some(Err(error)) => {
+                eprintln!("transport failed to notify native runtime: {error}");
+            }
+            Some(Ok(())) | None => {}
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        let _ = self;
+    }
+}
+
+#[derive(Debug, Default)]
+struct StopSignal {
+    requested: AtomicBool,
+    wait_lock: Mutex<()>,
+    wait_condvar: Condvar,
+}
+
+impl StopSignal {
+    fn is_requested(&self) -> bool {
+        self.requested.load(Ordering::Acquire)
+    }
+
+    fn request(&self) {
+        let _guard = self
+            .wait_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.requested.store(true, Ordering::Release);
+        self.wait_condvar.notify_all();
+    }
+
+    /// Wait for the retry deadline. Returns `false` when shutdown interrupts it.
+    fn wait_retry(&self, delay: Duration) -> bool {
+        if self.is_requested() {
+            return false;
+        }
+        let guard = self
+            .wait_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (_guard, _timeout) = self
+            .wait_condvar
+            .wait_timeout_while(guard, delay, |_| !self.is_requested())
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        !self.is_requested()
+    }
+}
 
 enum StartupUpdate {
     Connected {
@@ -64,20 +132,6 @@ fn connect_stream(addr: SocketAddr) -> Result<TcpStream> {
         .context("failed to connect to PaperSpoon")?;
     configure_stream(&stream)?;
     Ok(stream)
-}
-
-fn wait_for_startup_retry(stopping: &AtomicBool, delay: Duration) -> bool {
-    let deadline = Instant::now() + delay;
-    loop {
-        if stopping.load(Ordering::Acquire) {
-            return false;
-        }
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            return true;
-        }
-        std::thread::sleep(remaining.min(STARTUP_STOP_POLL_INTERVAL));
-    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -130,6 +184,7 @@ struct FrameMailboxState {
 #[derive(Clone, Default)]
 struct FrameMailbox {
     state: Arc<Mutex<FrameMailboxState>>,
+    runtime_wake: RuntimeWake,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -149,6 +204,13 @@ impl std::fmt::Display for FrameDimensionMismatch {
 }
 
 impl FrameMailbox {
+    fn with_runtime_wake(runtime_wake: RuntimeWake) -> Self {
+        Self {
+            state: Arc::default(),
+            runtime_wake,
+        }
+    }
+
     fn set_viewport(&self, viewport: (u16, u16)) {
         let mut state = self.state.lock().expect("frame mailbox lock");
         state.viewport = viewport;
@@ -162,15 +224,18 @@ impl FrameMailbox {
     }
 
     fn publish(&self, frame: ReceivedFrame) -> Result<(), FrameDimensionMismatch> {
-        let mut state = self.state.lock().expect("frame mailbox lock");
-        let actual = (frame.width(), frame.height());
-        if actual != state.viewport {
-            return Err(FrameDimensionMismatch {
-                expected: state.viewport,
-                actual,
-            });
+        {
+            let mut state = self.state.lock().expect("frame mailbox lock");
+            let actual = (frame.width(), frame.height());
+            if actual != state.viewport {
+                return Err(FrameDimensionMismatch {
+                    expected: state.viewport,
+                    actual,
+                });
+            }
+            state.pending = Some(frame);
         }
-        state.pending = Some(frame);
+        self.runtime_wake.notify();
         Ok(())
     }
 
@@ -192,7 +257,7 @@ pub struct Paperspoon {
     frames: FrameMailbox,
     outbound_tx: Option<SyncSender<QueuedOutbound>>,
     wake_tx: Option<Sender<()>>,
-    stopping: Arc<AtomicBool>,
+    stopping: Arc<StopSignal>,
     writer: Option<JoinHandle<()>>,
     reconnector: Option<JoinHandle<()>>,
     startup_rx: Option<Receiver<StartupUpdate>>,
@@ -218,9 +283,25 @@ struct QueuedOutbound {
     trace: Option<V2PointerTrace>,
 }
 
+fn disconnect_if_current_and_notify(
+    connection: &Arc<Mutex<ConnectionState>>,
+    candidate: &ConnectionStream,
+    runtime_wake: &RuntimeWake,
+) -> bool {
+    let disconnected = connection
+        .lock()
+        .expect("shared stream lock")
+        .disconnect_if_current(candidate);
+    if disconnected {
+        runtime_wake.notify();
+    }
+    disconnected
+}
+
 fn write_outbound(
     connection: &Arc<Mutex<ConnectionState>>,
     outbound: &QueuedOutbound,
+    runtime_wake: &RuntimeWake,
 ) -> Result<()> {
     let mut write_stream = {
         let guard = connection.lock().expect("shared stream lock");
@@ -234,10 +315,7 @@ fn write_outbound(
         if let Some(trace) = outbound.trace {
             latency::record("socket_write_error", Some(trace), "");
         }
-        connection
-            .lock()
-            .expect("shared stream lock")
-            .disconnect_if_current(&write_stream);
+        disconnect_if_current_and_notify(connection, &write_stream, runtime_wake);
         return Err(error)
             .with_context(|| format!("failed to write {} to PaperSpoon", outbound.description));
     }
@@ -250,15 +328,16 @@ fn write_outbound(
 fn spawn_writer(
     connection: Arc<Mutex<ConnectionState>>,
     outbound_rx: Receiver<QueuedOutbound>,
-    stopping: Arc<AtomicBool>,
+    stopping: Arc<StopSignal>,
+    runtime_wake: RuntimeWake,
 ) -> JoinHandle<()> {
     std::thread::spawn(move || {
         while let Ok(outbound) = outbound_rx.recv() {
-            if stopping.load(Ordering::Acquire) {
+            if stopping.is_requested() {
                 break;
             }
-            match write_outbound(&connection, &outbound) {
-                Err(error) if !stopping.load(Ordering::Acquire) => {
+            match write_outbound(&connection, &outbound, &runtime_wake) {
+                Err(error) if !stopping.is_requested() => {
                     eprintln!("transport error: {error:#}");
                 }
                 _ => {}
@@ -399,14 +478,19 @@ fn paperspoon_addr(host: Option<&str>, port: u16) -> Result<SocketAddr> {
 impl Paperspoon {
     /// Create a disconnected PaperSpoon without a reconnect worker.
     /// Startup failures and later sends remain non-fatal to the runtime loop.
+    #[cfg(test)]
     pub fn disconnected() -> Self {
+        Self::disconnected_with_runtime_wake(RuntimeWake::default())
+    }
+
+    fn disconnected_with_runtime_wake(runtime_wake: RuntimeWake) -> Self {
         Self {
             connection: Arc::new(Mutex::new(ConnectionState::disconnected())),
             remote_viewport: Arc::new(Mutex::new((0, 0))),
-            frames: FrameMailbox::default(),
+            frames: FrameMailbox::with_runtime_wake(runtime_wake),
             outbound_tx: None,
             wake_tx: None,
-            stopping: Arc::new(AtomicBool::new(false)),
+            stopping: Arc::new(StopSignal::default()),
             writer: None,
             reconnector: None,
             startup_rx: None,
@@ -415,10 +499,12 @@ impl Paperspoon {
     }
 
     /// Start retrying PaperSpoon connection attempts without blocking PaperPad.
+    #[cfg(target_os = "linux")]
     pub fn start(
         config: PaperpadConfig,
         remote_viewport: (u16, u16),
         pixel_formats: V2PixelFormats,
+        runtime_notifier: RuntimeNotifier,
     ) -> Self {
         Self::start_with_pixel_formats(
             move || {
@@ -428,6 +514,7 @@ impl Paperspoon {
             Some(STARTUP_RETRY_INTERVAL),
             remote_viewport,
             pixel_formats,
+            RuntimeWake::new(runtime_notifier),
         )
     }
 
@@ -445,6 +532,7 @@ impl Paperspoon {
             retry_interval,
             remote_viewport,
             V2PixelFormats::MONO1,
+            RuntimeWake::default(),
         )
     }
 
@@ -453,11 +541,12 @@ impl Paperspoon {
         retry_interval: Option<Duration>,
         remote_viewport: (u16, u16),
         pixel_formats: V2PixelFormats,
+        runtime_wake: RuntimeWake,
     ) -> Self
     where
         F: FnMut() -> StartupResult + Send + 'static,
     {
-        let mut paperspoon = Self::disconnected();
+        let mut paperspoon = Self::disconnected_with_runtime_wake(runtime_wake.clone());
         paperspoon.pixel_formats = pixel_formats;
         paperspoon.set_remote_viewport(remote_viewport);
         let worker_stopping = Arc::clone(&paperspoon.stopping);
@@ -467,12 +556,17 @@ impl Paperspoon {
         // a late result is dropped when this receiver no longer exists.
         drop(std::thread::spawn(move || {
             loop {
-                if worker_stopping.load(Ordering::Acquire) {
+                if worker_stopping.is_requested() {
                     break;
                 }
                 match connect() {
                     Ok((addr, stream)) => {
-                        let _ = startup_tx.send(StartupUpdate::Connected { addr, stream });
+                        if startup_tx
+                            .send(StartupUpdate::Connected { addr, stream })
+                            .is_ok()
+                        {
+                            runtime_wake.notify();
+                        }
                         break;
                     }
                     Err(error) => {
@@ -485,10 +579,11 @@ impl Paperspoon {
                         {
                             break;
                         }
+                        runtime_wake.notify();
                         let Some(delay) = retry_interval else {
                             break;
                         };
-                        if !wait_for_startup_retry(&worker_stopping, delay) {
+                        if !worker_stopping.wait_retry(delay) {
                             break;
                         }
                     }
@@ -537,6 +632,7 @@ impl Paperspoon {
         // which retries until PaperSpoon is reachable again and swaps in a
         // fresh socket — proactive auto-reconnect without user input.
         frames.set_viewport(remote_viewport);
+        let runtime_wake = frames.runtime_wake.clone();
         write_hello(&mut stream, remote_viewport, pixel_formats)?;
         let connection = Arc::new(Mutex::new(ConnectionState::connected(stream)));
         let remote_viewport = Arc::new(Mutex::new(remote_viewport));
@@ -553,12 +649,18 @@ impl Paperspoon {
         // Reconnector: wake on EOF, clear slot, retry connect until success,
         // install fresh socket + reader, then wait for the next EOF.
         let worker_connection = Arc::clone(&connection);
-        let stopping = Arc::new(AtomicBool::new(false));
-        let writer = spawn_writer(Arc::clone(&connection), outbound_rx, Arc::clone(&stopping));
+        let stopping = Arc::new(StopSignal::default());
+        let writer = spawn_writer(
+            Arc::clone(&connection),
+            outbound_rx,
+            Arc::clone(&stopping),
+            runtime_wake.clone(),
+        );
         let worker_stopping = Arc::clone(&stopping);
         let worker_frames = frames.clone();
         let worker_wake_tx = wake_tx.clone();
         let worker_remote_viewport = Arc::clone(&remote_viewport);
+        let worker_runtime_wake = runtime_wake.clone();
         let reconnector = std::thread::spawn(move || {
             let mut active_reader = Some(reader_handle);
             'reconnector: loop {
@@ -568,15 +670,18 @@ impl Paperspoon {
                 if let Some(reader) = active_reader.take() {
                     let _ = reader.join();
                 }
-                worker_connection
+                let disconnected = worker_connection
                     .lock()
                     .expect("shared stream lock")
                     .disconnect();
-                if worker_stopping.load(Ordering::Acquire) {
+                if disconnected {
+                    worker_runtime_wake.notify();
+                }
+                if worker_stopping.is_requested() {
                     break;
                 }
                 loop {
-                    if worker_stopping.load(Ordering::Acquire) {
+                    if worker_stopping.is_requested() {
                         break 'reconnector;
                     }
                     match TcpStream::connect_timeout(&addr, TCP_CONNECT_TIMEOUT) {
@@ -597,12 +702,13 @@ impl Paperspoon {
                             {
                                 let mut guard =
                                     worker_connection.lock().expect("shared stream lock");
-                                if worker_stopping.load(Ordering::Acquire) {
+                                if worker_stopping.is_requested() {
                                     let _ = new_stream.shutdown(Shutdown::Both);
                                     break 'reconnector;
                                 }
                                 guard.reconnect(new_stream);
                             }
+                            worker_runtime_wake.notify();
                             active_reader = Some(spawn_reader(
                                 fresh_reader,
                                 worker_frames.clone(),
@@ -750,7 +856,7 @@ impl Paperspoon {
 
 impl Drop for Paperspoon {
     fn drop(&mut self) {
-        self.stopping.store(true, Ordering::Release);
+        self.stopping.request();
         self.startup_rx.take();
 
         self.connection
@@ -773,7 +879,13 @@ impl Drop for Paperspoon {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "linux")]
+    use crate::runtime_wait::RuntimeWait;
     use std::io::Cursor;
+    #[cfg(target_os = "linux")]
+    use std::os::fd::AsRawFd;
+    #[cfg(target_os = "linux")]
+    use std::os::unix::net::UnixStream;
 
     const TEST_VIEWPORT: (u16, u16) = (1272, 1624);
 
@@ -781,6 +893,201 @@ mod tests {
         let frame = paper_protocol::Mono1Frame::new(width, height, pixels).expect("valid Mono1");
         let encoded = paper_protocol::encode_v2_frame(frame_id, &frame).expect("encode Frame");
         read_v2_frame(&mut Cursor::new(encoded)).expect("decode Frame")
+    }
+
+    #[test]
+    fn startup_retry_wait_is_interruptible_without_polling() {
+        let stopping = Arc::new(StopSignal::default());
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let (result_tx, result_rx) = mpsc::channel();
+        let worker_stopping = Arc::clone(&stopping);
+        let worker_barrier = Arc::clone(&barrier);
+        let worker = std::thread::spawn(move || {
+            worker_barrier.wait();
+            result_tx
+                .send(worker_stopping.wait_retry(Duration::from_secs(10)))
+                .expect("send retry result");
+        });
+
+        barrier.wait();
+        stopping.request();
+        assert!(
+            !result_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("startup retry did not wake")
+        );
+        worker.join().expect("startup retry worker panicked");
+    }
+
+    #[test]
+    fn startup_retry_wait_reaches_real_deadline() {
+        let stopping = StopSignal::default();
+        let started = Instant::now();
+        assert!(stopping.wait_retry(Duration::from_millis(10)));
+        assert!(started.elapsed() >= Duration::from_millis(10));
+    }
+
+    #[cfg(target_os = "linux")]
+    fn runtime_wake_pair() -> (UnixStream, UnixStream, RuntimeWait, RuntimeWake) {
+        let (input, input_guard) = UnixStream::pair().expect("create inert input pair");
+        let (waiter, notifier) =
+            RuntimeWait::new(input.as_raw_fd()).expect("create runtime waiter");
+        (input, input_guard, waiter, RuntimeWake::new(notifier))
+    }
+
+    #[cfg(target_os = "linux")]
+    fn wait_for_runtime_notification(waiter: &RuntimeWait) {
+        let ready = waiter
+            .wait(Some(Instant::now() + Duration::from_secs(2)))
+            .expect("wait for runtime notification");
+        assert!(ready.notified, "runtime notification did not arrive");
+        assert!(!ready.input.readable, "inert input unexpectedly readable");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn validated_frame_publication_wakes_and_preserves_latest_only_mailbox() {
+        let (_input, _input_guard, waiter, runtime_wake) = runtime_wake_pair();
+        let mailbox = FrameMailbox::with_runtime_wake(runtime_wake);
+        mailbox.set_viewport((9, 2));
+
+        mailbox
+            .publish(received_frame(1, 9, 2, vec![0x11, 0x80, 0x22, 0x00]))
+            .expect("publish first frame");
+        mailbox
+            .publish(received_frame(2, 9, 2, vec![0x44, 0x80, 0x55, 0x00]))
+            .expect("publish replacement frame");
+
+        wait_for_runtime_notification(&waiter);
+        assert_eq!(mailbox.take().expect("latest frame").frame_id(), 2);
+        let after_drain = waiter
+            .wait(Some(Instant::now() + Duration::from_millis(10)))
+            .expect("wait after coalesced frame wake");
+        assert!(after_drain.deadline_elapsed);
+        assert!(!after_drain.notified);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn rejected_frame_does_not_wake_runtime() {
+        let (_input, _input_guard, waiter, runtime_wake) = runtime_wake_pair();
+        let mailbox = FrameMailbox::with_runtime_wake(runtime_wake);
+        mailbox.set_viewport((9, 2));
+
+        mailbox
+            .publish(received_frame(3, 8, 2, vec![0x33; 2]))
+            .expect_err("mismatched frame must be rejected");
+        let ready = waiter
+            .wait(Some(Instant::now() + Duration::from_millis(10)))
+            .expect("wait after rejected frame");
+        assert!(ready.deadline_elapsed);
+        assert!(!ready.notified);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn terminal_startup_failure_wakes_before_main_thread_promotion() {
+        let (_input, _input_guard, waiter, runtime_wake) = runtime_wake_pair();
+        let mut paperspoon = Paperspoon::start_with_pixel_formats(
+            || Err(anyhow::anyhow!("injected terminal startup failure")),
+            None,
+            TEST_VIEWPORT,
+            V2PixelFormats::MONO1,
+            runtime_wake,
+        );
+
+        wait_for_runtime_notification(&waiter);
+        assert!(paperspoon.startup_rx.is_some());
+        paperspoon.promote_startup();
+        assert!(paperspoon.startup_rx.is_none());
+        assert!(!paperspoon.is_connected());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn startup_success_wakes_before_connection_state_is_promoted() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind listener");
+        let addr = listener.local_addr().expect("listener address");
+        let (_input, _input_guard, waiter, runtime_wake) = runtime_wake_pair();
+        let mut paperspoon = Paperspoon::start_with_pixel_formats(
+            move || connect_stream(addr).map(|stream| (addr, stream)),
+            None,
+            TEST_VIEWPORT,
+            V2PixelFormats::MONO1,
+            runtime_wake,
+        );
+
+        wait_for_runtime_notification(&waiter);
+        assert!(paperspoon.startup_rx.is_some());
+        let mut peer = accept_before(&listener, Duration::from_secs(2));
+        assert!(paperspoon.is_connected());
+        read_expected_hello(&mut peer, TEST_VIEWPORT);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn reader_disconnect_and_reconnect_each_wake_runtime() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind listener");
+        let addr = listener.local_addr().expect("listener address");
+        let (_input, _input_guard, waiter, runtime_wake) = runtime_wake_pair();
+        let stream = connect_stream(addr).expect("connect initial stream");
+        let mut paperspoon = Paperspoon::from_stream(
+            addr,
+            stream,
+            FrameMailbox::with_runtime_wake(runtime_wake),
+            TEST_VIEWPORT,
+            V2PixelFormats::MONO1,
+        )
+        .expect("start notified transport");
+        let mut first_peer = accept_before(&listener, Duration::from_secs(2));
+        read_expected_hello(&mut first_peer, TEST_VIEWPORT);
+
+        drop(listener);
+        drop(first_peer);
+        wait_for_runtime_notification(&waiter);
+        assert!(!paperspoon.is_connected());
+
+        let replacement_listener =
+            std::net::TcpListener::bind(addr).expect("rebind listener for reconnect");
+        let mut replacement_peer = accept_before(&replacement_listener, Duration::from_secs(5));
+        read_expected_hello(&mut replacement_peer, TEST_VIEWPORT);
+        wait_for_runtime_notification(&waiter);
+        assert!(paperspoon.is_connected());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn writer_failure_wakes_runtime_and_disconnects_current_token() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind listener");
+        let addr = listener.local_addr().expect("listener address");
+        let stream = connect_stream(addr).expect("connect stream");
+        let _peer = accept_before(&listener, Duration::from_secs(2));
+        let connection = Arc::new(Mutex::new(ConnectionState::connected(stream)));
+        let (connection_token, shutdown_stream) = {
+            let guard = connection.lock().expect("connection lock");
+            (
+                guard.current_token().expect("current token"),
+                guard
+                    .clone_stream()
+                    .expect("clone stream for shutdown")
+                    .into_stream(),
+            )
+        };
+        shutdown_stream
+            .shutdown(Shutdown::Both)
+            .expect("shut down current socket");
+        let (_input, _input_guard, waiter, runtime_wake) = runtime_wake_pair();
+        let outbound = QueuedOutbound {
+            connection: connection_token,
+            bytes: vec![1],
+            description: "injected writer failure",
+            trace: None,
+        };
+
+        write_outbound(&connection, &outbound, &runtime_wake)
+            .expect_err("write on shut-down socket must fail");
+        wait_for_runtime_notification(&waiter);
+        assert!(!connection.lock().expect("connection lock").is_connected());
     }
 
     fn accept_before(listener: &std::net::TcpListener, timeout: Duration) -> TcpStream {
@@ -1042,6 +1349,15 @@ mod tests {
             .expect("read write timeout")
     }
 
+    fn assert_transport_write_timeout_is_bounded(paperspoon: &Paperspoon) {
+        let actual = transport_write_timeout(paperspoon).expect("configured write timeout");
+        let rounded_upper_bound = TCP_WRITE_TIMEOUT + Duration::from_millis(20);
+        assert!(
+            (TCP_WRITE_TIMEOUT..=rounded_upper_bound).contains(&actual),
+            "configured write timeout {actual:?} is outside {TCP_WRITE_TIMEOUT:?}..={rounded_upper_bound:?}"
+        );
+    }
+
     #[test]
     fn explicit_host_resolves_directly() {
         let addr = paperspoon_addr(Some("127.0.0.1"), 6000).expect("explicit host must resolve");
@@ -1055,10 +1371,7 @@ mod tests {
             Paperspoon::connect_to(listener.local_addr().expect("addr"), TEST_VIEWPORT)
                 .expect("connect");
         let _peer = accept_before(&listener, Duration::from_secs(2));
-        assert_eq!(
-            transport_write_timeout(&paperspoon),
-            Some(TCP_WRITE_TIMEOUT)
-        );
+        assert_transport_write_timeout_is_bounded(&paperspoon);
     }
 
     #[test]
@@ -1408,10 +1721,7 @@ mod tests {
         );
 
         // Drop must stop and join the reader even while its peer remains idle.
-        assert_eq!(
-            transport_write_timeout(&paperspoon),
-            Some(TCP_WRITE_TIMEOUT)
-        );
+        assert_transport_write_timeout_is_bounded(&paperspoon);
         reconnected_peer
             .set_read_timeout(Some(Duration::from_secs(2)))
             .expect("set peer deadline");

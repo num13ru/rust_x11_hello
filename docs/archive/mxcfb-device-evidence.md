@@ -739,3 +739,87 @@ exclusive-input release, orderly framebuffer restoration, and post-run device
 usability on the tested PW6. It does not newly establish disconnect/reconnect,
 pixel fidelity, `SIGKILL`, kernel-hang or power-loss recovery, input-failure
 cleanup, or descriptor-close-only grab release.
+
+## Event-driven TERM cleanup (2026-11-16)
+
+The event-driven cutover commit `03bdf11` passed the host/Linux and ARMv7
+verification recorded in `docs/event-driven-runtime.plan.md`. Independent MTP
+readback before the run matched the deployed artifact SHA-256
+`7732a4dfa03fe1b991515fe4fd715607b0bdab0a0312153f3cb2d4fef683776b`.
+
+The operator ran **Test MXCFB TERM cleanup (15s)** and confirmed the stock
+Kindle UI returned normally. The bounded launcher session ended at
+`Mon Nov 16 10:44:00 GMT+3:0100 2026`; retrieved log SHA-256 was
+`bf98fa2765c46aae13fceb3b83c9d38f2bbce6ccb02c7c2155ec127ff6d3c27a`,
+and status SHA-256 was
+`7b518dd1f30983840b0c2ce28fd7996f09263a71985050d6a0d66397f7d87c8e`.
+The status reports `STOPPED status=0 reason=watchdog`.
+
+The authoritative log records the normal native runtime opening
+`/dev/input/event1` with `eviocgrab=true`, connecting to PaperSpoon, and
+dispatching two evdev Press/Release pairs. At the deadline the launcher sent
+`TERM`; PaperPad stopped with `reason=signal`, explicitly released
+`EVIOCGRAB`, restored the 2,157,312-byte framebuffer snapshot, and exited with
+status 0 without forced `KILL`. The restoration wait was 287,968 us. The log
+correctly records `ioctl_completion_proven=false` and
+`visual_completion_verified=false`; the operator observation establishes only
+that the stock UI visibly returned after this run.
+
+This establishes signal-path shutdown, native-input dispatch, explicit grab
+release, snapshot restoration, and clean watchdog completion for the deployed
+event-driven build while connected. It does not establish disconnected idle
+wake latency, repeated-signal behavior, local Exit on this build,
+active-contact cancellation, input-failure cleanup, driver visual completion,
+idle wakeup rate, CPU or battery improvement.
+
+### Disconnected TERM wake
+
+The operator then fully stopped PaperSpoon, reran **Test MXCFB TERM cleanup
+(15s)** without touching the screen, and confirmed the stock Kindle UI returned.
+The session ended at `Mon Nov 16 10:48:22 GMT+3:0100 2026`; retrieved log
+SHA-256 was
+`31c3ccf58c2ceae5775a828f6bfdf7b8344d20c01bbf31ede60dad30f42f0543`,
+and the unchanged status SHA-256 was
+`7b518dd1f30983840b0c2ce28fd7996f09263a71985050d6a0d66397f7d87c8e`.
+
+The authoritative log records `connected=false`, repeated bounded discovery
+failures, no `transport: connected`, and no evdev pointer records. At the
+deadline the launcher sent `TERM`; the main runtime immediately logged
+`stopped reason=signal` before the in-flight discovery attempt finished. It
+then explicitly released `EVIOCGRAB`, restored the 2,157,312-byte framebuffer
+snapshot, and exited 0 without forced `KILL`. The restoration wait was 287,979
+us; driver and visual completion remain unproven as recorded in the log.
+
+This establishes that the deployed event-driven build observes TERM while
+disconnected and retrying discovery, then completes orderly input/display
+cleanup and returns visibly to the stock UI. It does not provide a numeric
+signal-wake latency because individual log records are not timestamped, and it
+does not establish repeated-signal behavior, local Exit on this build,
+active-contact cancellation, input-failure cleanup, idle wakeup rate, CPU or
+battery improvement.
+
+### Disconnected local Exit
+
+With PaperSpoon still stopped, the operator ran **Run Paperpad (5m)**, tapped
+the device-local Exit button, and confirmed the stock Kindle UI returned. The
+session ended at `Mon Nov 16 17:05:01 GMT+3:0100 2026`; retrieved log SHA-256
+was `5b5587d75e5f4d753003d0300e132a20e94873dc70c1ad6de330a0a14aa684aa`,
+and status SHA-256 was
+`2fead5455234aee9d2909f8525bc5dab7bc5190893b73ddc8681f97309cc15b1`.
+The status reports `STOPPED status=0 reason=process_exit`.
+
+The authoritative log records `connected=false`, three discovery probe
+windows ending without a valid PaperSpoon response, and the intentional
+2,000 ms startup retry. It then records the bottom-strip evdev Press/Release
+pair at physical coordinates `(717,1677)` and `(717,1673)`, followed by
+`ui action=activate system=exit` and `stopped reason=local_exit`. PaperPad
+explicitly released `EVIOCGRAB`, restored the 2,157,312-byte framebuffer
+snapshot, and exited 0 without TERM or forced `KILL`. The restoration wait was
+287,900 us; `ioctl_completion_proven=false` and
+`visual_completion_verified=false` remain explicit limitations.
+
+This establishes that device-local Exit remains independent of PaperSpoon in
+the deployed event-driven build, including native input dispatch and orderly
+input/display cleanup. It does not establish repeated-signal behavior,
+active-contact cancellation, input-failure cleanup, idle wakeup rate, CPU or
+battery improvement.
