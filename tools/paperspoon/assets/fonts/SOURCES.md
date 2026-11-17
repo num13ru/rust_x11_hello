@@ -18,3 +18,10 @@ Stage 0 compared IBM Plex Mono Regular and Medium at 14, 16, 18, 20, and
 22 pixels. Medium was retained because the 18-pixel, threshold-128 host sample
 kept continuous stems without the lighter appearance of Regular. This is not
 evidence of physical e-ink legibility.
+
+`src/mxcfb/exit_label_bitmap.rs` is a thresholded bitmap derived from the same
+pinned IBM Plex Mono Medium file for PaperPad's device-local Exit label. It is
+reproducible with `cargo run --release --package paperspoon --example
+bake_exit_label`; the generated Rust source and PBM preview stay under the
+project-local ignored `.cache/typography-spike/` directory unless an explicit
+output path is supplied.

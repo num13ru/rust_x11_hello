@@ -37,7 +37,9 @@ At implementation time, read `AGENTS.md`, `README.md`, the relevant current sour
 - No X11 integration, GPU text renderer, generalized UI framework, or platform-wide theme system.
 - No automatic coupling between Mono1/Gray8 and A2, DU, DU4, or GC16. Pixel format and physical update waveform are independent concerns.
 - No bundling or redistributing Apple's Helvetica/Helvetica Neue font files.
-- No immediate replacement of PaperPad's local Exit-strip text.
+- PaperPad's local Exit strip remains outside the PaperSpoon text subsystem;
+  any later visual refresh must stay device-owned and must not add a font engine
+  to the Kindle runtime.
 
 ## Technical decisions
 
@@ -338,8 +340,29 @@ At implementation time, read `AGENTS.md`, `README.md`, the relevant current sour
 4. Text placement uses measured glyph metrics; UI hit targets, protocol layout, frame sizes, reconnect behavior, and PaperPad ownership remain unchanged.
 5. The rendering path is deterministic on supported hosts without requiring locally installed fonts. Fonts have documented redistribution rights.
 6. Existing tests and protocol validations pass; newly added negative-path, Unicode, clipping, and layout tests pass.
-7. No change to PaperPad binary, PPFB v2 framing, MXCFB, or waveform selection is required.
+7. The original host typography migration does not require a PaperPad binary,
+   PPFB v2 framing, MXCFB, or waveform-selection change. The later baked Exit
+   follow-up changes only PaperPad's device-local label pixels.
 8. Physical Kindle quality is recorded as **verified** only after an actual device run; otherwise it stays explicitly **unverified**.
+
+## Follow-up — baked PaperPad Exit label (2026-11-17)
+
+- Replaced the hand-authored scaled 5x7 `EXIT` glyphs with a fixed 110x34
+  one-bit bitmap generated from the pinned IBM Plex Mono Medium face at 48 px
+  and threshold 128. The font input is identified by SHA-256
+  `98fbd727aae340b236955879dabed4d991aac9e8e90b3b2a67ce4a59221cc97c`.
+- `tools/paperspoon/examples/bake_exit_label.rs` reproduces the Rust bitmap and
+  a PBM preview under the project-local ignored `.cache/typography-spike/`
+  directory. The committed asset is 476 bytes with MSB-first rows and zeroed
+  padding bits.
+- PaperPad centers the bitmap in the unchanged 72-pixel local strip and
+  unchanged Exit hit rectangle. If an unusually narrow Exit rectangle cannot
+  contain the fixed bitmap plus its border, PaperPad preserves the outline and
+  touch target while omitting the label rather than distorting the font.
+- The PaperPad binary contains neither OpenType bytes nor `cosmic-text`; font
+  parsing and rasterization remain host-side build-time tooling. Connection
+  indicator rendering, local activation, remote-viewport ownership, and GC16
+  system-strip presentation are unchanged.
 
 ## Risks and follow-ups (not required for this migration)
 
