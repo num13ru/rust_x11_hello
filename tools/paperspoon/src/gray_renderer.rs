@@ -4,7 +4,7 @@ use image::DynamicImage;
 use image::imageops::FilterType;
 use paper_protocol::{Gray8Frame, V2_FRAME_PREFIX_LEN, V2_MAX_PAYLOAD_LEN};
 
-use crate::font5x7;
+use crate::text_renderer::CoverageMask;
 
 pub const MAX_SOURCE_IMAGE_BYTES: usize = 256 * 1024 * 1024;
 
@@ -93,47 +93,37 @@ impl GrayCanvas {
         }
     }
 
-    /// Draw text at a top-left origin. `scale` expands both font axes.
-    pub fn draw_text(&mut self, x: u16, y: u16, text: &str, scale: u16, luminance: u8) {
-        let scale = scale.max(1);
-        let mut glyph_x = u32::from(x);
-        for character in text.chars() {
-            if glyph_x >= u32::from(self.width) {
-                break;
-            }
-            for (source_row, row_bits) in font5x7::rows(character).into_iter().enumerate() {
-                for source_repeat in 0..font5x7::VERTICAL_SCALE {
-                    for scale_y in 0..scale {
-                        let target_y = u32::from(y)
-                            + (source_row as u32 * u32::from(font5x7::VERTICAL_SCALE)
-                                + u32::from(source_repeat))
-                                * u32::from(scale)
-                            + u32::from(scale_y);
-                        if target_y >= u32::from(self.height) {
-                            continue;
-                        }
-                        for column in 0..font5x7::WIDTH {
-                            let mask = 1_u8 << (font5x7::WIDTH - 1 - column);
-                            if row_bits & mask == 0 {
-                                continue;
-                            }
-                            for scale_x in 0..scale {
-                                let target_x = glyph_x
-                                    + u32::from(column) * u32::from(scale)
-                                    + u32::from(scale_x);
-                                if target_x < u32::from(self.width) {
-                                    self.set_pixel(target_x as u16, target_y as u16, luminance);
-                                }
-                            }
-                        }
-                    }
+    /// Alpha-blend a clipped glyph coverage mask over the existing luminance.
+    ///
+    /// Coverage zero preserves the destination; coverage 255 replaces it with
+    /// `foreground_luminance`. Intermediate values use rounded source-over
+    /// blending and remain Gray8 rather than being thresholded.
+    pub fn draw_coverage(&mut self, mask: &CoverageMask, foreground_luminance: u8) {
+        let (origin_x, origin_y) = mask.origin();
+        let (width, height) = mask.dimensions();
+        for y in 0..height {
+            for x in 0..width {
+                let coverage = mask.pixels()[usize::from(y) * usize::from(width) + usize::from(x)];
+                if coverage == 0 {
+                    continue;
                 }
+                let Some(target_x) = origin_x.checked_add(x) else {
+                    continue;
+                };
+                let Some(target_y) = origin_y.checked_add(y) else {
+                    continue;
+                };
+                if target_x >= self.width || target_y >= self.height {
+                    continue;
+                }
+
+                let index = usize::from(target_y) * usize::from(self.width) + usize::from(target_x);
+                let destination = u32::from(self.pixels[index]);
+                let foreground = u32::from(foreground_luminance);
+                let alpha = u32::from(coverage);
+                self.pixels[index] =
+                    ((destination * (255 - alpha) + foreground * alpha + 127) / 255) as u8;
             }
-            let advance = u32::from(font5x7::ADVANCE) * u32::from(scale);
-            let Some(next_x) = glyph_x.checked_add(advance) else {
-                break;
-            };
-            glyph_x = next_x;
         }
     }
 
@@ -229,11 +219,15 @@ mod tests {
     }
 
     #[test]
-    fn text_and_rectangles_clip_without_panicking() {
-        let mut canvas = GrayCanvas::new(9, 8).expect("canvas");
-        canvas.outline_rect(7, 6, 8, 8, 0);
-        canvas.draw_text(6, 5, "Long title", 3, 0);
-        assert!(canvas.pixels().contains(&0));
-        canvas.into_frame().expect("valid frame");
+    fn coverage_blends_exact_luminance_and_clips_at_canvas_edge() {
+        let mask = CoverageMask::for_test(1, 0, 4, 2, vec![0, 64, 128, 255, 255, 128, 64, 0]);
+        let mut canvas = GrayCanvas::new(4, 2).expect("canvas");
+        canvas.fill_rect(0, 1, 4, 1, 100);
+        canvas.draw_coverage(&mask, 0);
+        assert_eq!(canvas.pixels(), &[255, 255, 191, 127, 100, 0, 50, 75]);
+
+        canvas.fill_rect(0, 0, 4, 2, 0);
+        canvas.draw_coverage(&mask, u8::MAX);
+        assert_eq!(canvas.pixels(), &[0, 0, 64, 128, 0, 255, 128, 64]);
     }
 }

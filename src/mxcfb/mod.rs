@@ -14,6 +14,8 @@ mod benchmark;
 mod controller;
 #[cfg(any(target_os = "linux", test))]
 mod dirty;
+#[cfg(any(target_os = "linux", test))]
+mod exit_label_bitmap;
 #[cfg(target_os = "linux")]
 mod hwtcon;
 #[cfg(any(target_os = "linux", test))]

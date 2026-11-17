@@ -1,15 +1,14 @@
 //! Network- and renderer-independent model of the host-owned application UI.
 
+use crate::text_renderer::{HorizontalAlignment, TextOverflow, TextRole};
+
 const GRID_COLUMNS: u16 = 3;
 const GRID_ROWS: u16 = 3;
 const CELL_MARGIN: u16 = 20;
 const GRID_TOP_INSET: u16 = 60;
 const STATUS_BAR_HEIGHT: u16 = 40;
-const STATUS_TEXT_BOTTOM_MARGIN: u16 = 10;
 const TITLE_X: u16 = CELL_MARGIN;
 const TITLE_BASELINE: u16 = 40;
-const LABEL_TEXT_X_OFFSET: u16 = 3;
-const LABEL_TEXT_Y_OFFSET: u16 = 5;
 
 /// PaperSpoon application title.
 pub const TITLE_TEXT: &str = "PaperSpoon button grid: tap 1-9";
@@ -36,11 +35,21 @@ impl Rect {
     }
 }
 
-/// Text and its baseline origin in remote-viewport coordinates.
+/// Vertical placement resolved from font metrics by the application renderer.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum VerticalTextPlacement {
+    Baseline(u16),
+    Center,
+}
+
+/// Semantic text placed inside a host-owned layout rectangle.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TextRun<'a> {
-    pub x: u16,
-    pub baseline_y: u16,
+    pub area: Rect,
+    pub vertical: VerticalTextPlacement,
+    pub role: TextRole,
+    pub alignment: HorizontalAlignment,
+    pub overflow: TextOverflow,
     pub text: &'a str,
 }
 
@@ -105,19 +114,29 @@ impl ApplicationUi {
             height: status_height,
         };
         let status = self.status.as_deref().map(|text| TextRun {
-            x: CELL_MARGIN.min(width - 1),
-            baseline_y: height
-                .saturating_sub(STATUS_TEXT_BOTTOM_MARGIN)
-                .min(height - 1),
+            area: horizontal_inset(status_region, CELL_MARGIN),
+            vertical: VerticalTextPlacement::Center,
+            role: TextRole::Status,
+            alignment: HorizontalAlignment::Left,
+            overflow: TextOverflow::Ellipsis,
             text,
         });
+        let title_x = TITLE_X.min(width - 1);
 
         Some(ApplicationLayout {
             width,
             height,
             title: TextRun {
-                x: TITLE_X.min(width - 1),
-                baseline_y: TITLE_BASELINE.min(height - 1),
+                area: Rect {
+                    x: title_x,
+                    y: 0,
+                    width: width - title_x,
+                    height: GRID_TOP_INSET.min(height).max(1),
+                },
+                vertical: VerticalTextPlacement::Baseline(TITLE_BASELINE.min(height - 1)),
+                role: TextRole::ApplicationTitle,
+                alignment: HorizontalAlignment::Left,
+                overflow: TextOverflow::Ellipsis,
                 text: TITLE_TEXT,
             },
             buttons: button_grid(width, height, self.pressed_button),
@@ -140,21 +159,23 @@ fn button_grid(width: u16, height: u16, pressed_button: Option<u8>) -> Vec<Butto
             let x = u32::from(CELL_MARGIN)
                 + u32::from(inner_width - side) * u32::from(column) / u32::from(GRID_COLUMNS - 1);
             let y = GRID_TOP_INSET + row * (side + row_gap);
-            let center_x = x + u32::from(side) / 2;
-            let center_y = u32::from(y) + u32::from(side) / 2;
             let index = usize::from(row * GRID_COLUMNS + column);
             let id = index as u8 + 1;
+            let bounds = Rect {
+                x: x as u16,
+                y,
+                width: side,
+                height: side,
+            };
             buttons.push(ButtonLayout {
                 id,
-                bounds: Rect {
-                    x: x as u16,
-                    y,
-                    width: side,
-                    height: side,
-                },
+                bounds,
                 label: TextRun {
-                    x: center_x.saturating_sub(u32::from(LABEL_TEXT_X_OFFSET)) as u16,
-                    baseline_y: (center_y + u32::from(LABEL_TEXT_Y_OFFSET)) as u16,
+                    area: bounds,
+                    vertical: VerticalTextPlacement::Center,
+                    role: TextRole::ButtonLabel,
+                    alignment: HorizontalAlignment::Center,
+                    overflow: TextOverflow::Clip,
                     text: BUTTON_LABELS[index],
                 },
                 pressed: pressed_button == Some(id),
@@ -163,6 +184,16 @@ fn button_grid(width: u16, height: u16, pressed_button: Option<u8>) -> Vec<Butto
     }
 
     buttons
+}
+
+fn horizontal_inset(rect: Rect, margin: u16) -> Rect {
+    let inset = margin.min(rect.width.saturating_sub(1) / 2);
+    Rect {
+        x: rect.x.saturating_add(inset),
+        y: rect.y,
+        width: rect.width.saturating_sub(inset.saturating_mul(2)).max(1),
+        height: rect.height,
+    }
 }
 
 fn grid_cell_side(width: u16, height: u16) -> Option<u16> {
@@ -194,8 +225,16 @@ mod tests {
         assert_eq!(
             layout.title,
             TextRun {
-                x: 20,
-                baseline_y: 40,
+                area: Rect {
+                    x: 20,
+                    y: 0,
+                    width: 1252,
+                    height: 60,
+                },
+                vertical: VerticalTextPlacement::Baseline(40),
+                role: TextRole::ApplicationTitle,
+                alignment: HorizontalAlignment::Left,
+                overflow: TextOverflow::Ellipsis,
                 text: TITLE_TEXT,
             }
         );
@@ -212,8 +251,11 @@ mod tests {
                 }
             );
             assert_eq!(button.label.text, BUTTON_LABELS[index]);
-            assert_eq!(button.label.x, button.bounds.x + 192 - 3);
-            assert_eq!(button.label.baseline_y, button.bounds.y + 192 + 5);
+            assert_eq!(button.label.area, button.bounds);
+            assert_eq!(button.label.vertical, VerticalTextPlacement::Center);
+            assert_eq!(button.label.role, TextRole::ButtonLabel);
+            assert_eq!(button.label.alignment, HorizontalAlignment::Center);
+            assert_eq!(button.label.overflow, TextOverflow::Clip);
             assert!(!button.pressed);
         }
         assert_eq!(
@@ -240,8 +282,16 @@ mod tests {
         assert_eq!(
             layout.status,
             Some(TextRun {
-                x: 20,
-                baseline_y: 1614,
+                area: Rect {
+                    x: 20,
+                    y: 1584,
+                    width: 1232,
+                    height: 40,
+                },
+                vertical: VerticalTextPlacement::Center,
+                role: TextRole::Status,
+                alignment: HorizontalAlignment::Left,
+                overflow: TextOverflow::Ellipsis,
                 text: "PaperSpoon: ready",
             })
         );
@@ -289,8 +339,16 @@ mod tests {
                         <= u32::from(layout.status_region.y)
                 );
             }
-            assert!(layout.title.x < width);
-            assert!(layout.title.baseline_y < height);
+            assert!(layout.title.area.x < width);
+            assert!(layout.title.area.y < height);
+            assert!(
+                u32::from(layout.title.area.x) + u32::from(layout.title.area.width)
+                    <= u32::from(width)
+            );
+            assert!(matches!(
+                layout.title.vertical,
+                VerticalTextPlacement::Baseline(baseline_y) if baseline_y < height
+            ));
         }
     }
 }

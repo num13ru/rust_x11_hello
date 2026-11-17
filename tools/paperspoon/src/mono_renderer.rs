@@ -1,7 +1,11 @@
 //! Deterministic software drawing primitives for protocol-native Mono1 frames.
 
-use crate::font5x7;
+use crate::text_renderer::CoverageMask;
 use paper_protocol::{Mono1Frame, Mono1FrameError, Mono1Pixel, mono1_payload_len, mono1_stride};
+
+/// Coverage at or above this value becomes foreground ink. No dithering is
+/// applied.
+pub const MONO_TEXT_THRESHOLD: u8 = 128;
 
 /// Mutable one-bit canvas using the protocol's MSB-first row representation.
 #[derive(Debug, Eq, PartialEq)]
@@ -103,43 +107,25 @@ impl MonoCanvas {
         }
     }
 
-    /// Draw text with the embedded bitmap font, clipping it to the canvas.
-    ///
-    /// `baseline_y` is the final raster row of each vertically doubled glyph.
-    pub fn draw_text(&mut self, x: u16, baseline_y: u16, text: &str, color: Mono1Pixel) {
-        let glyph_height = font5x7::HEIGHT * font5x7::VERTICAL_SCALE;
-        let top = i32::from(baseline_y) - i32::from(glyph_height - 1);
-        let mut glyph_x = u32::from(x);
-
-        for character in text.chars() {
-            if glyph_x >= u32::from(self.width) {
-                break;
-            }
-            for (source_row, row_bits) in font5x7::rows(character).into_iter().enumerate() {
-                for repeat in 0..font5x7::VERTICAL_SCALE {
-                    let target_y = top
-                        + i32::try_from(source_row).expect("font row fits i32")
-                            * i32::from(font5x7::VERTICAL_SCALE)
-                        + i32::from(repeat);
-                    if !(0..i32::from(self.height)).contains(&target_y) {
-                        continue;
-                    }
-                    for column in 0..font5x7::WIDTH {
-                        let mask = 1_u8 << (font5x7::WIDTH - 1 - column);
-                        if row_bits & mask == 0 {
-                            continue;
-                        }
-                        let target_x = glyph_x + u32::from(column);
-                        if target_x < u32::from(self.width) {
-                            self.set_pixel(target_x as u16, target_y as u16, color);
-                        }
-                    }
+    /// Composite a clipped glyph coverage mask without changing pixels below
+    /// the threshold.
+    pub fn draw_coverage(&mut self, mask: &CoverageMask, threshold: u8, color: Mono1Pixel) {
+        let (origin_x, origin_y) = mask.origin();
+        let (width, height) = mask.dimensions();
+        for y in 0..height {
+            for x in 0..width {
+                let coverage = mask.pixels()[usize::from(y) * usize::from(width) + usize::from(x)];
+                if coverage < threshold {
+                    continue;
                 }
+                let Some(target_x) = origin_x.checked_add(x) else {
+                    continue;
+                };
+                let Some(target_y) = origin_y.checked_add(y) else {
+                    continue;
+                };
+                self.set_pixel(target_x, target_y, color);
             }
-            let Some(next_x) = glyph_x.checked_add(u32::from(font5x7::ADVANCE)) else {
-                break;
-            };
-            glyph_x = next_x;
         }
     }
 
@@ -219,18 +205,18 @@ mod tests {
     }
 
     #[test]
-    fn text_preserves_case_digits_and_fallback_glyphs() {
-        let mut canvas = MonoCanvas::new(24, 14).expect("canvas");
-        canvas.draw_text(0, 13, "Aa1\n", Mono1Pixel::Black);
-        let frame = canvas.into_frame().expect("valid frame");
+    fn coverage_threshold_is_msb_first_and_preserves_padding_and_background() {
+        let mask = CoverageMask::for_test(6, 0, 3, 2, vec![127, 128, 255, 255, 1, 128]);
+        let mut canvas = MonoCanvas::new(9, 2).expect("canvas");
+        canvas.draw_coverage(&mask, MONO_TEXT_THRESHOLD, Mono1Pixel::Black);
+        assert_eq!(canvas.pixels(), &[0x01, 0x80, 0x02, 0x80]);
 
-        assert_eq!(frame.pixel(0, 0), Some(Mono1Pixel::White));
-        assert_eq!(frame.pixel(1, 0), Some(Mono1Pixel::Black));
+        canvas.clear(Mono1Pixel::Black);
+        canvas.draw_coverage(&mask, MONO_TEXT_THRESHOLD, Mono1Pixel::White);
+        assert_eq!(canvas.pixels(), &[0xfe, 0x00, 0xfd, 0x00]);
+        let frame = canvas.into_frame().expect("valid padding bits");
+        assert_eq!(frame.pixel(6, 0), Some(Mono1Pixel::Black));
         assert_eq!(frame.pixel(7, 0), Some(Mono1Pixel::White));
-        assert_eq!(frame.pixel(7, 4), Some(Mono1Pixel::Black));
-        assert_eq!(frame.pixel(14, 0), Some(Mono1Pixel::Black));
-        assert_eq!(frame.pixel(19, 0), Some(Mono1Pixel::Black));
-        assert_eq!(frame.pixel(18, 12), Some(Mono1Pixel::White));
-        assert_eq!(frame.pixel(20, 12), Some(Mono1Pixel::Black));
+        assert_eq!(frame.pixel(8, 0), Some(Mono1Pixel::White));
     }
 }

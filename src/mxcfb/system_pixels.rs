@@ -3,32 +3,15 @@
 
 use anyhow::{Context, Result, ensure};
 
+use super::exit_label_bitmap::{
+    EXIT_LABEL_BITS, EXIT_LABEL_HEIGHT, EXIT_LABEL_STRIDE, EXIT_LABEL_WIDTH,
+};
 use crate::ui::screen::{SYSTEM_UI_HEIGHT, ScreenLayout, ScreenRect};
 use crate::ui::system::{connection_indicator_bounds, exit_bounds};
 
 const WHITE: u8 = 0xff;
 const BLACK: u8 = 0x00;
 const BORDER_THICKNESS: usize = 2;
-const MAX_GLYPH_SCALE: usize = 5;
-const GLYPH_WIDTH: usize = 5;
-const GLYPH_HEIGHT: usize = 7;
-const TEXT_UNITS: usize = 4 * GLYPH_WIDTH + 3;
-
-// Five-column glyphs, top row first. These stay display-local.
-const EXIT_GLYPHS: [[u8; GLYPH_HEIGHT]; 4] = [
-    [
-        0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111,
-    ], // E
-    [
-        0b10001, 0b10001, 0b01010, 0b00100, 0b01010, 0b10001, 0b10001,
-    ], // X
-    [
-        0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b11111,
-    ], // I
-    [
-        0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100,
-    ], // T
-];
 
 pub(super) struct SystemUiPixels {
     pub region: ScreenRect,
@@ -74,25 +57,18 @@ pub(super) fn rasterize_system_ui(screen: ScreenLayout, connected: bool) -> Resu
         }
     }
 
-    // Very narrow screens still retain a visible, touchable Exit outline.
-    // Scale the label down to fit entirely inside that same local rectangle.
-    let scale = MAX_GLYPH_SCALE.min(width.saturating_sub(2 * BORDER_THICKNESS) / TEXT_UNITS);
-    if scale > 0 {
-        let text_width = TEXT_UNITS * scale;
-        let text_height = GLYPH_HEIGHT * scale;
-        let text_left = left + (width - text_width) / 2;
-        let text_top = top + (height - text_height) / 2;
-        for (glyph_index, glyph) in EXIT_GLYPHS.iter().enumerate() {
-            for (glyph_y, row) in glyph.iter().enumerate() {
-                for glyph_x in 0..GLYPH_WIDTH {
-                    if row & (1 << (GLYPH_WIDTH - 1 - glyph_x)) == 0 {
-                        continue;
-                    }
-                    let x = text_left + (glyph_index * (GLYPH_WIDTH + 1) + glyph_x) * scale;
-                    let y = text_top + glyph_y * scale;
-                    for pixel_y in y..y + scale {
-                        bytes[pixel_y * stride + x..pixel_y * stride + x + scale].fill(BLACK);
-                    }
+    // The font is baked at its physical size. Narrow layouts keep the local
+    // outline and hit target but omit the label instead of distorting it.
+    let label_fits = EXIT_LABEL_WIDTH <= width.saturating_sub(2 * BORDER_THICKNESS)
+        && EXIT_LABEL_HEIGHT <= height.saturating_sub(2 * BORDER_THICKNESS);
+    if label_fits {
+        let text_left = left + (width - EXIT_LABEL_WIDTH) / 2;
+        let text_top = top + (height - EXIT_LABEL_HEIGHT) / 2;
+        for glyph_y in 0..EXIT_LABEL_HEIGHT {
+            for glyph_x in 0..EXIT_LABEL_WIDTH {
+                let byte = EXIT_LABEL_BITS[glyph_y * EXIT_LABEL_STRIDE + glyph_x / 8];
+                if byte & (0x80 >> (glyph_x % 8)) != 0 {
+                    bytes[(text_top + glyph_y) * stride + text_left + glyph_x] = BLACK;
                 }
             }
         }
@@ -147,11 +123,44 @@ mod tests {
         assert_eq!(pixel(&disconnected, 64, 0), BLACK);
         assert_eq!(pixel(&disconnected, 1251, 71), BLACK);
         assert_eq!(pixel(&disconnected, 1252, 71), WHITE);
-        assert_eq!(pixel(&disconnected, 600, 18), BLACK); // first E glyph pixel
-        assert_eq!(pixel(&disconnected, 600, 17), WHITE);
+        let exit = exit_bounds(1272, 1696).expect("Exit bounds");
+        let label_left = usize::from(exit.x) + (usize::from(exit.width) - EXIT_LABEL_WIDTH) / 2;
+        let label_top = (usize::from(exit.height) - EXIT_LABEL_HEIGHT) / 2;
+        for glyph_y in 0..EXIT_LABEL_HEIGHT {
+            for glyph_x in 0..EXIT_LABEL_WIDTH {
+                let byte = EXIT_LABEL_BITS[glyph_y * EXIT_LABEL_STRIDE + glyph_x / 8];
+                let expected = if byte & (0x80 >> (glyph_x % 8)) != 0 {
+                    BLACK
+                } else {
+                    WHITE
+                };
+                assert_eq!(
+                    pixel(&disconnected, label_left + glyph_x, label_top + glyph_y),
+                    expected
+                );
+            }
+        }
+        assert_eq!(pixel(&disconnected, label_left - 1, label_top), WHITE);
+        assert_eq!(pixel(&disconnected, label_left, label_top - 1), WHITE);
         assert_eq!(pixel(&disconnected, 31, 24), BLACK); // circle outline
         assert_eq!(pixel(&disconnected, 31, 35), WHITE); // empty center
         assert_eq!(pixel(&connected, 31, 35), BLACK); // filled center
+    }
+
+    #[test]
+    fn baked_exit_label_has_valid_msb_first_rows_and_padding() {
+        assert_eq!(EXIT_LABEL_WIDTH, 110);
+        assert_eq!(EXIT_LABEL_HEIGHT, 34);
+        assert_eq!(EXIT_LABEL_STRIDE, EXIT_LABEL_WIDTH.div_ceil(8));
+        assert_eq!(EXIT_LABEL_BITS.len(), EXIT_LABEL_STRIDE * EXIT_LABEL_HEIGHT);
+        let padding_bits = 8 - EXIT_LABEL_WIDTH % 8;
+        assert_ne!(padding_bits, 8);
+        let padding_mask = (1_u8 << padding_bits) - 1;
+        assert!(
+            EXIT_LABEL_BITS
+                .chunks_exact(EXIT_LABEL_STRIDE)
+                .all(|row| row[EXIT_LABEL_STRIDE - 1] & padding_mask == 0)
+        );
     }
 
     #[test]
