@@ -30,6 +30,26 @@ impl PresentationBuffer {
     pub fn into_pixels(self) -> Vec<u32> {
         self.pixels
     }
+
+    pub fn update_from_frame(&mut self, frame: &Frame) -> Result<(), ConversionError> {
+        let (width, height, pixel_count, byte_count) = validated_layout(frame)?;
+        if self.pixels.capacity() < pixel_count {
+            self.pixels
+                .try_reserve_exact(pixel_count.saturating_sub(self.pixels.len()))
+                .map_err(|source| ConversionError::Allocation {
+                    pixel_count,
+                    byte_count,
+                    source,
+                })?;
+        }
+
+        self.pixels.clear();
+        write_pixels(frame, &mut self.pixels);
+        self.width = width;
+        self.height = height;
+        debug_assert_eq!(self.pixels.len(), pixel_count);
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -96,6 +116,25 @@ impl std::error::Error for ConversionError {
 }
 
 pub fn convert_frame(frame: &Frame) -> Result<PresentationBuffer, ConversionError> {
+    let (width, height, pixel_count, byte_count) = validated_layout(frame)?;
+    let mut pixels = Vec::new();
+    pixels
+        .try_reserve_exact(pixel_count)
+        .map_err(|source| ConversionError::Allocation {
+            pixel_count,
+            byte_count,
+            source,
+        })?;
+    write_pixels(frame, &mut pixels);
+    debug_assert_eq!(pixels.len(), pixel_count);
+    Ok(PresentationBuffer {
+        width,
+        height,
+        pixels,
+    })
+}
+
+fn validated_layout(frame: &Frame) -> Result<(u16, u16, usize, usize), ConversionError> {
     let width = frame.width();
     let height = frame.height();
     let pixel_count = usize::from(width)
@@ -110,15 +149,11 @@ pub fn convert_frame(frame: &Frame) -> Result<PresentationBuffer, ConversionErro
             maximum: MAX_PRESENTATION_PIXELS,
         });
     }
+    Ok((width, height, pixel_count, byte_count))
+}
 
-    let mut pixels = Vec::new();
-    pixels
-        .try_reserve_exact(pixel_count)
-        .map_err(|source| ConversionError::Allocation {
-            pixel_count,
-            byte_count,
-            source,
-        })?;
+fn write_pixels(frame: &Frame, pixels: &mut Vec<u32>) {
+    let width = frame.width();
     match frame {
         Frame::Mono1(frame) => {
             for row in frame.pixels().chunks_exact(frame.stride()) {
@@ -140,12 +175,6 @@ pub fn convert_frame(frame: &Frame) -> Result<PresentationBuffer, ConversionErro
             }));
         }
     }
-    debug_assert_eq!(pixels.len(), pixel_count);
-    Ok(PresentationBuffer {
-        width,
-        height,
-        pixels,
-    })
 }
 
 #[cfg(test)]
@@ -235,6 +264,40 @@ mod tests {
             ),
             "{error}"
         );
+    }
+
+    #[test]
+    fn matching_dimensions_reuse_the_existing_pixel_allocation() {
+        let initial = Gray8Frame::new(4, 2, vec![0; 8]).expect("valid initial Gray8 frame");
+        let mut converted = convert_frame(&Frame::Gray8(initial)).expect("convert initial frame");
+        let allocation = converted.pixels.as_ptr();
+        let capacity = converted.pixels.capacity();
+        let replacement =
+            Gray8Frame::new(4, 2, vec![255; 8]).expect("valid replacement Gray8 frame");
+
+        converted
+            .update_from_frame(&Frame::Gray8(replacement))
+            .expect("update presentation");
+
+        assert_eq!(converted.pixels.as_ptr(), allocation);
+        assert_eq!(converted.pixels.capacity(), capacity);
+        assert!(converted.pixels().iter().all(|pixel| *pixel == WHITE_RGB));
+    }
+
+    #[test]
+    fn rejected_update_preserves_the_previous_presentation() {
+        let initial = Gray8Frame::new(2, 2, vec![42; 4]).expect("valid initial Gray8 frame");
+        let mut converted = convert_frame(&Frame::Gray8(initial)).expect("convert initial frame");
+        let previous = converted.clone();
+        let oversized = Mono1Frame::new(4096, 4096, vec![0; 4096 / 8 * 4096])
+            .expect("valid protocol frame larger than RGB presentation limit");
+
+        let error = converted
+            .update_from_frame(&Frame::Mono1(oversized))
+            .expect_err("oversized replacement must fail");
+
+        assert!(matches!(error, ConversionError::TooLarge { .. }));
+        assert_eq!(converted, previous);
     }
 
     #[test]

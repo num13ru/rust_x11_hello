@@ -52,9 +52,12 @@ impl NetworkState {
             self.status = status;
         }
         if let Some(frame) = updates.frame {
-            let presentation = convert_frame(frame.frame())?;
+            if let Some(presentation) = self.presentation.as_mut() {
+                presentation.update_from_frame(frame.frame())?;
+            } else {
+                self.presentation = Some(convert_frame(frame.frame())?);
+            }
             self.last_frame = Some(frame);
-            self.presentation = Some(presentation);
             return Ok(true);
         }
         Ok(false)
@@ -511,6 +514,19 @@ mod tests {
         assert!(state.presentation.is_some());
 
         assert!(
+            state
+                .apply(WorkerUpdates {
+                    status: None,
+                    frame: Some(received_frame(8)),
+                })
+                .expect("reuse presentation buffer")
+        );
+        assert_eq!(
+            state.last_frame.as_ref().map(ReceivedFrame::frame_id),
+            Some(8)
+        );
+
+        assert!(
             !state
                 .apply(WorkerUpdates {
                     status: Some(ConnectionStatus::Error("connection lost".to_string())),
@@ -520,7 +536,7 @@ mod tests {
         );
         assert_eq!(
             state.last_frame.as_ref().map(ReceivedFrame::frame_id),
-            Some(7)
+            Some(8)
         );
         assert!(state.title("fit").contains("error"));
         assert!(state.presentation.is_some());
