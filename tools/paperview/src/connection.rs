@@ -166,7 +166,7 @@ pub fn connect_and_send_hello(
     Ok(stream)
 }
 
-fn validate_inputs(
+pub(crate) fn validate_inputs(
     host: &str,
     port: u16,
     viewport_width: u16,

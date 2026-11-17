@@ -41,6 +41,7 @@ pub enum FrameReadError {
     },
     Io {
         phase: ReadPhase,
+        received: usize,
         source: io::Error,
     },
     TruncatedHeader {
@@ -76,8 +77,15 @@ impl fmt::Display for FrameReadError {
                     "expected viewport must be nonzero, got {width}x{height}"
                 )
             }
-            Self::Io { phase, source } => {
-                write!(formatter, "I/O error while reading {phase:?}: {source}")
+            Self::Io {
+                phase,
+                received,
+                source,
+            } => {
+                write!(
+                    formatter,
+                    "I/O error after {received} bytes while reading {phase:?}: {source}"
+                )
             }
             Self::TruncatedHeader { received } => write!(
                 formatter,
@@ -227,7 +235,13 @@ fn read_until_eof_or_full(
             Ok(0) => break,
             Ok(count) => received += count,
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-            Err(source) => return Err(FrameReadError::Io { phase, source }),
+            Err(source) => {
+                return Err(FrameReadError::Io {
+                    phase,
+                    received,
+                    source,
+                });
+            }
         }
     }
     Ok(received)
@@ -491,6 +505,7 @@ mod tests {
                 error,
                 FrameReadError::Io {
                     phase: ReadPhase::Header,
+                    received: 0,
                     ref source,
                 } if source.kind() == io::ErrorKind::PermissionDenied
             ),
