@@ -34,9 +34,9 @@ impl Default for Options {
 }
 
 impl Options {
-    pub(crate) fn window_title(&self) -> String {
+    pub(crate) fn target_label(&self) -> String {
         format!(
-            "PaperView — checkerboard — {}:{} — {}x{}",
+            "{}:{} — {}x{}",
             self.host, self.port, self.viewport_width, self.viewport_height
         )
     }
