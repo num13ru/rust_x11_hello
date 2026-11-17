@@ -262,6 +262,9 @@ connected PaperPad session. The native window and frame rendering have been
 exercised on macOS Apple Silicon; the keyboard bindings and viewport model are
 covered by automated tests. Linux X11/Wayland and Windows remain unverified.
 
+See the [PaperView local development workflow](docs/paperview-development-workflow.md)
+for a safe two-terminal Gray8 and Now Playing inspection sequence.
+
 ## PaperSpoon frame commands
 
 Commands are entered on PaperSpoon's stdin. Explicit diagnostic dimensions
