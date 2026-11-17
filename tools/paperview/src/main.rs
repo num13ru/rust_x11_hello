@@ -9,15 +9,18 @@ use std::rc::Rc;
 use config::{Options, ParseOutcome};
 use paperview::framebuffer::{ConversionError, PresentationBuffer, convert_frame};
 use paperview::receiver::ReceivedFrame;
-use paperview::viewport::{LETTERBOX_RGB, render_fit};
+use paperview::viewport::{
+    LETTERBOX_RGB, PAN_STEP_SOURCE_PIXELS, ViewMode, ViewportState, ZoomLevel, render_view,
+};
 use paperview::worker::{
     ConnectionStatus, WorkerConfig, WorkerHandle, WorkerUpdates, start_worker,
 };
 use softbuffer::{Context, Surface};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
-use winit::event::WindowEvent;
+use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
+use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
 type PreviewSurface = Surface<Rc<Window>, Rc<Window>>;
@@ -57,7 +60,7 @@ impl NetworkState {
         Ok(false)
     }
 
-    fn title(&self) -> String {
+    fn title(&self, view_label: &str) -> String {
         let status = match self.status {
             ConnectionStatus::Connecting => "connecting",
             ConnectionStatus::Connected => "connected",
@@ -72,7 +75,10 @@ impl NetworkState {
                 frame.frame().pixel_format()
             )
         });
-        format!("PaperView — {status}{frame} — {}", self.target_label)
+        format!(
+            "PaperView — {status}{frame} — view {view_label} — {}",
+            self.target_label
+        )
     }
 }
 
@@ -81,6 +87,7 @@ struct PreviewApp {
     network_proxy: EventLoopProxy<UserEvent>,
     network_worker: Option<WorkerHandle>,
     network_state: NetworkState,
+    viewport: ViewportState,
     last_logged_connection_error: Option<String>,
     window: Option<Rc<Window>>,
     surface: Option<PreviewSurface>,
@@ -99,6 +106,7 @@ impl PreviewApp {
             network_proxy,
             network_worker: None,
             network_state: NetworkState::new(options.target_label()),
+            viewport: ViewportState::default(),
             last_logged_connection_error: None,
             window: None,
             surface: None,
@@ -117,7 +125,7 @@ impl PreviewApp {
             Some(window) => Rc::clone(window),
             None => {
                 let attributes = Window::default_attributes()
-                    .with_title(self.network_state.title())
+                    .with_title(self.network_state.title(&self.viewport.label()))
                     .with_inner_size(LogicalSize::new(640.0, 480.0));
                 match event_loop.create_window(attributes) {
                     Ok(window) => {
@@ -175,6 +183,11 @@ impl PreviewApp {
             return;
         };
         let updates = worker.take_updates();
+        let previous_dimensions = self
+            .network_state
+            .presentation
+            .as_ref()
+            .map(|frame| (u32::from(frame.width()), u32::from(frame.height())));
         match updates.status.as_ref() {
             Some(ConnectionStatus::Connected) => self.last_logged_connection_error = None,
             Some(ConnectionStatus::Error(error))
@@ -192,11 +205,135 @@ impl PreviewApp {
                 false
             }
         };
+        if frame_changed {
+            let (source_width, source_height, target_width, target_height) = self.view_geometry();
+            if previous_dimensions != Some((source_width, source_height)) {
+                self.viewport
+                    .center(source_width, source_height, target_width, target_height);
+            } else {
+                self.viewport
+                    .clamp(source_width, source_height, target_width, target_height);
+            }
+        }
         if let Some(window) = self.window.as_ref() {
-            window.set_title(&self.network_state.title());
+            window.set_title(&self.network_state.title(&self.viewport.label()));
             if frame_changed {
                 window.request_redraw();
             }
+        }
+    }
+
+    fn view_geometry(&self) -> (u32, u32, u32, u32) {
+        let (source_width, source_height) = self
+            .network_state
+            .presentation
+            .as_ref()
+            .map_or((0, 0), |frame| {
+                (u32::from(frame.width()), u32::from(frame.height()))
+            });
+        let (target_width, target_height) = self.window.as_ref().map_or((0, 0), |window| {
+            let size = window.inner_size();
+            (size.width, size.height)
+        });
+        (source_width, source_height, target_width, target_height)
+    }
+
+    fn handle_key(&mut self, event: &KeyEvent) {
+        if event.state != ElementState::Pressed {
+            return;
+        }
+        let PhysicalKey::Code(key) = event.physical_key else {
+            return;
+        };
+        let (source_width, source_height, target_width, target_height) = self.view_geometry();
+        let changed = match key {
+            KeyCode::KeyF => self.viewport.select(
+                ViewMode::Fit,
+                source_width,
+                source_height,
+                target_width,
+                target_height,
+            ),
+            KeyCode::Digit1 => self.viewport.select(
+                ViewMode::Zoom(ZoomLevel::X1),
+                source_width,
+                source_height,
+                target_width,
+                target_height,
+            ),
+            KeyCode::Digit2 => self.viewport.select(
+                ViewMode::Zoom(ZoomLevel::X2),
+                source_width,
+                source_height,
+                target_width,
+                target_height,
+            ),
+            KeyCode::Digit4 => self.viewport.select(
+                ViewMode::Zoom(ZoomLevel::X4),
+                source_width,
+                source_height,
+                target_width,
+                target_height,
+            ),
+            KeyCode::Home => {
+                self.viewport
+                    .center(source_width, source_height, target_width, target_height)
+            }
+            KeyCode::ArrowLeft => self.viewport.pan_by(
+                -PAN_STEP_SOURCE_PIXELS,
+                0,
+                source_width,
+                source_height,
+                target_width,
+                target_height,
+            ),
+            KeyCode::ArrowRight => self.viewport.pan_by(
+                PAN_STEP_SOURCE_PIXELS,
+                0,
+                source_width,
+                source_height,
+                target_width,
+                target_height,
+            ),
+            KeyCode::ArrowUp => self.viewport.pan_by(
+                0,
+                -PAN_STEP_SOURCE_PIXELS,
+                source_width,
+                source_height,
+                target_width,
+                target_height,
+            ),
+            KeyCode::ArrowDown => self.viewport.pan_by(
+                0,
+                PAN_STEP_SOURCE_PIXELS,
+                source_width,
+                source_height,
+                target_width,
+                target_height,
+            ),
+            _ => false,
+        };
+        if changed && let Some(window) = self.window.as_ref() {
+            window.set_title(&self.network_state.title(&self.viewport.label()));
+            window.request_redraw();
+        }
+    }
+
+    fn handle_view_resize(&mut self, target_width: u32, target_height: u32) {
+        let (source_width, source_height) = self
+            .network_state
+            .presentation
+            .as_ref()
+            .map_or((0, 0), |frame| {
+                (u32::from(frame.width()), u32::from(frame.height()))
+            });
+        if target_width != 0 && target_height != 0 {
+            self.viewport
+                .clamp(source_width, source_height, target_width, target_height);
+        }
+        if let Some(window) = self.window.as_ref() {
+            window.set_title(&self.network_state.title(&self.viewport.label()));
+            window.request_redraw();
         }
     }
 
@@ -226,11 +363,14 @@ impl PreviewApp {
             }
         };
         if let Some(presentation) = self.network_state.presentation.as_ref() {
-            if let Err(error) = render_fit(presentation, width.get(), height.get(), &mut buffer) {
-                self.fail(
-                    event_loop,
-                    format!("could not render fitted frame: {error}"),
-                );
+            if let Err(error) = render_view(
+                self.viewport,
+                presentation,
+                width.get(),
+                height.get(),
+                &mut buffer,
+            ) {
+                self.fail(event_loop, format!("could not render frame: {error}"));
                 return;
             }
         } else {
@@ -282,11 +422,16 @@ impl ApplicationHandler<UserEvent> for PreviewApp {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::RedrawRequested => self.redraw(event_loop),
-            WindowEvent::Resized(_) => {
-                if let Some(window) = self.window.as_ref() {
-                    window.request_redraw();
-                }
+            WindowEvent::Resized(size) => self.handle_view_resize(size.width, size.height),
+            WindowEvent::ScaleFactorChanged { .. } => {
+                let size = self
+                    .window
+                    .as_ref()
+                    .map(|window| window.inner_size())
+                    .unwrap_or_default();
+                self.handle_view_resize(size.width, size.height);
             }
+            WindowEvent::KeyboardInput { event, .. } => self.handle_key(&event),
             _ => {}
         }
     }
@@ -361,8 +506,8 @@ mod tests {
             state.last_frame.as_ref().map(ReceivedFrame::frame_id),
             Some(7)
         );
-        assert!(state.title().contains("connected"));
-        assert!(state.title().contains("frame 7 Gray8"));
+        assert!(state.title("fit").contains("connected"));
+        assert!(state.title("fit").contains("frame 7 Gray8"));
         assert!(state.presentation.is_some());
 
         assert!(
@@ -377,7 +522,7 @@ mod tests {
             state.last_frame.as_ref().map(ReceivedFrame::frame_id),
             Some(7)
         );
-        assert!(state.title().contains("error"));
+        assert!(state.title("fit").contains("error"));
         assert!(state.presentation.is_some());
     }
 }
