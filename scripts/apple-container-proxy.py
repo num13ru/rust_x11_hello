@@ -214,12 +214,16 @@ def main() -> int:
     args = parse_args()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     gateway, subnet = discover_network(args.network)
-    with ProxyServer((gateway, 0), ProxyHandler) as server:
+    # Apple Container exposes the macOS host to guests at the network gateway,
+    # but that gateway is not assigned to a host interface. Bind the host
+    # listener on IPv4 wildcard while advertising the guest-visible gateway.
+    # ProxyServer.verify_request still limits clients to this private subnet.
+    with ProxyServer(("0.0.0.0", 0), ProxyHandler) as server:
         server.allowed_clients = subnet
         _, port = server.server_address
         proxy_url = f"http://{gateway}:{port}"
         print(
-            f"proxy: listening on discovered network {args.network!r}; Ctrl-C to stop",
+            f"proxy: listening for discovered network {args.network!r}; Ctrl-C to stop",
             flush=True,
         )
         if command:
