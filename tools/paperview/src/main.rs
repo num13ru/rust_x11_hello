@@ -1,7 +1,12 @@
+mod config;
+
+use std::env;
 use std::error::Error;
 use std::num::NonZeroU32;
+use std::process::ExitCode;
 use std::rc::Rc;
 
+use config::{Options, ParseOutcome};
 use softbuffer::{Context, Surface};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
@@ -15,17 +20,25 @@ const CHECKER_SIZE: u32 = 32;
 
 type PreviewSurface = Surface<Rc<Window>, Rc<Window>>;
 
-#[derive(Default)]
 struct PreviewApp {
+    window_title: String,
     window: Option<Rc<Window>>,
     surface: Option<PreviewSurface>,
     fatal_error: Option<String>,
 }
 
 impl PreviewApp {
+    fn new(options: &Options) -> Self {
+        Self {
+            window_title: options.window_title(),
+            window: None,
+            surface: None,
+            fatal_error: None,
+        }
+    }
+
     fn fail(&mut self, event_loop: &ActiveEventLoop, message: impl Into<String>) {
         let message = message.into();
-        eprintln!("paperview: {message}");
         self.fatal_error = Some(message);
         event_loop.exit();
     }
@@ -35,7 +48,7 @@ impl PreviewApp {
             Some(window) => Rc::clone(window),
             None => {
                 let attributes = Window::default_attributes()
-                    .with_title("PaperView — Stage 0 checkerboard")
+                    .with_title(self.window_title.clone())
                     .with_inner_size(LogicalSize::new(640.0, 480.0));
                 match event_loop.create_window(attributes) {
                     Ok(window) => {
@@ -157,14 +170,32 @@ impl ApplicationHandler for PreviewApp {
     }
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+fn run() -> Result<(), Box<dyn Error>> {
+    let options = match config::parse(env::args_os()) {
+        Ok(ParseOutcome::Run(options)) => options,
+        Ok(ParseOutcome::Help) => {
+            println!("{}", config::USAGE);
+            return Ok(());
+        }
+        Err(error) => return Err(format!("{error}\n\n{}", config::USAGE).into()),
+    };
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Wait);
 
-    let mut app = PreviewApp::default();
+    let mut app = PreviewApp::new(&options);
     event_loop.run_app(&mut app)?;
     if let Some(error) = app.fatal_error {
         return Err(error.into());
     }
     Ok(())
+}
+
+fn main() -> ExitCode {
+    match run() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("paperview: {error}");
+            ExitCode::FAILURE
+        }
+    }
 }

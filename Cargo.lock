@@ -1708,6 +1708,7 @@ dependencies = [
 name = "paperview"
 version = "0.1.0"
 dependencies = [
+ "paper-protocol",
  "softbuffer",
  "winit",
 ]
