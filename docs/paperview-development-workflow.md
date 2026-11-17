@@ -41,7 +41,8 @@ and sends them to the most recently connected client.
 cargo run -p paperview -- \
   --host 127.0.0.1 \
   --port 5581 \
-  --viewport 1272x1624
+  --viewport 1272x1624 \
+  --save-dir /private/tmp
 ```
 
 PaperView should connect without blocking the window event loop. Its title
@@ -79,11 +80,18 @@ layout or source pixels:
 - `2` or `4`: exact integer nearest-neighbor enlargement.
 - Arrow keys: pan by 32 source pixels while in an integer zoom mode.
 - `Home`: recenter the bounded source-pixel pan.
+- `S`: save the current validated source frame as an 8-bit grayscale PNG.
 
 At 1x, 2x, and 4x, inspect antialiased Now Playing text without introducing a
 second font or text-rendering path. When the scaled source exceeds the window,
 use the arrow keys to reach its edges. The title's pan coordinates make the
 crop explicit.
+
+`S` writes into the existing `--save-dir` with a deterministic name such as
+`paperview-frame-00000000000000000042-gray8-1272x1624.png`. It refuses to
+overwrite an existing path. A nonexistent or unwritable directory produces a
+terminal error and leaves the displayed frame unchanged. The exported pixels
+come from the retained PPFB frame, not the fitted or zoomed window surface.
 
 An operating-system screenshot is useful for manual inspection but is not a
 canonical source-frame fixture: window scaling, capture, and display color
@@ -101,6 +109,9 @@ rm -f \
   /private/tmp/paperspoon-paperview.log \
   /private/tmp/paperspoon-paperview-latency.jsonl
 ```
+
+Remove any exported PNG by its exact reported path when it is no longer
+needed; avoid committing personal Now Playing metadata or artwork.
 
 This workflow has been exercised on macOS Apple Silicon for native window
 connection and frame rendering. Linux X11/Wayland, Windows, and automated GUI

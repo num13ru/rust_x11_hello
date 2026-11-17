@@ -3,10 +3,12 @@ mod config;
 use std::env;
 use std::error::Error;
 use std::num::NonZeroU32;
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::rc::Rc;
 
 use config::{Options, ParseOutcome};
+use paperview::export::{export_source_png, source_png_filename};
 use paperview::framebuffer::{ConversionError, PresentationBuffer, convert_frame};
 use paperview::receiver::ReceivedFrame;
 use paperview::viewport::{
@@ -91,6 +93,7 @@ struct PreviewApp {
     network_worker: Option<WorkerHandle>,
     network_state: NetworkState,
     viewport: ViewportState,
+    save_dir: Option<PathBuf>,
     last_logged_connection_error: Option<String>,
     window: Option<Rc<Window>>,
     surface: Option<PreviewSurface>,
@@ -110,6 +113,7 @@ impl PreviewApp {
             network_worker: None,
             network_state: NetworkState::new(options.target_label()),
             viewport: ViewportState::default(),
+            save_dir: options.save_dir.clone(),
             last_logged_connection_error: None,
             window: None,
             surface: None,
@@ -248,6 +252,12 @@ impl PreviewApp {
         let PhysicalKey::Code(key) = event.physical_key else {
             return;
         };
+        if key == KeyCode::KeyS {
+            if !event.repeat {
+                self.save_source_frame();
+            }
+            return;
+        }
         let (source_width, source_height, target_width, target_height) = self.view_geometry();
         let changed = match key {
             KeyCode::KeyF => self.viewport.select(
@@ -319,6 +329,29 @@ impl PreviewApp {
         if changed && let Some(window) = self.window.as_ref() {
             window.set_title(&self.network_state.title(&self.viewport.label()));
             window.request_redraw();
+        }
+    }
+
+    fn save_source_frame(&self) {
+        let Some(directory) = self.save_dir.as_ref() else {
+            eprintln!("paperview: source PNG export is disabled; restart with --save-dir DIR");
+            return;
+        };
+        let Some(frame) = self.network_state.last_frame.as_ref() else {
+            eprintln!("paperview: cannot save source PNG before a valid frame is received");
+            return;
+        };
+        let path = directory.join(source_png_filename(frame.frame_id(), frame.frame()));
+        match export_source_png(frame.frame(), &path) {
+            Ok(()) => eprintln!(
+                "paperview: saved source frame {} to {}",
+                frame.frame_id(),
+                path.display()
+            ),
+            Err(error) => eprintln!(
+                "paperview: could not save source frame {}: {error}",
+                frame.frame_id()
+            ),
         }
     }
 

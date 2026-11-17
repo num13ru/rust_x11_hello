@@ -1,4 +1,5 @@
 use std::ffi::OsString;
+use std::path::PathBuf;
 
 use paper_protocol::{DEFAULT_TCP_PORT, V2_FRAME_PREFIX_LEN, V2_MAX_PAYLOAD_LEN};
 
@@ -8,6 +9,7 @@ Options:
   --host HOST             PaperSpoon host (default: 127.0.0.1)
   --port PORT             PaperSpoon TCP port (default: 5581)
   --viewport WIDTHxHEIGHT Negotiated PPFB viewport (default: 1272x1624)
+  --save-dir DIR          Existing directory for source PNGs written with S
   -h, --help              Print this help";
 
 const DEFAULT_HOST: &str = "127.0.0.1";
@@ -20,6 +22,7 @@ pub(crate) struct Options {
     pub(crate) port: u16,
     pub(crate) viewport_width: u16,
     pub(crate) viewport_height: u16,
+    pub(crate) save_dir: Option<PathBuf>,
 }
 
 impl Default for Options {
@@ -29,6 +32,7 @@ impl Default for Options {
             port: DEFAULT_TCP_PORT,
             viewport_width: DEFAULT_VIEWPORT_WIDTH,
             viewport_height: DEFAULT_VIEWPORT_HEIGHT,
+            save_dir: None,
         }
     }
 }
@@ -55,6 +59,7 @@ pub(crate) fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Par
     let mut host_seen = false;
     let mut port_seen = false;
     let mut viewport_seen = false;
+    let mut save_dir_seen = false;
 
     while let Some(argument) = arguments.next() {
         let argument = argument
@@ -82,6 +87,14 @@ pub(crate) fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Par
                 options.viewport_width = width;
                 options.viewport_height = height;
             }
+            "--save-dir" => {
+                reject_duplicate(&mut save_dir_seen, "--save-dir")?;
+                let directory = next_os_value(&mut arguments, "--save-dir")?;
+                if directory.is_empty() {
+                    return Err("--save-dir must not be empty".to_string());
+                }
+                options.save_dir = Some(PathBuf::from(directory));
+            }
             _ => return Err(format!("unexpected argument {argument:?}")),
         }
     }
@@ -95,6 +108,15 @@ fn reject_duplicate(seen: &mut bool, option: &str) -> Result<(), String> {
     }
     *seen = true;
     Ok(())
+}
+
+fn next_os_value(
+    arguments: &mut impl Iterator<Item = OsString>,
+    option: &str,
+) -> Result<OsString, String> {
+    arguments
+        .next()
+        .ok_or_else(|| format!("{option} requires a value"))
 }
 
 fn next_value(
@@ -172,6 +194,7 @@ mod tests {
                 port: 5581,
                 viewport_width: 1272,
                 viewport_height: 1624,
+                save_dir: None,
             }))
         );
     }
@@ -186,12 +209,15 @@ mod tests {
                 "6000",
                 "--viewport",
                 "800X600",
+                "--save-dir",
+                "exports",
             ]),
             Ok(ParseOutcome::Run(Options {
                 host: "paperspoon.local".to_string(),
                 port: 6000,
                 viewport_width: 800,
                 viewport_height: 600,
+                save_dir: Some(PathBuf::from("exports")),
             }))
         );
     }
@@ -204,7 +230,7 @@ mod tests {
 
     #[test]
     fn missing_option_values_fail_clearly() {
-        for option in ["--host", "--port", "--viewport"] {
+        for option in ["--host", "--port", "--viewport", "--save-dir"] {
             let error = parse_strings(&[option]).expect_err("missing value must fail");
             assert!(error.contains("requires a value"), "{error}");
         }
@@ -249,6 +275,7 @@ mod tests {
             ("--host", "first", "second"),
             ("--port", "5581", "5582"),
             ("--viewport", "800x600", "600x800"),
+            ("--save-dir", "first", "second"),
         ] {
             let error = parse_strings(&[option, first, option, second])
                 .expect_err("duplicate option must fail");
@@ -261,6 +288,11 @@ mod tests {
         assert!(
             parse_strings(&["--host", "  "])
                 .expect_err("blank host must fail")
+                .contains("must not be empty")
+        );
+        assert!(
+            parse_strings(&["--save-dir", ""])
+                .expect_err("empty save directory must fail")
                 .contains("must not be empty")
         );
         assert!(

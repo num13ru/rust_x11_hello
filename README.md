@@ -257,6 +257,11 @@ pixels, and `Home` to recenter. The title reports the active zoom and source
 pan. Panning is bounded so every source edge remains reachable without
 silently wrapping. PaperView sends no pointer actions.
 
+Add `--save-dir DIR` to enable `S`, which exports the current validated source
+frame as an 8-bit grayscale PNG. PaperView creates a deterministic filename
+from the frame ID, format, and dimensions and refuses to overwrite an existing
+file. Fit, zoom, pan, and operating-system scaling never affect the export.
+
 PaperSpoon serves one current PPFB client; starting PaperView may replace a
 connected PaperPad session. The native window and frame rendering have been
 exercised on macOS Apple Silicon; the keyboard bindings and viewport model are
