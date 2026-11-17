@@ -363,6 +363,13 @@ At implementation time, read `AGENTS.md`, `README.md`, the relevant current sour
   parsing and rasterization remain host-side build-time tooling. Connection
   indicator rendering, local activation, remote-viewport ownership, and GC16
   system-strip presentation are unchanged.
+- The operator manually verified the baked label on the documented Paperwhite 6
+  on 2026-11-17 after the deployed binary independently matched the verified
+  host artifact at SHA-256
+  `4e0967b8828e39002980c5332910d0b683f34878f735ac94f0aa1371c4d8d00a`.
+  The label was readable and correctly presented in the unchanged device-local
+  strip. This visual check does not add a claim about application typography,
+  waveform performance, or unusually narrow fallback layouts.
 
 ## Risks and follow-ups (not required for this migration)
 
