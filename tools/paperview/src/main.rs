@@ -7,7 +7,9 @@ use std::process::ExitCode;
 use std::rc::Rc;
 
 use config::{Options, ParseOutcome};
+use paperview::framebuffer::{ConversionError, PresentationBuffer, convert_frame};
 use paperview::receiver::ReceivedFrame;
+use paperview::viewport::{LETTERBOX_RGB, render_fit};
 use paperview::worker::{
     ConnectionStatus, WorkerConfig, WorkerHandle, WorkerUpdates, start_worker,
 };
@@ -17,10 +19,6 @@ use winit::dpi::LogicalSize;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::window::{Window, WindowId};
-
-const LIGHT_SQUARE: u32 = 0x00e8_e8e8;
-const DARK_SQUARE: u32 = 0x0028_2828;
-const CHECKER_SIZE: u32 = 32;
 
 type PreviewSurface = Surface<Rc<Window>, Rc<Window>>;
 
@@ -33,6 +31,7 @@ struct NetworkState {
     target_label: String,
     status: ConnectionStatus,
     last_frame: Option<ReceivedFrame>,
+    presentation: Option<PresentationBuffer>,
 }
 
 impl NetworkState {
@@ -41,16 +40,21 @@ impl NetworkState {
             target_label,
             status: ConnectionStatus::Connecting,
             last_frame: None,
+            presentation: None,
         }
     }
 
-    fn apply(&mut self, updates: WorkerUpdates) {
+    fn apply(&mut self, updates: WorkerUpdates) -> Result<bool, ConversionError> {
         if let Some(status) = updates.status {
             self.status = status;
         }
         if let Some(frame) = updates.frame {
+            let presentation = convert_frame(frame.frame())?;
             self.last_frame = Some(frame);
+            self.presentation = Some(presentation);
+            return Ok(true);
         }
+        Ok(false)
     }
 
     fn title(&self) -> String {
@@ -63,15 +67,12 @@ impl NetworkState {
         };
         let frame = self.last_frame.as_ref().map_or_else(String::new, |frame| {
             format!(
-                " — received frame {} {:?} (not displayed)",
+                " — frame {} {:?}",
                 frame.frame_id(),
                 frame.frame().pixel_format()
             )
         });
-        format!(
-            "PaperView — {status}{frame} — checkerboard — {}",
-            self.target_label
-        )
+        format!("PaperView — {status}{frame} — {}", self.target_label)
     }
 }
 
@@ -184,9 +185,18 @@ impl PreviewApp {
             }
             _ => {}
         }
-        self.network_state.apply(updates);
+        let frame_changed = match self.network_state.apply(updates) {
+            Ok(frame_changed) => frame_changed,
+            Err(error) => {
+                eprintln!("paperview: could not convert received frame: {error}");
+                false
+            }
+        };
         if let Some(window) = self.window.as_ref() {
             window.set_title(&self.network_state.title());
+            if frame_changed {
+                window.request_redraw();
+            }
         }
     }
 
@@ -215,15 +225,16 @@ impl PreviewApp {
                 return;
             }
         };
-        for y in 0..height.get() {
-            for x in 0..width.get() {
-                let square = (x / CHECKER_SIZE) + (y / CHECKER_SIZE);
-                buffer[(y * width.get() + x) as usize] = if square.is_multiple_of(2) {
-                    LIGHT_SQUARE
-                } else {
-                    DARK_SQUARE
-                };
+        if let Some(presentation) = self.network_state.presentation.as_ref() {
+            if let Err(error) = render_fit(presentation, width.get(), height.get(), &mut buffer) {
+                self.fail(
+                    event_loop,
+                    format!("could not render fitted frame: {error}"),
+                );
+                return;
             }
+        } else {
+            buffer.fill(LETTERBOX_RGB);
         }
         if let Err(error) = buffer.present() {
             self.fail(
@@ -338,30 +349,35 @@ mod tests {
     #[test]
     fn network_state_retains_last_frame_across_errors_without_claiming_display() {
         let mut state = NetworkState::new("test endpoint".to_string());
-        state.apply(WorkerUpdates {
-            status: Some(ConnectionStatus::Connected),
-            frame: Some(received_frame(7)),
-        });
+        assert!(
+            state
+                .apply(WorkerUpdates {
+                    status: Some(ConnectionStatus::Connected),
+                    frame: Some(received_frame(7)),
+                })
+                .expect("convert frame")
+        );
         assert_eq!(
             state.last_frame.as_ref().map(ReceivedFrame::frame_id),
             Some(7)
         );
         assert!(state.title().contains("connected"));
-        assert!(
-            state
-                .title()
-                .contains("received frame 7 Gray8 (not displayed)")
-        );
+        assert!(state.title().contains("frame 7 Gray8"));
+        assert!(state.presentation.is_some());
 
-        state.apply(WorkerUpdates {
-            status: Some(ConnectionStatus::Error("connection lost".to_string())),
-            frame: None,
-        });
+        assert!(
+            !state
+                .apply(WorkerUpdates {
+                    status: Some(ConnectionStatus::Error("connection lost".to_string())),
+                    frame: None,
+                })
+                .expect("status-only update")
+        );
         assert_eq!(
             state.last_frame.as_ref().map(ReceivedFrame::frame_id),
             Some(7)
         );
         assert!(state.title().contains("error"));
-        assert!(state.title().contains("not displayed"));
+        assert!(state.presentation.is_some());
     }
 }
