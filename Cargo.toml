@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = [".", "crates/paper-protocol", "tools/paperspoon"]
+members = [".", "crates/paper-protocol", "tools/paperspoon", "tools/paperview"]
 resolver = "3"
 
 [dependencies]

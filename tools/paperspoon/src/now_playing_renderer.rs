@@ -373,16 +373,32 @@ mod tests {
         }
     }
 
+    fn default_now_playing_viewport() -> (u16, u16) {
+        let fixture = include_str!("../../paperview/tests/fixtures/now-playing-viewport.txt");
+        let (width, height) = fixture
+            .trim()
+            .split_once('x')
+            .expect("Now Playing viewport fixture must be WIDTHxHEIGHT");
+        (
+            width.parse().expect("fixture width must be u16"),
+            height.parse().expect("fixture height must be u16"),
+        )
+    }
+
     #[test]
     fn complete_track_uses_antialiased_text_in_portrait_gray8() {
         let artwork = DynamicImage::ImageLuma8(ImageBuffer::from_pixel(8, 4, Luma([u8::MAX])));
-        let frame = render_now_playing(&complete_snapshot(Some(artwork)), 1272, 1624)
+        let (width, height) = default_now_playing_viewport();
+        let frame = render_now_playing(&complete_snapshot(Some(artwork)), width, height)
             .expect("render Now Playing");
         assert_eq!(
             (frame.width(), frame.height(), frame.stride()),
-            (1272, 1624, 1272)
+            (width, height, usize::from(width))
         );
-        assert_eq!(frame.pixels().len(), 1272 * 1624);
+        assert_eq!(
+            frame.pixels().len(),
+            usize::from(width) * usize::from(height)
+        );
         assert!(frame.pixels().contains(&BLACK));
         assert!(
             frame

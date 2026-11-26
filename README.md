@@ -242,6 +242,40 @@ See [MXCFB benchmarks](docs/archive/mxcfb-benchmarks.md) for the current results
 methodology, commands, operating conditions, cleanup behavior, and waveform
 limitations.
 
+## PaperView desktop preview
+
+With PaperSpoon already listening, launch the read-only desktop client with the
+same viewport dimensions used by its frame commands:
+
+```sh
+cargo run -p paperview -- --host 127.0.0.1 --port 5581 --viewport 1272x1624
+```
+
+PaperView starts in aspect-preserving Fit mode. Press `F` for Fit, `1`, `2`, or
+`4` for exact physical-pixel integer zoom, the arrow keys to pan by 32 source
+pixels, and `Home` to recenter. The title reports the active zoom and source
+pan. Panning is bounded so every source edge remains reachable without
+silently wrapping. PaperView sends no pointer actions by default.
+
+Add `--interactive` to opt into primary-button PPFB pointer input. Left-button
+Down/Up coordinates are mapped through the exact Fit or integer-zoom transform;
+letterbox, secondary-button, and disconnected clicks are ignored. Keyboard
+zoom/pan remains the preview control, while a left drag represents remote touch.
+Run PaperSpoon with `--no-forward-url` when exercising application buttons.
+
+Add `--save-dir DIR` to enable `S`, which exports the current validated source
+frame as an 8-bit grayscale PNG. PaperView creates a deterministic filename
+from the frame ID, format, and dimensions and refuses to overwrite an existing
+file. Fit, zoom, pan, and operating-system scaling never affect the export.
+
+PaperSpoon serves one current PPFB client; starting PaperView may replace a
+connected PaperPad session. The native window and frame rendering have been
+exercised on macOS Apple Silicon; the keyboard bindings and viewport model are
+covered by automated tests. Linux X11/Wayland and Windows remain unverified.
+
+See the [PaperView local development workflow](docs/paperview-development-workflow.md)
+for a safe two-terminal Gray8 and Now Playing inspection sequence.
+
 ## PaperSpoon frame commands
 
 Commands are entered on PaperSpoon's stdin. Explicit diagnostic dimensions
