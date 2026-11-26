@@ -174,6 +174,12 @@ pub struct ZoomRect {
     pub zoom: ZoomLevel,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SourcePoint {
+    pub x: u16,
+    pub y: u16,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RenderError {
     TargetSizeOverflow { width: u32, height: u32 },
@@ -288,6 +294,69 @@ pub fn zoom_rect(
     })
 }
 
+pub fn map_target_to_source(
+    state: ViewportState,
+    source_width: u16,
+    source_height: u16,
+    target_width: u32,
+    target_height: u32,
+    target_x: f64,
+    target_y: f64,
+) -> Option<SourcePoint> {
+    let target_x = target_pixel(target_x, target_width)?;
+    let target_y = target_pixel(target_y, target_height)?;
+    let source_width_u32 = u32::from(source_width);
+    let source_height_u32 = u32::from(source_height);
+
+    let (source_x, source_y) = match state.mode() {
+        ViewMode::Fit => {
+            let rect = fit_rect(
+                source_width_u32,
+                source_height_u32,
+                target_width,
+                target_height,
+            )?;
+            let relative_x = target_x.checked_sub(rect.x).filter(|x| *x < rect.width)?;
+            let relative_y = target_y.checked_sub(rect.y).filter(|y| *y < rect.height)?;
+            (
+                u32::try_from(
+                    u64::from(relative_x) * u64::from(source_width) / u64::from(rect.width),
+                )
+                .ok()?,
+                u32::try_from(
+                    u64::from(relative_y) * u64::from(source_height) / u64::from(rect.height),
+                )
+                .ok()?,
+            )
+        }
+        ViewMode::Zoom(zoom) => {
+            let rect = zoom_rect(
+                source_width_u32,
+                source_height_u32,
+                target_width,
+                target_height,
+                zoom,
+                state.pan(),
+            )?;
+            let relative_x = target_x
+                .checked_sub(rect.target_x)
+                .filter(|x| *x < rect.width)?;
+            let relative_y = target_y
+                .checked_sub(rect.target_y)
+                .filter(|y| *y < rect.height)?;
+            (
+                rect.source_x + relative_x / zoom.factor(),
+                rect.source_y + relative_y / zoom.factor(),
+            )
+        }
+    };
+
+    Some(SourcePoint {
+        x: u16::try_from(source_x).ok()?,
+        y: u16::try_from(source_y).ok()?,
+    })
+}
+
 pub fn render_view(
     state: ViewportState,
     source: &PresentationBuffer,
@@ -398,6 +467,13 @@ fn validate_target(
         return Err(RenderError::BufferLength { expected, actual });
     }
     Ok(())
+}
+
+fn target_pixel(value: f64, extent: u32) -> Option<u32> {
+    if !value.is_finite() || value < 0.0 || value >= f64::from(extent) {
+        return None;
+    }
+    Some(value.floor() as u32)
 }
 
 fn maximum_pan_axis(source: u32, target: u32, zoom: u32) -> u32 {
@@ -695,6 +771,66 @@ mod tests {
         let mut state = ViewportState::default();
         assert!(!state.pan_by(32, 32, 100, 100, 10, 10));
         assert_eq!(state.pan(), PanOffset::default());
+    }
+
+    #[test]
+    fn fit_pointer_mapping_matches_render_sampling_and_rejects_letterbox() {
+        let state = ViewportState::default();
+        assert_eq!(
+            map_target_to_source(state, 4, 2, 8, 8, 0.0, 2.0),
+            Some(SourcePoint { x: 0, y: 0 })
+        );
+        assert_eq!(
+            map_target_to_source(state, 4, 2, 8, 8, 7.999, 5.999),
+            Some(SourcePoint { x: 3, y: 1 })
+        );
+        assert_eq!(map_target_to_source(state, 4, 2, 8, 8, 0.0, 1.999), None);
+        assert_eq!(map_target_to_source(state, 4, 2, 8, 8, 0.0, 6.0), None);
+    }
+
+    #[test]
+    fn zoom_pointer_mapping_accounts_for_pan_and_centered_letterboxing() {
+        let mut panned = ViewportState::default();
+        assert!(panned.select(ViewMode::Zoom(ZoomLevel::X2), 10, 8, 8, 8));
+        assert_eq!(
+            map_target_to_source(panned, 10, 8, 8, 8, 0.0, 0.0),
+            Some(SourcePoint { x: 3, y: 2 })
+        );
+        assert_eq!(
+            map_target_to_source(panned, 10, 8, 8, 8, 7.999, 7.999),
+            Some(SourcePoint { x: 6, y: 5 })
+        );
+
+        let mut centered = ViewportState::default();
+        assert!(centered.select(ViewMode::Zoom(ZoomLevel::X2), 2, 2, 8, 8));
+        assert_eq!(map_target_to_source(centered, 2, 2, 8, 8, 1.999, 2.0), None);
+        assert_eq!(
+            map_target_to_source(centered, 2, 2, 8, 8, 2.0, 2.0),
+            Some(SourcePoint { x: 0, y: 0 })
+        );
+        assert_eq!(
+            map_target_to_source(centered, 2, 2, 8, 8, 5.999, 5.999),
+            Some(SourcePoint { x: 1, y: 1 })
+        );
+        assert_eq!(map_target_to_source(centered, 2, 2, 8, 8, 6.0, 2.0), None);
+    }
+
+    #[test]
+    fn pointer_mapping_uses_physical_target_pixels_for_high_dpi_windows() {
+        assert_eq!(
+            map_target_to_source(ViewportState::default(), 100, 50, 400, 200, 200.0, 100.0,),
+            Some(SourcePoint { x: 50, y: 25 })
+        );
+    }
+
+    #[test]
+    fn pointer_mapping_rejects_invalid_coordinates_and_zero_extents() {
+        let state = ViewportState::default();
+        assert_eq!(map_target_to_source(state, 4, 4, 4, 4, -0.1, 0.0), None);
+        assert_eq!(map_target_to_source(state, 4, 4, 4, 4, f64::NAN, 0.0), None);
+        assert_eq!(map_target_to_source(state, 4, 4, 4, 4, 4.0, 0.0), None);
+        assert_eq!(map_target_to_source(state, 0, 4, 4, 4, 0.0, 0.0), None);
+        assert_eq!(map_target_to_source(state, 4, 4, 0, 4, 0.0, 0.0), None);
     }
 
     #[test]
