@@ -10,6 +10,7 @@ Options:
   --port PORT             PaperSpoon TCP port (default: 5581)
   --viewport WIDTHxHEIGHT Negotiated PPFB viewport (default: 1272x1624)
   --save-dir DIR          Existing directory for source PNGs written with S
+  --interactive           Send primary-button clicks as PPFB pointer input
   -h, --help              Print this help";
 
 const DEFAULT_HOST: &str = "127.0.0.1";
@@ -23,6 +24,7 @@ pub(crate) struct Options {
     pub(crate) viewport_width: u16,
     pub(crate) viewport_height: u16,
     pub(crate) save_dir: Option<PathBuf>,
+    pub(crate) interactive: bool,
 }
 
 impl Default for Options {
@@ -33,6 +35,7 @@ impl Default for Options {
             viewport_width: DEFAULT_VIEWPORT_WIDTH,
             viewport_height: DEFAULT_VIEWPORT_HEIGHT,
             save_dir: None,
+            interactive: false,
         }
     }
 }
@@ -60,6 +63,7 @@ pub(crate) fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Par
     let mut port_seen = false;
     let mut viewport_seen = false;
     let mut save_dir_seen = false;
+    let mut interactive_seen = false;
 
     while let Some(argument) = arguments.next() {
         let argument = argument
@@ -94,6 +98,10 @@ pub(crate) fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Par
                     return Err("--save-dir must not be empty".to_string());
                 }
                 options.save_dir = Some(PathBuf::from(directory));
+            }
+            "--interactive" => {
+                reject_duplicate(&mut interactive_seen, "--interactive")?;
+                options.interactive = true;
             }
             _ => return Err(format!("unexpected argument {argument:?}")),
         }
@@ -195,6 +203,7 @@ mod tests {
                 viewport_width: 1272,
                 viewport_height: 1624,
                 save_dir: None,
+                interactive: false,
             }))
         );
     }
@@ -211,6 +220,7 @@ mod tests {
                 "800X600",
                 "--save-dir",
                 "exports",
+                "--interactive",
             ]),
             Ok(ParseOutcome::Run(Options {
                 host: "paperspoon.local".to_string(),
@@ -218,6 +228,7 @@ mod tests {
                 viewport_width: 800,
                 viewport_height: 600,
                 save_dir: Some(PathBuf::from("exports")),
+                interactive: true,
             }))
         );
     }
@@ -295,6 +306,10 @@ mod tests {
                 .expect_err("duplicate option must fail");
             assert!(error.contains("only be specified once"), "{error}");
         }
+
+        let error = parse_strings(&["--interactive", "--interactive"])
+            .expect_err("duplicate interactive flag must fail");
+        assert!(error.contains("only be specified once"), "{error}");
     }
 
     #[test]
