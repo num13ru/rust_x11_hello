@@ -270,6 +270,20 @@ mod tests {
     }
 
     #[test]
+    fn now_playing_geometry_fixture_matches_the_default_viewport() {
+        let fixture = include_str!("../tests/fixtures/now-playing-viewport.txt").trim();
+        let ParseOutcome::Run(options) =
+            parse_strings(&["--viewport", fixture]).expect("parse viewport fixture")
+        else {
+            panic!("viewport fixture unexpectedly requested help");
+        };
+        assert_eq!(
+            (options.viewport_width, options.viewport_height),
+            (DEFAULT_VIEWPORT_WIDTH, DEFAULT_VIEWPORT_HEIGHT)
+        );
+    }
+
+    #[test]
     fn duplicate_options_are_rejected() {
         for (option, first, second) in [
             ("--host", "first", "second"),
