@@ -8,19 +8,22 @@ use std::process::ExitCode;
 use std::rc::Rc;
 
 use config::{Options, ParseOutcome};
+use paper_protocol::V2PointerPhase;
 use paperview::export::{export_source_png, source_png_filename};
 use paperview::framebuffer::{ConversionError, PresentationBuffer, convert_frame};
+use paperview::input::PointerContact;
 use paperview::receiver::ReceivedFrame;
 use paperview::viewport::{
-    LETTERBOX_RGB, PAN_STEP_SOURCE_PIXELS, ViewMode, ViewportState, ZoomLevel, render_view,
+    LETTERBOX_RGB, PAN_STEP_SOURCE_PIXELS, SourcePoint, ViewMode, ViewportState, ZoomLevel,
+    map_target_to_source, render_view,
 };
 use paperview::worker::{
     ConnectionStatus, WorkerConfig, WorkerHandle, WorkerUpdates, start_worker,
 };
 use softbuffer::{Context, Surface};
 use winit::application::ApplicationHandler;
-use winit::dpi::LogicalSize;
-use winit::event::{ElementState, KeyEvent, WindowEvent};
+use winit::dpi::{LogicalSize, PhysicalPosition};
+use winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
@@ -94,6 +97,9 @@ struct PreviewApp {
     network_state: NetworkState,
     viewport: ViewportState,
     save_dir: Option<PathBuf>,
+    interactive: bool,
+    cursor_position: Option<PhysicalPosition<f64>>,
+    pointer_contact: PointerContact,
     last_logged_connection_error: Option<String>,
     window: Option<Rc<Window>>,
     surface: Option<PreviewSurface>,
@@ -114,10 +120,27 @@ impl PreviewApp {
             network_state: NetworkState::new(options.target_label()),
             viewport: ViewportState::default(),
             save_dir: options.save_dir.clone(),
+            interactive: options.interactive,
+            cursor_position: None,
+            pointer_contact: PointerContact::default(),
             last_logged_connection_error: None,
             window: None,
             surface: None,
             fatal_error: None,
+        }
+    }
+
+    fn view_label(&self) -> String {
+        let mut label = self.viewport.label();
+        if self.interactive {
+            label.push_str(" — input interactive");
+        }
+        label
+    }
+
+    fn update_window_title(&self) {
+        if let Some(window) = self.window.as_ref() {
+            window.set_title(&self.network_state.title(&self.view_label()));
         }
     }
 
@@ -132,7 +155,7 @@ impl PreviewApp {
             Some(window) => Rc::clone(window),
             None => {
                 let attributes = Window::default_attributes()
-                    .with_title(self.network_state.title(&self.viewport.label()))
+                    .with_title(self.network_state.title(&self.view_label()))
                     .with_inner_size(LogicalSize::new(640.0, 480.0));
                 match event_loop.create_window(attributes) {
                     Ok(window) => {
@@ -190,6 +213,17 @@ impl PreviewApp {
             return;
         };
         let updates = worker.take_updates();
+        if matches!(
+            updates.status.as_ref(),
+            Some(
+                ConnectionStatus::Connecting
+                    | ConnectionStatus::Disconnected
+                    | ConnectionStatus::Error(_)
+                    | ConnectionStatus::Stopped
+            )
+        ) {
+            self.pointer_contact.clear();
+        }
         let previous_dimensions = self
             .network_state
             .presentation
@@ -215,6 +249,7 @@ impl PreviewApp {
         if frame_changed {
             let (source_width, source_height, target_width, target_height) = self.view_geometry();
             if previous_dimensions != Some((source_width, source_height)) {
+                self.cancel_pointer();
                 self.viewport
                     .center(source_width, source_height, target_width, target_height);
             } else {
@@ -223,7 +258,7 @@ impl PreviewApp {
             }
         }
         if let Some(window) = self.window.as_ref() {
-            window.set_title(&self.network_state.title(&self.viewport.label()));
+            self.update_window_title();
             if frame_changed {
                 window.request_redraw();
             }
@@ -243,6 +278,78 @@ impl PreviewApp {
             (size.width, size.height)
         });
         (source_width, source_height, target_width, target_height)
+    }
+
+    fn pointer_point(&self) -> Option<SourcePoint> {
+        if !self.interactive || self.network_state.status != ConnectionStatus::Connected {
+            return None;
+        }
+        let presentation = self.network_state.presentation.as_ref()?;
+        let position = self.cursor_position?;
+        let size = self.window.as_ref()?.inner_size();
+        map_target_to_source(
+            self.viewport,
+            presentation.width(),
+            presentation.height(),
+            size.width,
+            size.height,
+            position.x,
+            position.y,
+        )
+    }
+
+    fn send_pointer(&self, phase: V2PointerPhase, point: SourcePoint) -> bool {
+        let Some(worker) = self.network_worker.as_ref() else {
+            return false;
+        };
+        match worker.send_pointer(phase, point.x, point.y) {
+            Ok(()) => true,
+            Err(error) => {
+                eprintln!(
+                    "paperview: could not queue {:?} pointer at {},{}: {error}",
+                    phase, point.x, point.y
+                );
+                false
+            }
+        }
+    }
+
+    fn handle_cursor_moved(&mut self, position: PhysicalPosition<f64>) {
+        self.cursor_position = Some(position);
+        let point = self.pointer_point();
+        self.pointer_contact.update(point);
+    }
+
+    fn handle_mouse_input(&mut self, state: ElementState, button: MouseButton) {
+        if !self.interactive || button != MouseButton::Left {
+            return;
+        }
+        match state {
+            ElementState::Pressed => {
+                if self.pointer_contact.is_active() {
+                    return;
+                }
+                let Some(point) = self.pointer_point() else {
+                    return;
+                };
+                if self.send_pointer(V2PointerPhase::Down, point) {
+                    let began = self.pointer_contact.begin(point);
+                    debug_assert!(began, "inactive contact must accept Down");
+                }
+            }
+            ElementState::Released => {
+                let point = self.pointer_point();
+                if let Some(point) = self.pointer_contact.end(point) {
+                    self.send_pointer(V2PointerPhase::Up, point);
+                }
+            }
+        }
+    }
+
+    fn cancel_pointer(&mut self) {
+        if let Some(point) = self.pointer_contact.cancel() {
+            self.send_pointer(V2PointerPhase::Up, point);
+        }
     }
 
     fn handle_key(&mut self, event: &KeyEvent) {
@@ -326,9 +433,12 @@ impl PreviewApp {
             ),
             _ => false,
         };
-        if changed && let Some(window) = self.window.as_ref() {
-            window.set_title(&self.network_state.title(&self.viewport.label()));
-            window.request_redraw();
+        if changed {
+            self.cancel_pointer();
+            if let Some(window) = self.window.as_ref() {
+                self.update_window_title();
+                window.request_redraw();
+            }
         }
     }
 
@@ -356,6 +466,7 @@ impl PreviewApp {
     }
 
     fn handle_view_resize(&mut self, target_width: u32, target_height: u32) {
+        self.cancel_pointer();
         let (source_width, source_height) = self
             .network_state
             .presentation
@@ -368,7 +479,7 @@ impl PreviewApp {
                 .clamp(source_width, source_height, target_width, target_height);
         }
         if let Some(window) = self.window.as_ref() {
-            window.set_title(&self.network_state.title(&self.viewport.label()));
+            self.update_window_title();
             window.request_redraw();
         }
     }
@@ -438,6 +549,7 @@ impl ApplicationHandler<UserEvent> for PreviewApp {
     }
 
     fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+        self.cancel_pointer();
         self.surface = None;
     }
 
@@ -456,7 +568,10 @@ impl ApplicationHandler<UserEvent> for PreviewApp {
         }
 
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                self.cancel_pointer();
+                event_loop.exit();
+            }
             WindowEvent::RedrawRequested => self.redraw(event_loop),
             WindowEvent::Resized(size) => self.handle_view_resize(size.width, size.height),
             WindowEvent::ScaleFactorChanged { .. } => {
@@ -468,6 +583,12 @@ impl ApplicationHandler<UserEvent> for PreviewApp {
                 self.handle_view_resize(size.width, size.height);
             }
             WindowEvent::KeyboardInput { event, .. } => self.handle_key(&event),
+            WindowEvent::CursorMoved { position, .. } => self.handle_cursor_moved(position),
+            WindowEvent::CursorLeft { .. } => self.cursor_position = None,
+            WindowEvent::MouseInput { state, button, .. } => {
+                self.handle_mouse_input(state, button);
+            }
+            WindowEvent::Focused(false) => self.cancel_pointer(),
             _ => {}
         }
     }
