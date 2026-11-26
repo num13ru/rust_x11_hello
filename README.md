@@ -255,7 +255,13 @@ PaperView starts in aspect-preserving Fit mode. Press `F` for Fit, `1`, `2`, or
 `4` for exact physical-pixel integer zoom, the arrow keys to pan by 32 source
 pixels, and `Home` to recenter. The title reports the active zoom and source
 pan. Panning is bounded so every source edge remains reachable without
-silently wrapping. PaperView sends no pointer actions.
+silently wrapping. PaperView sends no pointer actions by default.
+
+Add `--interactive` to opt into primary-button PPFB pointer input. Left-button
+Down/Up coordinates are mapped through the exact Fit or integer-zoom transform;
+letterbox, secondary-button, and disconnected clicks are ignored. Keyboard
+zoom/pan remains the preview control, while a left drag represents remote touch.
+Run PaperSpoon with `--no-forward-url` when exercising application buttons.
 
 Add `--save-dir DIR` to enable `S`, which exports the current validated source
 frame as an 8-bit grayscale PNG. PaperView creates a deterministic filename

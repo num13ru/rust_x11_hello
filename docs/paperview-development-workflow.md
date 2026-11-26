@@ -1,8 +1,9 @@
 # PaperView local development workflow
 
 This workflow previews PaperSpoon-owned PPFB frames in a native desktop window
-without a Kindle. PaperView remains a read-only framebuffer client: it does not
-render application text, acquire Now Playing metadata, or send pointer actions.
+without a Kindle. PaperView remains read-only by default: it does not render
+application text or acquire Now Playing metadata. The explicit `--interactive`
+mode can send viewport-relative PPFB pointer input for application testing.
 
 ## Conditions
 
@@ -48,6 +49,32 @@ cargo run -p paperview -- \
 PaperView should connect without blocking the window event loop. Its title
 reports connection state, the most recent frame ID and pixel format, the view
 mode, and the negotiated endpoint and viewport.
+
+## Optional pointer input
+
+Omit `--interactive` for the default read-only preview. Add it to the PaperView
+command only when local application input is intentional:
+
+```sh
+cargo run -p paperview -- \
+  --host 127.0.0.1 \
+  --port 5581 \
+  --viewport 1272x1624 \
+  --interactive
+```
+
+Keep PaperSpoon's `--no-forward-url` flag for this workflow. In interactive
+mode:
+
+- The primary button sends existing PPFB Down/Up messages. Secondary buttons,
+  clicks in Fit or zoom letterboxing, and clicks while disconnected are ignored.
+- A primary drag is remote touch input. Use the keyboard bindings below for
+  local zoom and pan.
+- Focus loss, resize, scale-factor changes, and view-transform changes end an
+  active contact once at its last valid source coordinate. A disconnect clears
+  it without replaying input into the next session.
+- The window title includes `input interactive`; reconnect creates a fresh
+  pointer session.
 
 ## Exercise the same window
 
@@ -114,5 +141,6 @@ Remove any exported PNG by its exact reported path when it is no longer
 needed; avoid committing personal Now Playing metadata or artwork.
 
 This workflow has been exercised on macOS Apple Silicon for native window
-connection and frame rendering. Linux X11/Wayland, Windows, and automated GUI
-keypress injection remain unverified.
+connection, frame rendering, keyboard zoom, read-only mouse behavior, and
+interactive pointer mapping across Fit, 1x, 2x, 4x, disconnect, and reconnect.
+Linux X11/Wayland and Windows remain unverified.

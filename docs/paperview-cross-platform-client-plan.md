@@ -1,6 +1,6 @@
 # PaperView: cross-platform PPFB v2 framebuffer preview
 
-Status: MVP implemented and validated on macOS; Linux and Windows unverified\
+Status: MVP and optional interactive input validated on macOS; Linux and Windows unverified\
 Scope: New host-side Rust application (`tools/paperview/`)\
 Platforms: macOS, Linux (X11/Wayland), Windows\
 Display backend: `winit` + `softbuffer`\
@@ -9,12 +9,17 @@ Implementation: Incremental milestones with explicit verification gates
 
 ## Implementation status (2026-11-26)
 
-- Stages 0 through 3 are implemented. The optional Stage 4 mouse/touch
-  emulation remains unimplemented; PaperView is read-only.
+- Stages 0 through 4 are implemented. PaperView remains read-only by default;
+  `--interactive` explicitly enables viewport-relative pointer input.
 - On macOS, a single PaperView window received a Mono1 application frame and
   Gray8 gradient, bars, and real Now Playing frames from PaperSpoon at
   `1272x1624`. Fit, 1x, 2x, 4x, and keyboard panning were exercised through the
   native UI.
+- macOS interactive validation covered default read-only behavior, Fit
+  letterboxing, 1x/2x/4x source mapping, primary and secondary buttons,
+  outside release, disconnect, and reconnect. PaperSpoon's authoritative log
+  showed one bounded Down/Up pair per accepted contact and URL dispatch stayed
+  disabled under `--no-forward-url`.
 - The Now Playing source frame exported as a `1272x1624`, 8-bit grayscale PNG.
   A second save attempt left the original file's size, modification time, and
   SHA-256 unchanged, confirming the no-overwrite path.
@@ -154,12 +159,12 @@ Names are suggestions, not a mandate to add empty abstractions. Keep pure conver
 
 ## Stage 4 — Optional mouse/touch emulation (after the viewer is stable)
 
-- [ ] Add an **opt-in** mode (for example, `--interactive`; default is read-only). Distinguish this from drag-to-pan/zoom UI operations.
-- [ ] Convert mouse coordinates through the **inverse** of the exact preview transform (window physical pixels -> image pixels), accounting for DPI, letterboxing, pan, and zoom. Ignore events outside the viewport.
-- [ ] Send only existing PPFB `V2Pointer` Down/Up messages, with primary-button semantics. Do not add semantic action IDs or duplicate application button geometry.
-- [ ] Guarantee at most one matched Up per Down and avoid accidental actions on focus loss, outside release, disconnect, or reconnect. Document cancellation behavior and ensure protocol expectations are met.
-- [ ] For manual tests, launch PaperSpoon with `--no-forward-url` so clicking application buttons never triggers unexpected Hammerspoon actions.
-- [ ] Test the mapping at fit scale and multiple zoom levels, near edges, with letterboxing, and under high-DPI settings.
+- [x] Add an **opt-in** mode (for example, `--interactive`; default is read-only). Distinguish this from drag-to-pan/zoom UI operations.
+- [x] Convert mouse coordinates through the **inverse** of the exact preview transform (window physical pixels -> image pixels), accounting for DPI, letterboxing, pan, and zoom. Ignore events outside the viewport.
+- [x] Send only existing PPFB `V2Pointer` Down/Up messages, with primary-button semantics. Do not add semantic action IDs or duplicate application button geometry.
+- [x] Guarantee at most one matched Up per Down and avoid accidental actions on focus loss, outside release, disconnect, or reconnect. Document cancellation behavior and ensure protocol expectations are met.
+- [x] For manual tests, launch PaperSpoon with `--no-forward-url` so clicking application buttons never triggers unexpected Hammerspoon actions.
+- [x] Test the mapping at fit scale and multiple zoom levels, near edges, with letterboxing, and under high-DPI settings.
 
 **Gate:** With explicit opt-in, a window click acts like a viewport-relative PaperPad touch without changing PPFB or PaperSpoon hit-testing. Read-only behavior remains the default.
 
