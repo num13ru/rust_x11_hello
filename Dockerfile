@@ -8,6 +8,7 @@ RUN apt-get update \
         binutils-arm-linux-gnueabihf \
         libc6-dev-armhf-cross \
         file \
+        jq \
     && rustup target add "${RUST_TARGET}" \
     && rm -rf /var/lib/apt/lists/*
 

@@ -50,6 +50,28 @@ timeout only while a real display-maintenance deadline is pending.
 
 ### 1. Verify and build the Kindle package
 
+#### Native Nix build (experimental)
+
+On Apple Silicon macOS, install Nix with `nix-command` and `flakes` enabled.
+The first activation and an uncached Cargo build need network access. Run these
+commands from the repository root.
+
+```sh
+nix develop -c make check
+nix develop -c make build BUILD_BACKEND=native
+nix develop -c make verify BUILD_BACKEND=native
+```
+
+The shell supplies Rust 1.97.1, the ARMv7 musl target, and LLVM ELF tools.
+If the target libraries or ELF tools are missing, check that the commands run
+inside `nix develop`. Host workspace tests compile for macOS and require
+loopback networking. The native Kindle build has passed host verification on
+Apple Silicon. Physical Kindle validation is pending. See the
+[build results](docs/containerless-kindle-build.md) for the platform matrix,
+ELF checks, and timings.
+
+#### Container build (default)
+
 From the repository root:
 
 ```sh
@@ -59,7 +81,7 @@ make verify
 git diff --check
 ```
 
-`make check` needs Rust, Bash, `jq`, and local loopback socket access. The ARM
+`make check` needs Rust, Bash, `jq`, Python 3, and loopback socket access. The ARM
 build and static verification use Docker by default. On an Apple-silicon Mac
 with [Apple Container](https://github.com/apple/container) installed, start its
 service once per login and select it in the local, ignored `.env` file:
@@ -79,13 +101,15 @@ make verify
 ```
 
 The Makefile loads `.env` when present and otherwise defaults to Docker. A
-command-line assignment still takes precedence, for example
-`make verify CONTAINER_CLI=docker`.
+command-line assignment takes precedence, for example
+`make verify BUILD_BACKEND=container CONTAINER_CLI=docker`.
 
 `make build` creates the builder image when it is missing or `Dockerfile` has
-changed; use `make image` to force a rebuild. Cargo dependencies persist in the
-ignored, backend-specific `.cache/cargo/` directory. `make clean-cache` removes
-those dependency caches without removing build outputs.
+changed. `make image` and `make shell` operate on the selected container image
+even when `BUILD_BACKEND=native`. Cargo dependencies persist in the ignored,
+backend-specific `.cache/cargo/` directory. `make clean-cache` removes those
+caches. `make clean-target` removes the repository's `target/`. `make clean`
+also removes the packaged binary and `logs/`.
 
 Apple Container runs the builder natively as AArch64 while Rust still targets
 the Kindle's `armv7-unknown-linux-musleabihf`. Both backends limit build and
@@ -97,7 +121,12 @@ that provides both `build` and `run`. Docker remains the portable fallback.
 For guest connectivity failures caused by a host VPN, see
 [Apple Container network issues](#apple-container-network-issues).
 
-The resulting untracked binary is:
+#### Verified artifact
+
+Both backends verify the newly built ARMv7 hard-float static ELF before
+publishing it. `make verify` rechecks the published artifact with the selected
+backend. The shared build script uses the executable path reported by Cargo,
+including when Cargo uses a custom target directory.
 
 ```text
 kindle-extension/rust_x11_hello/bin/rust_x11_hello
