@@ -1,11 +1,28 @@
 # PaperView: cross-platform PPFB v2 framebuffer preview
 
-Status: Proposed\
+Status: MVP implemented and validated on macOS; Linux and Windows unverified\
 Scope: New host-side Rust application (`tools/paperview/`)\
 Platforms: macOS, Linux (X11/Wayland), Windows\
 Display backend: `winit` + `softbuffer`\
 Target: Inspect PaperSpoon's actual Mono1 and Gray8 frames without a Kindle\
 Implementation: Incremental milestones with explicit verification gates
+
+## Implementation status (2026-11-26)
+
+- Stages 0 through 3 are implemented. The optional Stage 4 mouse/touch
+  emulation remains unimplemented; PaperView is read-only.
+- On macOS, a single PaperView window received a Mono1 application frame and
+  Gray8 gradient, bars, and real Now Playing frames from PaperSpoon at
+  `1272x1624`. Fit, 1x, 2x, 4x, and keyboard panning were exercised through the
+  native UI.
+- The Now Playing source frame exported as a `1272x1624`, 8-bit grayscale PNG.
+  A second save attempt left the original file's size, modification time, and
+  SHA-256 unchanged, confirming the no-overwrite path.
+- `make check` passes on macOS. It must run with loopback networking available
+  because PaperSpoon's tests bind local TCP and UDP sockets.
+- Linux and Windows build and manual validation were explicitly skipped because
+  those environments were unavailable. They are unverified, not passing.
+- This work was host-only: no Kindle binary was rebuilt or deployed.
 
 ## Goal
 
@@ -150,11 +167,11 @@ Names are suggestions, not a mandate to add empty abstractions. Keep pure conver
 
 ### Automated checks
 
-- [ ] `cargo fmt --all -- --check`
-- [ ] `cargo test -p paper-protocol -p paperview` and applicable workspace tests.
-- [ ] `cargo clippy -p paperview --all-targets -- -D warnings` (record unrelated existing workspace issues, if any).
-- [ ] `cargo check -p paperview` on the development host; where available, check native builds on macOS, Linux, and Windows rather than claiming untested support.
-- [ ] `make check` (or the current equivalent specified by `AGENTS.md`) and `git diff --check` to catch regressions outside the new crate.
+- [x] `cargo fmt --all -- --check`
+- [x] `cargo test -p paper-protocol -p paperview` and applicable workspace tests.
+- [x] `cargo clippy -p paperview --all-targets -- -D warnings` (record unrelated existing workspace issues, if any).
+- [x] `cargo check -p paperview` on the development host; where available, check native builds on macOS, Linux, and Windows rather than claiming untested support.
+- [x] `make check` (or the current equivalent specified by `AGENTS.md`) and `git diff --check` to catch regressions outside the new crate.
 - [ ] Pure unit tests: Mono1 black/white polarity, MSB bit order, each-row padding, odd widths, Gray8 endpoints/midtones, correct channel packing, stride and payload bounds.
 - [ ] Pure geometry tests: aspect fit, centered letterboxing, high-DPI transform, 1:1 physical-pixel mapping, zoom/pan bounds, inverse pointer mapping, zero-sized windows.
 - [ ] Protocol tests: split TCP reads, partial headers, truncated/oversized frame, invalid format, zero/out-of-range dimensions, unsupported messages, slow presentation, reconnect and stale-session rejection.
@@ -163,12 +180,12 @@ Names are suggestions, not a mandate to add empty abstractions. Keep pure conver
 
 ### Manual checks
 
-- [ ] macOS: receive `ui 1272x1624`, `frame gray-gradient 1272x1624`, and `frame nowplaying` from a local PaperSpoon. Verify contrast, source pixels, zoom, clipping, and scaling.
-- [ ] Linux: verify at least one native windowing session; explicitly record whether X11, Wayland, or both were tested.
-- [ ] Windows: open window, connect to a reachable PaperSpoon on another machine, resize/zoom, inspect the Gray8 image, and disconnect/reconnect. Do not assume macOS Now Playing exists on Windows.
+- [x] macOS: receive `ui 1272x1624`, `frame gray-gradient 1272x1624`, `frame gray-bars 1272x1624`, and `frame nowplaying` from a local PaperSpoon. Verify source dimensions and grayscale export, zoom, panning, clipping, and scaling.
+- [ ] Linux: skipped on 2026-11-26 because no Linux environment was available; X11 and Wayland remain unverified.
+- [ ] Windows: skipped on 2026-11-26 because no Windows environment was available; native window, resize/zoom, and reconnect behavior remain unverified.
 - [ ] Stop PaperSpoon abruptly: the window stays responsive, indicates disconnection, retains the last correct frame, and reconnects when the server restarts.
 - [ ] Demonstrate single-session behavior when Kindle was previously connected; do not claim simultaneous PaperPad/PaperView output.
-- [ ] Verify that no Kindle binary was rebuilt or deployed as part of PaperView-only changes.
+- [x] Verify that no Kindle binary was rebuilt or deployed as part of PaperView-only changes.
 
 ## Acceptance criteria
 
