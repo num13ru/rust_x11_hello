@@ -4,6 +4,7 @@ use std::str::FromStr;
 use anyhow::{Context, Result, bail, ensure};
 use flate2::{Compression, Decompress, FlushDecompress, Status};
 use paper_protocol::PixelFormat;
+use paper_protocol::compression::{ZstdDecoder, ZstdEncoder};
 
 use crate::corpus::Layout;
 
@@ -82,14 +83,14 @@ impl FromStr for Codec {
 
 pub struct Encoder {
     codec: Codec,
-    zstd: Option<zstd::bulk::Compressor<'static>>,
+    zstd: Option<ZstdEncoder>,
     scratch: Vec<u8>,
 }
 
 impl Encoder {
     pub fn new(codec: Codec) -> Result<Self> {
         let zstd = match codec {
-            Codec::Zstd(level) => Some(zstd::bulk::Compressor::new(level)?),
+            Codec::Zstd(level) => Some(ZstdEncoder::new(level)?),
             _ => None,
         };
         Ok(Self {
@@ -113,13 +114,11 @@ impl Encoder {
                 let len = lz4_flex::block::compress_into(input, output)?;
                 output.truncate(len);
             }
-            Codec::Zstd(_) => {
-                output.reserve(zstd::zstd_safe::compress_bound(input.len()));
-                self.zstd
-                    .as_mut()
-                    .context("missing Zstandard encoder")?
-                    .compress_to_buffer(input, output)?;
-            }
+            Codec::Zstd(_) => self
+                .zstd
+                .as_mut()
+                .context("missing Zstandard encoder")?
+                .encode(input, output)?,
             Codec::Deflate(level) => {
                 let mut encoder =
                     flate2::write::DeflateEncoder::new(output, Compression::new(level));
@@ -134,13 +133,13 @@ impl Encoder {
 
 pub struct Decoder {
     codec: Codec,
-    zstd: Option<zstd::bulk::Decompressor<'static>>,
+    zstd: Option<ZstdDecoder>,
 }
 
 impl Decoder {
     pub fn new(codec: Codec) -> Result<Self> {
         let zstd = if matches!(codec, Codec::Zstd(_)) {
-            Some(zstd::bulk::Decompressor::new()?)
+            Some(ZstdDecoder::new()?)
         } else {
             None
         };
@@ -166,22 +165,11 @@ impl Decoder {
                 let written = lz4_flex::block::decompress_into(input, output)?;
                 ensure!(written == expected, "incorrect LZ4 decoded length");
             }
-            Codec::Zstd(_) => {
-                let size = zstd::zstd_safe::find_frame_compressed_size(input).map_err(|code| {
-                    anyhow::anyhow!(
-                        "Zstandard frame size: {}",
-                        zstd::zstd_safe::get_error_name(code)
-                    )
-                })?;
-                ensure!(size == input.len(), "trailing bytes in Zstandard input");
-                output.resize(expected, 0);
-                let written = self
-                    .zstd
-                    .as_mut()
-                    .context("missing Zstandard decoder")?
-                    .decompress_to_buffer(input, output.as_mut_slice())?;
-                ensure!(written == expected, "incorrect Zstandard decoded length");
-            }
+            Codec::Zstd(_) => self
+                .zstd
+                .as_mut()
+                .context("missing Zstandard decoder")?
+                .decode(input, expected, output)?,
             Codec::Deflate(_) => {
                 output.resize(expected + 1, 0);
                 let mut decoder = Decompress::new(false);

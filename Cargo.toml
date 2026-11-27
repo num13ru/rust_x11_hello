@@ -10,4 +10,4 @@ resolver = "3"
 [dependencies]
 anyhow = "1"
 libc = "0.2"
-paper-protocol = { path = "crates/paper-protocol" }
+paper-protocol = { path = "crates/paper-protocol", features = ["compression"] }

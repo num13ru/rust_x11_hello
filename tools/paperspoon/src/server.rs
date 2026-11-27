@@ -5,6 +5,7 @@ use std::net::{Shutdown, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use paper_protocol::v3;
 use paper_protocol::{V2PixelFormat, V2PixelFormats};
 
 #[derive(Clone, Default)]
@@ -17,10 +18,17 @@ struct ActiveConnection {
     stream: TcpStream,
     pixel_formats: V2PixelFormats,
     viewport: Option<(u16, u16)>,
+    encodings: Option<v3::Encodings>,
 }
 
 #[derive(Clone)]
 pub(crate) struct ConnectionToken(Arc<()>);
+
+impl ConnectionToken {
+    pub(crate) fn matches(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
 
 #[derive(Clone)]
 pub(crate) struct FrameTarget {
@@ -64,7 +72,7 @@ impl CurrentConnection {
 
     #[cfg(test)]
     pub(crate) fn install(&self, stream: &TcpStream) -> io::Result<ConnectionToken> {
-        self.install_inner(stream, V2PixelFormats::MONO1, None)
+        self.install_inner(stream, V2PixelFormats::MONO1, None, None)
     }
 
     #[cfg(test)]
@@ -73,16 +81,27 @@ impl CurrentConnection {
         stream: &TcpStream,
         pixel_formats: V2PixelFormats,
     ) -> io::Result<ConnectionToken> {
-        self.install_inner(stream, pixel_formats, None)
+        self.install_inner(stream, pixel_formats, None, None)
     }
 
+    #[cfg(test)]
     pub(crate) fn install_for_hello(
         &self,
         stream: &TcpStream,
         pixel_formats: V2PixelFormats,
         viewport: (u16, u16),
     ) -> io::Result<ConnectionToken> {
-        self.install_inner(stream, pixel_formats, Some(viewport))
+        self.install_negotiated(stream, pixel_formats, viewport, None)
+    }
+
+    pub(crate) fn install_negotiated(
+        &self,
+        stream: &TcpStream,
+        pixel_formats: V2PixelFormats,
+        viewport: (u16, u16),
+        encodings: Option<v3::Encodings>,
+    ) -> io::Result<ConnectionToken> {
+        self.install_inner(stream, pixel_formats, Some(viewport), encodings)
     }
 
     fn install_inner(
@@ -90,6 +109,7 @@ impl CurrentConnection {
         stream: &TcpStream,
         pixel_formats: V2PixelFormats,
         viewport: Option<(u16, u16)>,
+        encodings: Option<v3::Encodings>,
     ) -> io::Result<ConnectionToken> {
         let token = Arc::new(());
         let active = ActiveConnection {
@@ -97,9 +117,17 @@ impl CurrentConnection {
             stream: stream.try_clone()?,
             pixel_formats,
             viewport,
+            encodings,
         };
         *self.inner.lock().expect("current connection lock") = Some(active);
         Ok(ConnectionToken(token))
+    }
+
+    pub(crate) fn transport(&self) -> Option<(ConnectionToken, Option<v3::Encodings>)> {
+        let guard = self.inner.lock().expect("current connection lock");
+        guard
+            .as_ref()
+            .map(|active| (ConnectionToken(Arc::clone(&active.token)), active.encodings))
     }
 
     pub(crate) fn frame_target(
@@ -123,21 +151,33 @@ impl CurrentConnection {
     }
 
     /// Write a framebuffer only when the active peer advertised its format.
+    #[cfg(test)]
     pub(crate) fn forward_frame(
         &self,
         bytes: &[u8],
         pixel_format: V2PixelFormat,
     ) -> io::Result<FrameForward> {
-        self.forward_frame_inner(bytes, pixel_format, None)
+        self.forward_frame_inner(bytes, pixel_format, None, None)
     }
 
+    #[cfg(test)]
     pub(crate) fn forward_frame_to(
         &self,
         bytes: &[u8],
         pixel_format: V2PixelFormat,
         target: &FrameTarget,
     ) -> io::Result<FrameForward> {
-        self.forward_frame_inner(bytes, pixel_format, Some(target))
+        self.forward_frame_inner(bytes, pixel_format, Some(target), None)
+    }
+
+    pub(crate) fn forward_negotiated(
+        &self,
+        bytes: &[u8],
+        pixel_format: V2PixelFormat,
+        target: Option<&FrameTarget>,
+        connection: &ConnectionToken,
+    ) -> io::Result<FrameForward> {
+        self.forward_frame_inner(bytes, pixel_format, target, Some(connection))
     }
 
     fn forward_frame_inner(
@@ -145,11 +185,15 @@ impl CurrentConnection {
         bytes: &[u8],
         pixel_format: V2PixelFormat,
         target: Option<&FrameTarget>,
+        connection: Option<&ConnectionToken>,
     ) -> io::Result<FrameForward> {
         let mut guard = self.inner.lock().expect("current connection lock");
         let Some(active) = guard.as_mut() else {
             return Ok(FrameForward::NoConnection);
         };
+        if connection.is_some_and(|candidate| !Arc::ptr_eq(&active.token, &candidate.0)) {
+            return Ok(FrameForward::ConnectionChanged);
+        }
         if let Some(target) = target {
             if !Arc::ptr_eq(&active.token, &target.token.0) {
                 return Ok(FrameForward::ConnectionChanged);

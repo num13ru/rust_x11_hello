@@ -38,7 +38,7 @@ fn run() -> Result<()> {
             println!("Codecs: {}", codec::Codec::NAMES.join(", "));
             #[cfg(feature = "scenarios")]
             println!(
-                "framebuffer-bench generate SCENARIO CORPUS\n\nScenarios: {}",
+                "framebuffer-bench generate SCENARIO CORPUS [JPEG ...]\n\nScenarios: {}",
                 scenarios::NAMES.join(", ")
             );
             Ok(())
@@ -65,9 +65,9 @@ fn run() -> Result<()> {
             benchmark::decode(Path::new(path), None, benchmark::Options::parse(options)?)
         }
         #[cfg(feature = "scenarios")]
-        [command, name, path] if command == "generate" => {
+        [command, name, path, artwork @ ..] if command == "generate" => {
             let name = name.to_str().context("scenario name must be UTF-8")?;
-            scenarios::generate(name, Path::new(path))
+            scenarios::generate(name, Path::new(path), artwork)
         }
         _ => bail!("invalid arguments, see --help"),
     }

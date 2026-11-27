@@ -1,10 +1,11 @@
 //! Protocol-v2 session and pointer framing from PaperPad.
 
+use paper_protocol::v3;
 use paper_protocol::{
     V2_HEADER_LEN, V2DecodeResult, V2Hello, V2Payload, V2Pointer, V2Viewport, decode_v2_message,
     decode_v2_payload,
 };
-use std::io::{self, BufRead, Read};
+use std::io::{self, BufRead, Cursor, Read};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum InboundMessage {
@@ -55,6 +56,54 @@ pub(crate) fn read_session_message<R: BufRead>(
             "duplicate Hello from PaperPad",
         )),
         None => Ok(None),
+    }
+}
+
+pub(crate) fn read_negotiated_hello<R: BufRead>(
+    reader: &mut R,
+) -> io::Result<Option<(V2Hello, Option<v3::Encodings>)>> {
+    if reader.fill_buf()?.is_empty() {
+        return Ok(None);
+    }
+    let mut bytes = [0; V2_HEADER_LEN];
+    reader.read_exact(&mut bytes)?;
+    if bytes[4] != v3::VERSION {
+        return read_session_hello(&mut Cursor::new(bytes).chain(reader))
+            .map(|hello| hello.map(|hello| (hello, None)));
+    }
+    let header = v3::Header::decode(bytes)?;
+    if header.kind != v3::Kind::Hello || header.payload_len != 8 {
+        return Err(invalid_data("expected PPFB v3 Hello"));
+    }
+    let mut payload = [0; 8];
+    reader.read_exact(&mut payload)?;
+    let hello = v3::Hello::decode(&payload)?;
+    Ok(Some((
+        V2Hello::with_pixel_formats(hello.width, hello.height, hello.formats),
+        Some(hello.encodings),
+    )))
+}
+
+pub(crate) fn read_v3_session_message<R: BufRead>(
+    reader: &mut R,
+) -> io::Result<Option<SessionMessage>> {
+    if reader.fill_buf()?.is_empty() {
+        return Ok(None);
+    }
+    let mut bytes = [0; V2_HEADER_LEN + paper_protocol::V2_TRACED_POINTER_PAYLOAD_LEN];
+    reader.read_exact(&mut bytes[..V2_HEADER_LEN])?;
+    let header = v3::Header::decode(bytes[..V2_HEADER_LEN].try_into().expect("fixed header"))?;
+    let length = match (header.kind, header.payload_len) {
+        (v3::Kind::PointerDown | v3::Kind::PointerUp, len @ (4 | 28)) => len,
+        (v3::Kind::ViewportChanged, 4) => 4,
+        _ => return Err(invalid_data("invalid PPFB v3 client control message")),
+    };
+    let end = V2_HEADER_LEN + length;
+    reader.read_exact(&mut bytes[V2_HEADER_LEN..end])?;
+    match v3::decode_control(&mut bytes[..end])? {
+        V2Payload::Pointer(pointer) => Ok(Some(SessionMessage::Pointer(pointer))),
+        V2Payload::ViewportChanged(viewport) => Ok(Some(SessionMessage::ViewportChanged(viewport))),
+        _ => Err(invalid_data("expected PPFB v3 pointer or viewport")),
     }
 }
 

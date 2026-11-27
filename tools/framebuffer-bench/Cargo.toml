@@ -15,8 +15,7 @@ flate2 = { version = "=1.1.10", default-features = false, features = ["rust_back
 image = { version = "=0.25.8", default-features = false, optional = true }
 libc = "0.2"
 lz4_flex = { version = "=0.14.2", default-features = false, features = ["std", "safe-encode", "safe-decode", "checked-decode"] }
-paper-protocol = { path = "../../crates/paper-protocol" }
+paper-protocol = { path = "../../crates/paper-protocol", features = ["compression"] }
 paperspoon = { path = "../paperspoon", optional = true }
 png = "=0.18.1"
 tempfile = "3"
-zstd = { version = "=0.14.5", default-features = false, features = ["rust-backend"] }

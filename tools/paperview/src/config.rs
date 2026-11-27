@@ -1,7 +1,7 @@
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-use paper_protocol::{DEFAULT_TCP_PORT, V2_FRAME_PREFIX_LEN, V2_MAX_PAYLOAD_LEN};
+use paper_protocol::{DEFAULT_TCP_PORT, V2_FRAME_PREFIX_LEN, V2_MAX_PAYLOAD_LEN, v3};
 
 pub(crate) const USAGE: &str = "Usage: paperview [OPTIONS]
 
@@ -10,6 +10,8 @@ Options:
   --port PORT             PaperSpoon TCP port (default: 5581)
   --viewport WIDTHxHEIGHT Negotiated PPFB viewport (default: 1272x1624)
   --save-dir DIR          Existing directory for source PNGs written with S
+  --transport MODE         v2 (default), v3-raw, v3-auto, or v3-zstd
+  --transport-diagnostics   Log receive statistics every five seconds
   --interactive           Send primary-button clicks as PPFB pointer input
   -h, --help              Print this help";
 
@@ -25,6 +27,8 @@ pub(crate) struct Options {
     pub(crate) viewport_height: u16,
     pub(crate) save_dir: Option<PathBuf>,
     pub(crate) interactive: bool,
+    pub(crate) transport: v3::ClientMode,
+    pub(crate) transport_diagnostics: bool,
 }
 
 impl Default for Options {
@@ -36,6 +40,8 @@ impl Default for Options {
             viewport_height: DEFAULT_VIEWPORT_HEIGHT,
             save_dir: None,
             interactive: false,
+            transport: v3::ClientMode::Legacy,
+            transport_diagnostics: false,
         }
     }
 }
@@ -64,6 +70,7 @@ pub(crate) fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Par
     let mut viewport_seen = false;
     let mut save_dir_seen = false;
     let mut interactive_seen = false;
+    let mut transport_seen = false;
 
     while let Some(argument) = arguments.next() {
         let argument = argument
@@ -98,6 +105,19 @@ pub(crate) fn parse(arguments: impl IntoIterator<Item = OsString>) -> Result<Par
                     return Err("--save-dir must not be empty".to_string());
                 }
                 options.save_dir = Some(PathBuf::from(directory));
+            }
+            "--transport-diagnostics" => {
+                reject_duplicate(
+                    &mut options.transport_diagnostics,
+                    "--transport-diagnostics",
+                )?;
+            }
+            "--transport" => {
+                reject_duplicate(&mut transport_seen, "--transport")?;
+                let value = next_value(&mut arguments, "--transport")?;
+                options.transport = value
+                    .parse()
+                    .map_err(|error: std::io::Error| format!("--transport: {error}"))?;
             }
             "--interactive" => {
                 reject_duplicate(&mut interactive_seen, "--interactive")?;
@@ -204,6 +224,8 @@ mod tests {
                 viewport_height: 1624,
                 save_dir: None,
                 interactive: false,
+                transport: v3::ClientMode::Legacy,
+                transport_diagnostics: false,
             }))
         );
     }
@@ -229,6 +251,8 @@ mod tests {
                 viewport_height: 600,
                 save_dir: Some(PathBuf::from("exports")),
                 interactive: true,
+                transport: v3::ClientMode::Legacy,
+                transport_diagnostics: false,
             }))
         );
     }

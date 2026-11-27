@@ -2,6 +2,7 @@ use std::collections::TryReserveError;
 use std::fmt;
 use std::io::{self, Read};
 
+use paper_protocol::v3;
 use paper_protocol::{
     Frame, FrameError, V2_HEADER_LEN, V2DecodeError, V2DecodeResult, V2MessageType, V2Payload,
     V2PayloadError, decode_v2_message, decode_v2_payload,
@@ -11,6 +12,9 @@ use paper_protocol::{
 pub struct ReceivedFrame {
     frame_id: u64,
     frame: Frame,
+    pub(crate) encoding: v3::Encoding,
+    pub(crate) wire_bytes: usize,
+    pub(crate) decode_elapsed: std::time::Duration,
 }
 
 impl ReceivedFrame {
@@ -211,7 +215,43 @@ pub fn read_next_frame(
     }
     let frame_id = frame.frame_id();
     let frame = frame.to_owned_frame().map_err(FrameReadError::Frame)?;
-    Ok(Some(ReceivedFrame { frame_id, frame }))
+    Ok(Some(ReceivedFrame {
+        frame_id,
+        frame,
+        encoding: v3::Encoding::Raw,
+        wire_bytes: encoded.len(),
+        decode_elapsed: std::time::Duration::ZERO,
+    }))
+}
+
+pub(crate) fn read_next_v3_frame(
+    reader: &mut impl Read,
+    decoder: &mut v3::FrameDecoder,
+    viewport: v3::Viewport,
+    encodings: v3::Encodings,
+) -> Result<Option<ReceivedFrame>, FrameReadError> {
+    let Some(bytes) = read_header(reader)? else {
+        return Ok(None);
+    };
+    let header = v3::Header::decode(bytes).map_err(|source| FrameReadError::Io {
+        phase: ReadPhase::Header,
+        received: V2_HEADER_LEN,
+        source,
+    })?;
+    let received = decoder
+        .read_frame(reader, header, viewport, encodings)
+        .map_err(|source| FrameReadError::Io {
+            phase: ReadPhase::Payload,
+            received: 0,
+            source,
+        })?;
+    Ok(Some(ReceivedFrame {
+        frame_id: received.id,
+        frame: received.frame,
+        encoding: received.encoding,
+        wire_bytes: received.encoded_len,
+        decode_elapsed: received.decode_elapsed,
+    }))
 }
 
 fn read_header(reader: &mut impl Read) -> Result<Option<[u8; V2_HEADER_LEN]>, FrameReadError> {

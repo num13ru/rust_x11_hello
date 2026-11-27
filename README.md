@@ -27,6 +27,8 @@ PPFB v2 uses typed binary messages for capability negotiation, viewport
 changes, pointer phases, and frames. Mono1 is row-major and MSB-first (`0` is
 white); Gray8 uses one byte per pixel (`0` is black and `255` is white).
 Payloads are capped at 16 MiB and validated before becoming authoritative.
+Raw v2 is the default. Opt-in PPFB v3 can negotiate independent Zstandard
+frames with raw fallback. See the [PPFB v3 setup and wire format](docs/ppfb-v3.md).
 
 PaperSpoon embeds pinned IBM Plex Mono and Inter font assets, so host UI
 rendering does not depend on installed macOS fonts or network access. Mono1

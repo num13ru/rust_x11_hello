@@ -726,7 +726,6 @@ dependencies = [
  "paperspoon",
  "png",
  "tempfile",
- "zstd",
 ]
 
 [[package]]
@@ -1723,6 +1722,9 @@ dependencies = [
 [[package]]
 name = "paper-protocol"
 version = "0.1.0"
+dependencies = [
+ "zstd",
+]
 
 [[package]]
 name = "paperspoon"
