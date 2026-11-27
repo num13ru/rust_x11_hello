@@ -132,14 +132,12 @@ different cache and network conditions.
 
 ## Physical Kindle validation
 
-The statically verified native extension was prepared in a temporary checkout.
-Physical testing on the Paperwhite 6 remains pending. For manual acceptance,
-use the existing verified MTP install or update workflow and retain its
-rollback binary. Check KUAL launch and initialization, MXCFB access, evdev
-touch, PaperSpoon connectivity, Mono1 and Gray8 rendering, waveform selection,
-local Exit, watchdog termination, framebuffer restoration, and clean exit.
+The operator verified the deployed native build on a Kindle Paperwhite 6.
+Independent MTP readback matched the native artifact and confirmed that the
+retained rollback matched the previously installed binary. The operator
+reported the overall result. Individual acceptance checks remain unrecorded.
+See the [device evidence](archive/mxcfb-device-evidence.md#native-nix-build-2026-11-27).
 
-The container backend remains the default until that pass. After hardware
-validation, the native backend can be considered for the default. The GNU
-cross-compiler and cross-libc packages are candidates for removal from the
-container image if the separate GNU target is retired.
+The native backend is opt-in on Apple Silicon. The GNU cross-compiler and
+cross-libc packages are candidates for removal from the container image if
+the separate GNU target is retired.

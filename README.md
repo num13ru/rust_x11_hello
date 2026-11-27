@@ -65,10 +65,7 @@ nix develop -c make verify BUILD_BACKEND=native
 The shell supplies Rust 1.97.1, the ARMv7 musl target, and LLVM ELF tools.
 If the target libraries or ELF tools are missing, check that the commands run
 inside `nix develop`. Host workspace tests compile for macOS and require
-loopback networking. The native Kindle build has passed host verification on
-Apple Silicon. Physical Kindle validation is pending. See the
-[build results](docs/containerless-kindle-build.md) for the platform matrix,
-ELF checks, and timings.
+loopback networking.
 
 #### Container build (default)
 
