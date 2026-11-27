@@ -66,21 +66,21 @@ printf '.globl _main\n_main:\n    ret\n' |
 head -c 52 static > truncated
 cp static soft-float
 printf '\000\002\000\005' | dd of=soft-float bs=1 seek=36 conv=notrunc 2>/dev/null
-python3 - <<'PY'
-import struct
-from pathlib import Path
 
-elf = bytearray(Path("static").read_bytes())
-program_headers = struct.unpack_from("<I", elf, 28)[0]
-header_size, header_count = struct.unpack_from("<HH", elf, 42)
-for offset in range(program_headers, program_headers + header_count * header_size, header_size):
-    if struct.unpack_from("<I", elf, offset)[0] == 1:  # PT_LOAD
-        struct.pack_into("<II", elf, offset + 16, len(elf) + 1, len(elf) + 1)
-        break
-else:
-    raise ValueError("No PT_LOAD fixture segment")
-Path("oversized-segment").write_bytes(elf)
-PY
+# Put a single PT_LOAD immediately after the 52-byte ELF32 header.
+cat > single-segment.ld <<'EOF'
+PHDRS { text PT_LOAD FLAGS(5); }
+SECTIONS {
+    . = 0x10000;
+    .text : { *(.text) } :text
+}
+EOF
+link -T single-segment.ld entry.o -o oversized-segment
+bash "$CHECKER" oversized-segment
+# Set p_filesz and p_memsz to 16 MiB, beyond the end of the fixture.
+load_size_offset=$((52 + 16))
+printf '\000\000\000\001\000\000\000\001' |
+    dd of=oversized-segment bs=1 seek="$load_size_offset" conv=notrunc 2>/dev/null
 
 reject() {
     local bin=$1 expected=$2 output

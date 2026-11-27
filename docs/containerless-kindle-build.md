@@ -51,7 +51,7 @@ no separate C cross-compiler, external target sysroot, or container runtime.
 | LLVM | Inspect ELF with `llvm-readelf` and assemble regression fixtures with `llvm-mc` |
 | `file` | Report the verified binary format during packaging |
 | `jq` | Check the KUAL menu and read Cargo's executable path |
-| Python 3 | Run existing project checks and generate a malformed ELF regression fixture |
+| Python 3 | Run the Apple Container proxy and latency analyzer checks |
 
 The shared build now checks the active compiler's target library directory,
 builds with `Cargo.lock`, and uses Cargo's reported executable path. It
