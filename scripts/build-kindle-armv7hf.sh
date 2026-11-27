@@ -4,44 +4,37 @@ set -euo pipefail
 TARGET="armv7-unknown-linux-musleabihf"
 BIN_NAME="rust_x11_hello"
 EXT_DIR="kindle-extension/rust_x11_hello"
-OUT_BIN="target/${TARGET}/release/${BIN_NAME}"
+DEPLOY_BIN="${EXT_DIR}/bin/${BIN_NAME}"
 
-if ! rustup target list --installed | grep -qx "${TARGET}"; then
-    echo "Missing Rust target ${TARGET}; rebuild the Docker image." >&2
+target_libdir=$(rustc --print target-libdir --target "$TARGET")
+shopt -s nullglob
+standard_libraries=("$target_libdir"/libstd-*.rlib)
+if (( ${#standard_libraries[@]} == 0 )); then
+    printf 'ERROR: Rust standard library for %s is missing from %s. Use nix develop or rebuild the container image.\n' \
+        "$TARGET" "$target_libdir" >&2
     exit 1
 fi
 
-cargo build --release --target "${TARGET}" --package "${BIN_NAME}"
+# Cargo reports the actual executable path, including custom target directories.
+cargo_output=$(cargo build --locked --release --target "$TARGET" --package "$BIN_NAME" --bin "$BIN_NAME" \
+    --message-format=json-render-diagnostics)
+built_bin=$(jq --exit-status --raw-output --slurp --arg name "$BIN_NAME" '
+        map(select(.reason == "compiler-artifact" and .target.name == $name and
+                   .target.kind == ["bin"] and .executable != null))
+        | if length == 1 then .[0].executable else error("Expected one Kindle executable from Cargo") end
+    ' <<<"$cargo_output")
 
 mkdir -p "${EXT_DIR}/bin"
-
-cp "${OUT_BIN}" "${EXT_DIR}/bin/${BIN_NAME}"
-chmod +x "${EXT_DIR}/bin/${BIN_NAME}"
-chmod +x "${EXT_DIR}/bin/"*.sh 2>/dev/null || true
-
-echo
-echo "Built Kindle extension:"
-echo "${EXT_DIR}"
-echo
-
-find "${EXT_DIR}" -maxdepth 3 -type f -print
-
-echo
-echo "Binary info:"
-file "${EXT_DIR}/bin/${BIN_NAME}" || true
-
-echo
-echo "Interpreter check:"
-if command -v readelf >/dev/null 2>&1; then
-    readelf -l "${EXT_DIR}/bin/${BIN_NAME}" | grep interpreter || echo "No dynamic interpreter found. Good for static musl."
-else
-    echo "readelf not found"
+if [[ -d "$DEPLOY_BIN" ]]; then
+    printf 'ERROR: Kindle artifact path is a directory: %s\n' "$DEPLOY_BIN" >&2
+    exit 1
 fi
-
-echo
-echo "GLIBC symbols check:"
-if command -v arm-linux-gnueabihf-objdump >/dev/null 2>&1; then
-    arm-linux-gnueabihf-objdump -T "${EXT_DIR}/bin/${BIN_NAME}" | grep GLIBC_ || echo "No GLIBC symbols found. Good."
-else
-    echo "objdump not found"
-fi
+staged_bin=$(mktemp "${EXT_DIR}/bin/.${BIN_NAME}.XXXXXX")
+trap 'rm -f "$staged_bin"' EXIT
+trap 'exit 1' HUP INT TERM
+cp "$built_bin" "$staged_bin"
+chmod 755 "$staged_bin"
+bash "$(dirname "${BASH_SOURCE[0]}")/check-static.sh" "$staged_bin"
+file -b "$staged_bin"
+mv -f "$staged_bin" "$DEPLOY_BIN"
+printf 'Built Kindle extension binary: %s\n' "$DEPLOY_BIN"

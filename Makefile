@@ -1,5 +1,6 @@
 -include .env
 
+BUILD_BACKEND ?= container
 CONTAINER_CLI ?= docker
 CONTAINER_RUN_ARGS ?= --cpus 8 --memory 2g
 CONTAINER_BUILD_ARGS ?=
@@ -50,6 +51,7 @@ check: check-menu
 	sh -n kindle-extension/rust_x11_hello/bin/probe-fb.sh
 	sh -n kindle-extension/rust_x11_hello/bin/probe-input.sh
 	bash -n scripts/build-kindle-armv7hf.sh
+	bash -n scripts/check-static.sh
 	bash -n scripts/deploy-kindle-mtp.sh
 	python3 scripts/apple-container-proxy.py --help >/dev/null
 	python3 scripts/test-analyze-latency.py
@@ -74,9 +76,6 @@ check-menu:
 
 image:
 	$(CONTAINER_PROXY_WRAPPER) $(MAKE) _image
-
-build:
-	$(CONTAINER_PROXY_WRAPPER) $(MAKE) _build
 
 shell:
 	$(CONTAINER_PROXY_WRAPPER) $(MAKE) _shell
@@ -103,12 +102,25 @@ _build: _ensure-image _prepare-cargo-cache
 		-w $(WORKDIR) \
 		$(IMAGE)
 
+ifeq ($(BUILD_BACKEND),native)
+build:
+	bash scripts/build-kindle-armv7hf.sh
+
+verify:
+	bash scripts/check-static.sh
+else ifeq ($(BUILD_BACKEND),container)
+build:
+	$(CONTAINER_PROXY_WRAPPER) $(MAKE) _build
+
 verify:
 	$(CONTAINER_CLI) run --rm $(CONTAINER_RUN_ARGS) $(CONTAINER_PROXY_RUN_ARGS) \
 		-v "$$(pwd)":$(WORKDIR) \
 		-w $(WORKDIR) \
 		$(IMAGE) \
 		bash scripts/check-static.sh
+else
+$(error Unsupported BUILD_BACKEND '$(BUILD_BACKEND)'. Use native or container)
+endif
 
 _shell: _ensure-image _prepare-cargo-cache
 	$(CONTAINER_CLI) run --rm -it $(CONTAINER_RUN_ARGS) $(CONTAINER_PROXY_RUN_ARGS) \

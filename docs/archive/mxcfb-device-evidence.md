@@ -863,3 +863,12 @@ No additional photographs, logs, deployed-binary checksum, requested waveform
 names, or per-mode qualitative observations accompanied the follow-up. The
 record therefore supports successful completion of those checks but does not
 support a mode-specific ghosting, latency, refresh-rate, or exact-color claim.
+
+## Native Nix build (2026-11-27)
+
+The operator verified the native Nix build from commit `85dfaca` on the
+Kindle Paperwhite 6. Independent MTP readback after updating matched the host
+artifact's SHA-256 `bfbf40545347ee4703f256372590d91a9d35d6d14b420334b8f821c714e82126`.
+The retained rollback also matched the binary read back before the update.
+The operator reported the overall device result, with individual acceptance
+checks unrecorded.
