@@ -50,7 +50,7 @@ timeout only while a real display-maintenance deadline is pending.
 
 ### 1. Verify and build the Kindle package
 
-#### Native Nix build (experimental)
+#### Native Nix build (default)
 
 On Apple Silicon macOS, install Nix with `nix-command` and `flakes` enabled.
 The first activation and an uncached Cargo build need network access. Run these
@@ -58,48 +58,43 @@ commands from the repository root.
 
 ```sh
 nix develop -c make check
-nix develop -c make build BUILD_BACKEND=native
-nix develop -c make verify BUILD_BACKEND=native
+nix develop -c make build
+nix develop -c make verify
 ```
 
-The shell supplies Rust 1.97.1, the ARMv7 musl target, and LLVM ELF tools.
-If the target libraries or ELF tools are missing, check that the commands run
-inside `nix develop`. Host workspace tests compile for macOS and require
-loopback networking.
+The shell supplies Rust 1.97.1, the ARMv7 musl target, and LLVM ELF tools. For an
+interactive session, run `nix develop` once and use the same `make` commands.
+Host workspace tests on macOS require loopback networking.
 
-#### Container build (default)
+#### Optional Mr Boxington cache
 
-From the repository root:
+To use the same toolchain with Mr Boxington's Cargo wrapper, run:
 
 ```sh
-make check
-make build
-make verify
-git diff --check
+nix develop .#mbx -c make build
 ```
 
-`make check` needs Rust, Bash, `jq`, Python 3, and loopback socket access. The ARM
-build and static verification use Docker by default. On an Apple-silicon Mac
-with [Apple Container](https://github.com/apple/container) installed, start its
-service once per login and select it in the local, ignored `.env` file:
+See the [build guide](docs/containerless-kindle-build.md) for cache inspection,
+troubleshooting, and validation results.
+
+#### Docker and Apple Container builds
+
+```sh
+make build BUILD_BACKEND=container CONTAINER_CLI=docker
+make verify BUILD_BACKEND=container CONTAINER_CLI=docker
+```
+
+On Apple Silicon with [Apple Container](https://github.com/apple/container) installed:
 
 ```sh
 container system start
+make build BUILD_BACKEND=container CONTAINER_CLI=container
+make verify BUILD_BACKEND=container CONTAINER_CLI=container
 ```
 
-```dotenv
-# .env
-CONTAINER_CLI=container
-```
-
-```sh
-make build
-make verify
-```
-
-The Makefile loads `.env` when present and otherwise defaults to Docker. A
-command-line assignment takes precedence, for example
-`make verify BUILD_BACKEND=container CONTAINER_CLI=docker`.
+Set `BUILD_BACKEND=container` and your preferred `CONTAINER_CLI` in the ignored
+`.env` file to persist the selection. Command-line assignments take precedence.
+Docker is the default CLI when you select the container backend.
 
 `make build` creates the builder image when it is missing or `Dockerfile` has
 changed. `make image` and `make shell` operate on the selected container image

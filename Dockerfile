@@ -1,4 +1,4 @@
-FROM rust:1.86-bookworm
+FROM rust:1.97.1-bookworm
 
 ARG RUST_TARGET=armv7-unknown-linux-musleabihf
 

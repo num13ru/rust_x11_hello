@@ -6,6 +6,14 @@ BIN_NAME="rust_x11_hello"
 EXT_DIR="kindle-extension/rust_x11_hello"
 DEPLOY_BIN="${EXT_DIR}/bin/${BIN_NAME}"
 
+for dependency in rustc cargo jq file; do
+    if ! command -v "$dependency" >/dev/null 2>&1; then
+        printf 'ERROR: %s is required to build the Kindle artifact. Enter nix develop or rebuild the container image.\n' \
+            "$dependency" >&2
+        exit 1
+    fi
+done
+
 target_libdir=$(rustc --print target-libdir --target "$TARGET")
 shopt -s nullglob
 standard_libraries=("$target_libdir"/libstd-*.rlib)
