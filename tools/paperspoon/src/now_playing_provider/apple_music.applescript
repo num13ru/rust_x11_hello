@@ -56,6 +56,20 @@ on run argv
             set artworkData to raw data of artwork 1 of currentTrack
             if my trackIdentity(current track) is not trackKey then return "track changed"
             set outputPath to item 3 of argv
+        else if operation is "reveal" then
+            reopen
+            activate
+            if (count of browser windows) > 0 then
+                set collapsed of browser window 1 to false
+                set visible of browser window 1 to true
+            end if
+            -- Some streamed tracks cannot be revealed in the library.
+            try
+                if my trackIdentity(current track) is trackKey then
+                    reveal current track
+                    return "revealed"
+                end if
+            end try
         else if operation is "previous" then
             previous track
         else if operation is "playpause" then

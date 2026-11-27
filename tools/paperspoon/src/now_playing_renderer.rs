@@ -46,6 +46,15 @@ impl HeaderLayout {
             .saturating_add(self.artwork_gap)
     }
 
+    fn artwork_bounds(&self, width: u16) -> ControlRect {
+        ControlRect {
+            x: width.saturating_sub(self.artwork_side) / 2,
+            y: self.artwork_y,
+            width: self.artwork_side,
+            height: self.artwork_side,
+        }
+    }
+
     fn metadata_height(&self) -> u16 {
         TextRole::NowPlayingTitle.style().line_height
             + TextRole::NowPlayingMetadata.style().line_height * 2
@@ -100,12 +109,15 @@ impl NowPlayingRenderer {
         let HeaderLayout {
             margin,
             inner_width,
-            artwork_side,
-            artwork_y,
             line_gap,
             ..
         } = *layout;
-        let artwork_x = width.saturating_sub(artwork_side) / 2;
+        let ControlRect {
+            x: artwork_x,
+            y: artwork_y,
+            width: artwork_side,
+            ..
+        } = layout.artwork_bounds(width);
 
         let artwork_rendered = artwork.is_some_and(|artwork| {
             canvas
@@ -371,6 +383,7 @@ impl NowPlayingRenderer {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LiveControl {
+    Cover,
     Previous,
     PlayPause,
     Next,
@@ -387,7 +400,7 @@ impl LiveControl {
                 Self::Seek => track.duration().is_some(),
                 Self::Shuffle => track.shuffle.is_some(),
                 Self::Repeat => track.repeat.is_some(),
-                Self::Previous | Self::PlayPause | Self::Next => true,
+                Self::Cover | Self::Previous | Self::PlayPause | Self::Next => true,
             })
     }
 }
@@ -408,6 +421,7 @@ impl ControlRect {
 
 pub struct LiveLayout {
     header: HeaderLayout,
+    cover: ControlRect,
     controls: Option<LiveControls>,
 }
 
@@ -520,10 +534,18 @@ impl LiveLayout {
                 mode_buttons,
             }
         });
-        Self { header, controls }
+        let cover = header.artwork_bounds(width);
+        Self {
+            header,
+            cover,
+            controls,
+        }
     }
 
     pub fn control_at(&self, x: u16, y: u16) -> Option<LiveControl> {
+        if self.cover.contains(x, y) {
+            return Some(LiveControl::Cover);
+        }
         let controls = self.controls.as_ref()?;
         if controls.progress.contains(x, y) {
             return Some(LiveControl::Seek);
@@ -543,6 +565,7 @@ impl LiveLayout {
             return None;
         }
         Some(match control {
+            LiveControl::Cover => PlaybackCommand::RevealTrack,
             LiveControl::Previous => PlaybackCommand::Previous,
             LiveControl::PlayPause => PlaybackCommand::PlayPause,
             LiveControl::Next => PlaybackCommand::Next,
@@ -734,7 +757,7 @@ impl LiveNowPlayingRenderer {
                     Some(RepeatMode::One) => "REPEAT ONE",
                     None => "REPEAT --",
                 },
-                LiveControl::Seek => unreachable!("seek is the progress bar"),
+                LiveControl::Cover | LiveControl::Seek => unreachable!("not a button"),
             };
             self.renderer.draw_line(
                 canvas,

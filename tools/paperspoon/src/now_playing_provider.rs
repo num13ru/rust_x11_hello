@@ -128,6 +128,7 @@ impl Playback {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PlaybackCommand {
+    RevealTrack,
     Previous,
     PlayPause,
     Next,
@@ -284,6 +285,7 @@ impl MediaProvider for FakeMusic {
         }
         let now = Instant::now();
         match command {
+            PlaybackCommand::RevealTrack => {}
             PlaybackCommand::Previous => {
                 self.index = (self.index + Self::IDS.len() - 1) % Self::IDS.len();
                 self.position = 0.0;

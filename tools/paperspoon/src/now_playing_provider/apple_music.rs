@@ -34,6 +34,7 @@ impl MediaProvider for AppleMusic {
         let temp = tempfile::tempdir().map_err(|error| error.to_string())?;
         let seek_ms;
         let args = match command {
+            PlaybackCommand::RevealTrack => vec!["reveal", track_id],
             PlaybackCommand::Previous => vec!["previous", track_id],
             PlaybackCommand::PlayPause => vec!["playpause", track_id],
             PlaybackCommand::Next => vec!["next", track_id],
@@ -48,6 +49,7 @@ impl MediaProvider for AppleMusic {
         let response = run_script(&args, temp.path(), cancel)?;
         match response.as_str() {
             "ok" => Ok(()),
+            "revealed" if command == PlaybackCommand::RevealTrack => Ok(()),
             _ => Err(format!("Music command rejected: {response}")),
         }
     }

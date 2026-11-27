@@ -168,6 +168,8 @@ states while keeping its track sequence deterministic.
 Restart PaperSpoon with `--now-playing-apple-music` and keep
 `--no-forward-url` to disable Hammerspoon forwarding for grid actions.
 The Apple Music flag authorizes direct playback commands separately.
+Tap the cover to bring Music to the front and reveal the current track
+where Music supports it. This also works with the cover placeholder.
 Open Music and allow Automation access for the terminal or application
 that launches PaperSpoon. Start playback in Music before testing the
 controls. PaperSpoon polls and controls Music through AppleScript, so

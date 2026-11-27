@@ -80,6 +80,7 @@ impl CommandObservation {
             return false;
         };
         match self.command {
+            PlaybackCommand::RevealTrack => false,
             PlaybackCommand::PlayPause => after.label() != self.before.label(),
             PlaybackCommand::Next | PlaybackCommand::Previous => {
                 self.before
@@ -137,6 +138,12 @@ impl Contact {
             Self::Armed(armed) => Some(armed),
             _ => None,
         }
+    }
+
+    fn pressed_control(&self) -> Option<LiveControl> {
+        self.armed()
+            .map(|armed| armed.control)
+            .filter(|control| *control != LiveControl::Cover)
     }
 }
 
@@ -274,7 +281,7 @@ impl State {
         let control = layout.control_at(pointer.x(), pointer.y());
         match pointer.phase() {
             V2PointerPhase::Down => {
-                let pressed = self.contact.armed().is_some();
+                let pressed = self.contact.pressed_control();
                 let track_id = self
                     .track_id()
                     .filter(|id| Some(*id) == self.visible_track.as_deref());
@@ -286,7 +293,7 @@ impl State {
                     }),
                     _ => Contact::Cancelled,
                 };
-                if pressed != self.contact.armed().is_some() {
+                if pressed != self.contact.pressed_control() {
                     self.revision += 1;
                 }
                 None
@@ -296,7 +303,9 @@ impl State {
                 else {
                     return None;
                 };
-                self.revision += 1;
+                if armed.control != LiveControl::Cover {
+                    self.revision += 1;
+                }
                 if control != Some(armed.control) || self.track_id() != Some(&armed.track_id) {
                     return None;
                 }
@@ -619,15 +628,18 @@ fn media_loop(
                     started.elapsed().as_micros(),
                     if result.is_ok() { "ok" } else { "error" },
                 ));
-                observe_command = match result {
-                    Ok(()) => Some(CommandObservation {
-                        started,
-                        command,
-                        before,
-                    }),
+                match result {
+                    Ok(()) if command != PlaybackCommand::RevealTrack => {
+                        observe_command = Some(CommandObservation {
+                            started,
+                            command,
+                            before,
+                        });
+                    }
+                    Ok(()) => {}
                     Err(error) => {
                         eprintln!("Now Playing command failed: {error}");
-                        None
+                        observe_command = None;
                     }
                 };
             }
@@ -748,7 +760,7 @@ fn render_loop(shared: &Shared, frames: &FrameSender, interval: Duration) {
         let target_revision = state.target_revision;
         let artwork = state.artwork.clone();
         let artwork_revision = state.artwork_revision;
-        let pressed = state.contact.armed().map(|armed| armed.control);
+        let pressed = state.contact.pressed_control();
         let playback = state.playback.clone();
         drop(state);
         let started = Instant::now();
@@ -898,6 +910,36 @@ mod tests {
         );
         state.pointer(down);
         state.pointer(down);
+        assert!(state.pointer(up).is_none());
+    }
+
+    #[test]
+    fn cover_tap_reveals_the_current_track_without_repainting() {
+        let (mut state, mut provider, now) = connected();
+        let down = V2Pointer::new(V2PointerPhase::Down, 160, 35);
+        let up = V2Pointer::new(V2PointerPhase::Up, 160, 35);
+        let revision = state.revision;
+        assert!(state.pointer(up).is_none());
+        assert!(state.pointer(down).is_none());
+        assert!(
+            state
+                .pointer(V2Pointer::new(V2PointerPhase::Up, 5, 35))
+                .is_none()
+        );
+        assert!(state.pointer(down).is_none());
+        assert!(matches!(
+            state.pointer(up),
+            Some(MediaWork::Command {
+                command: PlaybackCommand::RevealTrack,
+                ..
+            })
+        ));
+        assert!(state.pointer(up).is_none());
+        assert_eq!(state.revision, revision);
+
+        state.pointer(down);
+        provider.change(FakeChange::Next, now);
+        state.set_playback(provider.sample_at(now).unwrap(), now);
         assert!(state.pointer(up).is_none());
     }
 

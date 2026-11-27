@@ -345,7 +345,8 @@ evidence.
 Start PaperSpoon with `--now-playing-fake` for development or
 `--now-playing-apple-music` on macOS for Apple Music. With a Gray8 client
 connected, enter `nowplaying start`. Tap **Prev**, **Play/Pause**, **Next**,
-**Shuffle**, **Repeat**, or the progress bar. Enter `nowplaying stop` to
+**Shuffle**, **Repeat**, or the progress bar. Tap the cover to show Apple
+Music on the Mac and reveal the current track when available. Enter `nowplaying stop` to
 return to the application grid. On Kindle, use **Run Paperpad DU (5m)**
 for binary controls and GC16 artwork.
 
