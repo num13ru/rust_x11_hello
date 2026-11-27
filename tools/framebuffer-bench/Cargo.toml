@@ -1,0 +1,22 @@
+[package]
+name = "framebuffer-bench"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[features]
+default = ["scenarios"]
+scenarios = ["dep:image", "dep:paperspoon"]
+
+[dependencies]
+anyhow = "1"
+crc32fast = "1"
+flate2 = { version = "=1.1.10", default-features = false, features = ["rust_backend"] }
+image = { version = "=0.25.8", default-features = false, optional = true }
+libc = "0.2"
+lz4_flex = { version = "=0.14.2", default-features = false, features = ["std", "safe-encode", "safe-decode", "checked-decode"] }
+paper-protocol = { path = "../../crates/paper-protocol" }
+paperspoon = { path = "../paperspoon", optional = true }
+png = "=0.18.1"
+tempfile = "3"
+zstd = { version = "=0.14.5", default-features = false, features = ["rust-backend"] }
