@@ -1,6 +1,6 @@
 -include .env
 
-BUILD_BACKEND ?= container
+BUILD_BACKEND ?= native
 CONTAINER_CLI ?= docker
 CONTAINER_RUN_ARGS ?= --cpus 8 --memory 2g
 CONTAINER_BUILD_ARGS ?=
@@ -19,9 +19,11 @@ CONTAINER_PROXY_RUN_ARGS :=
 CONTAINER_PROXY_WRAPPER :=
 PROXY_ENV_NAMES := http_proxy https_proxy
 
+ifneq ($(filter container,$(BUILD_BACKEND))$(filter image shell _image _ensure-image _build _shell,$(MAKECMDGOALS)),)
 ifneq ($(PROXY),true)
 ifneq ($(PROXY),false)
 $(error PROXY must be true or false)
+endif
 endif
 endif
 
@@ -41,8 +43,9 @@ endif
 
 .PHONY: check
 .PHONY: check-menu
+.PHONY: check-toolchain
 
-check: check-menu
+check: check-menu check-toolchain
 	cargo fmt --all --check
 	cargo check --workspace
 	cargo clippy --workspace --all-targets -- -D warnings
@@ -59,6 +62,14 @@ check: check-menu
 
 check-menu:
 	sh scripts/check-menu.sh "$(MENU_JSON)"
+
+check-toolchain:
+	@native=$$(sed -n 's/.*rust-bin\.stable\."\([0-9][0-9.]*\)"\.minimal.*/\1/p' flake.nix); \
+	container=$$(sed -n 's/^FROM rust:\([0-9][0-9.]*\)-bookworm$$/\1/p' Dockerfile); \
+	if [ -z "$$native" ] || [ "$$native" != "$$container" ]; then \
+		printf 'ERROR: Rust pins in flake.nix (%s) and Dockerfile (%s) must match.\n' "$$native" "$$container" >&2; \
+		exit 1; \
+	fi
 
 .PHONY: image
 .PHONY: _image

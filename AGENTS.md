@@ -6,7 +6,10 @@ steps an agent should follow, especially around physical-device work.
 
 ## Project shape
 
-- Rust binary (`src/`) builds for ARMv7 musl via Docker (`make build`, `make verify`).
+- Rust binary (`src/`) builds for ARMv7 musl in the default Nix shell
+  (`nix develop`, then `make check`, `make build`, and `make verify`). The optional
+  `nix develop .#mbx` shell adds a local compilation cache. Docker and Apple
+  Container remain available via `BUILD_BACKEND=container`.
 - Host artifact: `kindle-extension/rust_x11_hello/bin/rust_x11_hello` (untracked, rebuilt by `make build`).
 - Device extension root: `/extensions/rust_x11_hello` (MTP) = `/mnt/us/extensions/rust_x11_hello` (runtime).
 - KUAL actions **Run Paperpad GC16/DU/A2/DU4 (5m)** use the connected native
@@ -81,8 +84,11 @@ dependencies.
 Prerequisites:
 
 - Kindle unlocked with USB accessory access allowed; `mtp-rs devices` lists it.
-- PaperPad-affecting changes built and verified first:
-  `make check && make build && make verify`.
+- PaperPad-affecting changes built and verified first from the default Nix shell:
+  `make check && make build && make verify`. Use the recorded native build
+  [device evidence](docs/archive/mxcfb-device-evidence.md#native-nix-build-2026-11-27)
+  when checking the baseline. Experimental MBX artifacts require separate,
+  manual physical validation.
 
 ### Agent deployment authorization
 

@@ -7,9 +7,13 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    mbx = {
+      url = "github:jdx/mr-boxington/v1.31.0";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { nixpkgs, rust-overlay, ... }: {
+  outputs = { nixpkgs, rust-overlay, mbx, ... }: {
     devShells = nixpkgs.lib.genAttrs [
       "aarch64-darwin"
       "x86_64-darwin"
@@ -22,9 +26,17 @@
           extensions = [ "rustfmt" "clippy" ];
           targets = [ "armv7-unknown-linux-musleabihf" ];
         };
+        commonPackages = with pkgs; [ rust gnumake bash llvmPackages.llvm file jq python3 ];
+        mbxPackage = mbx.packages.${system}.mbx;
       in {
         default = pkgs.mkShell {
-          packages = with pkgs; [ rust gnumake bash llvmPackages.llvm file jq python3 ];
+          packages = commonPackages;
+        };
+        mbx = pkgs.mkShell {
+          packages = commonPackages ++ [ mbxPackage ];
+          shellHook = ''
+            export PATH="${mbxPackage}/libexec/mbx:$PATH"
+          '';
         };
       });
   };

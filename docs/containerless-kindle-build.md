@@ -1,6 +1,96 @@
-# Containerless Kindle build results
+# Kindle build guide and validation
 
-## Build audit
+## Current workflow
+
+Use `nix develop` for the default native build, or `nix develop .#mbx` to opt
+into Mr Boxington v1.31.0. Both shells supply Rust 1.97.1 with the same ARMv7
+musl libraries and LLVM tools. The MBX shell adds the pinned upstream package
+and puts its `libexec/mbx/cargo` wrapper first on the shell's `PATH`. The
+project's `.cargo/config.toml` continues to select `rust-lld` and static CRT
+linking. Run `command -v cargo rustc`, `cargo -V`, and `mbx doctor` inside the
+MBX shell to check tool discovery. Use `nix develop` if you need plain Cargo.
+
+The [README build commands](../README.md#1-verify-and-build-the-kindle-package)
+cover both native shells and the explicit Docker and Apple Container alternatives.
+The container image uses the Rust 1.97.1 Bookworm tag. Update the pins in
+`flake.nix` and `Dockerfile` together. `make check-toolchain` runs as part of
+`make check`, and changes to `Dockerfile` invalidate the builder image stamp.
+For missing commands or ARM target libraries, enter `nix develop`. For an
+outdated container image, run `make image` with the chosen `CONTAINER_CLI`.
+
+### Cache and cleanup
+
+| Storage | Contents and ownership |
+| --- | --- |
+| `/nix/store` | Toolchains and Nix packages, managed by Nix |
+| Cargo registry under `CARGO_HOME` (usually `~/.cargo`) | Native Cargo dependency downloads |
+| MBX cache | Shared compiler outputs and MBX-managed targets. `mbx doctor` reports the active location. |
+| Repository `target/` | Regular Cargo build outputs and container image stamps |
+| Repository `.cache/cargo/` | Dependency downloads for the container builds, separated by CLI |
+
+Use `mbx stats` for cache reuse, `mbx cache stats` for disk usage, and
+`mbx gc --dry-run` to preview shared cache collection. `mbx clean` clears the
+current checkout's MBX-managed target. `make clean-target` clears the checkout's
+`target/`, which MBX can link to its managed target directory. Plain Cargo
+recreates a local `target/` when you remove that link and build in `nix develop`.
+`make clean` also removes `logs/` and the packaged Kindle binary.
+`make clean-cache` clears `.cache/cargo/`. These Make targets leave the shared
+MBX cache, native Cargo registry, and Nix store in place.
+
+## Native-first validation (2026-11-27)
+
+| Apple Silicon macOS environment | Workspace checks | Kindle build and ELF verification |
+| --- | --- | --- |
+| Nix 2.36.0, plain Cargo | Passed, 301 Rust tests plus script checks | Passed with the default backend and an unavailable container CLI |
+| Nix 2.36.0, MBX v1.31.0 | Passed, same checks | Passed with the default backend. Cargo used `rust-lld` and `+crt-static`. |
+| Docker Desktop 29.9.3 | Host checks run in Nix | Passed |
+| Apple Container 1.7.1 | Host checks run in Nix | Passed with `PROXY=true` |
+
+`nix flake check` passed for Apple Silicon. Linux and Intel macOS were outside
+this run. All four builds used Rust and Cargo 1.97.1 and produced little-endian
+ELF32 Arm v7-A EABI5 hard-float executables. The verifier found no dynamic
+interpreter, shared-library dependencies, or GLIBC versions. Plain Cargo and
+MBX produced identical 1,211,204-byte binaries that matched the recorded
+Paperwhite 6 readback. Docker and Apple Container produced identical
+1,211,120-byte binaries. The recorded hardware run used plain native Cargo.
+[Paperwhite 6 device evidence](archive/mxcfb-device-evidence.md#native-nix-build-2026-11-27)
+
+The MBX shell resolved `cargo` to the upstream wrapper and resolved `rustc`
+and underlying Cargo to the Nix toolchain. `mbx doctor` reported zero failures.
+Its setup warning refers to the global shim. It also reported that the test
+filesystem did not refresh access times, so MBX skipped unused-unit collection
+there. Switching between plain Cargo and MBX worked, and an intentional Rust
+compilation failure preserved the previous package. A rebuild after reverting
+that failure passed ELF verification. PaperSpoon built as a separate macOS
+ARM64 executable, and the Kindle verifier correctly rejected it.
+
+### Local cache measurements
+
+Single wall-clock samples with downloaded dependencies, the same `Cargo.lock`,
+and the default release profile for the ARMv7 musl target. The first MBX shell
+provisioning and diagnostics took about 4 minutes 41 seconds. The plain shell
+was already provisioned.
+
+| Operation | Plain Cargo | MBX |
+| --- | ---: | ---: |
+| Warm Nix shell activation | 0.50 s | 0.98 s |
+| Clean release build | 2.66 s | 5.41 s |
+| Repeated build | 0.17 s | 0.20 s |
+| Build after a comment-only source edit | 0.98 s | 1.03 s |
+| Fresh second checkout | 2.19 s | 2.87 s |
+| ELF verification | 0.06 s | 0.06 s |
+
+`mbx stats` recorded three compiler cache hits in the second checkout. Clearing
+its managed target with `mbx clean` and running `make clean-target` and
+`make build` yielded three more hits in a 2.74 s rebuild. `mbx cache stats`
+reported 35.4 MiB of logical data for two checkouts, including their managed
+targets. Each plain Cargo target directory used 13.5 MiB on disk. The MBX cache
+reused compiler outputs in this run, and plain Cargo had lower wall-clock build
+times in all measured scenarios.
+
+## Original containerless build validation
+
+### Build audit
 
 `cargo tree --locked --target armv7-unknown-linux-musleabihf --package rust_x11_hello`
 resolves `anyhow` 1.0.102, `libc` 0.2.186, and the local `paper-protocol`
@@ -20,7 +110,7 @@ it. Make mounts that checkout at `/work` and a backend-specific dependency
 cache at `/cargo`. MTP deployment reads the canonical extension directory and
 uses independent USB tooling. It does not invoke Cargo or a container.
 
-## Reference build
+### Reference build
 
 An isolated checkout of `aaeaf22` built with Docker Desktop 29.9.3 on Apple
 Silicon using the existing AArch64 Linux builder. Rust and Cargo were both
@@ -35,7 +125,7 @@ information. The binary was 1,208,776 bytes and matched the checkout's
 existing local deployment binary byte for byte. The reference build was kept
 outside the working checkout.
 
-## Native toolchain
+### Native toolchain
 
 The Nix shell pins Rust and Cargo 1.97.1 via `rust-overlay`, along with the
 `armv7-unknown-linux-musleabihf` standard library. Rust's Darwin `rust-lld`
@@ -60,7 +150,7 @@ publishing it. Cargo failure and an injected invalid artifact both left the
 previous binary in place and left no staging file. The isolated native build
 also passed with a custom Cargo target directory containing a space.
 
-## Build matrix
+### Build matrix
 
 | Host | Backend | Result |
 | --- | --- | --- |
@@ -79,7 +169,7 @@ Docker had active workloads, so the native run used failing CLI stubs and an
 invalid Docker socket. Neither stub was invoked, and no container cache or
 image stamp was created during the native run.
 
-## ELF comparison
+### ELF comparison
 
 The reference and native artifacts both reported ELF32 little-endian ARM
 `ET_EXEC`, Arm v7 Application profile, Thumb-2, VFPv3-D16, and EABI5 hard-float
@@ -99,7 +189,7 @@ versions, missing inspectors, and inspector diagnostics. It passed with both
 LLVM and GNU `readelf`. Run it with
 `nix develop -c bash scripts/test-check-static.sh`.
 
-## Build timings
+### Build timings
 
 Three sequential samples per backend on the same Apple Silicon host, shown
 as median wall-clock seconds. All used the release profile, eight Cargo jobs,
@@ -130,7 +220,7 @@ when it could not reach Debian. The build succeeded in 27.63 s using the
 existing restricted proxy. These are one-time provisioning observations under
 different cache and network conditions.
 
-## Physical Kindle validation
+### Physical Kindle validation
 
 The operator verified the deployed native build on a Kindle Paperwhite 6.
 Independent MTP readback matched the native artifact and confirmed that the
@@ -138,6 +228,6 @@ retained rollback matched the previously installed binary. The operator
 reported the overall result. Individual acceptance checks remain unrecorded.
 See the [device evidence](archive/mxcfb-device-evidence.md#native-nix-build-2026-11-27).
 
-The native backend is opt-in on Apple Silicon. The GNU cross-compiler and
-cross-libc packages are candidates for removal from the container image if
-the separate GNU target is retired.
+The native backend became the default after this device validation. The GNU
+cross-compiler and cross-libc packages are candidates for removal from the
+container image if the separate GNU target is retired.
