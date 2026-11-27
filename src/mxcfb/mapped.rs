@@ -103,7 +103,17 @@ impl WritableFramebuffer {
 
     /// Write only the remote rows of a fully prepared frame. All ranges are
     /// checked before the first store. A successful write is not a panel update.
+    #[cfg(test)]
     pub(super) fn write_prepared(&mut self, prepared: &PreparedRemote) -> Result<ScreenRect> {
+        self.write_prepared_region(prepared, prepared.region())?;
+        Ok(prepared.region())
+    }
+
+    pub(super) fn write_prepared_region(
+        &mut self,
+        prepared: &PreparedRemote,
+        region: ScreenRect,
+    ) -> Result<()> {
         ensure!(
             self.matches_spec(prepared.spec()),
             "prepared frame and writable mapping geometry differ"
@@ -112,13 +122,33 @@ impl WritableFramebuffer {
             prepared.mapped_len() == self.len,
             "prepared frame and writable mapping lengths differ"
         );
-        for (offset, row) in prepared.rows() {
-            self.check_range(offset, row.len())?;
+        let full = prepared.region();
+        let x = usize::from(
+            region
+                .x
+                .checked_sub(full.x)
+                .context("region starts before prepared columns")?,
+        );
+        let y = usize::from(
+            region
+                .y
+                .checked_sub(full.y)
+                .context("region starts before prepared rows")?,
+        );
+        let right = x + usize::from(region.width);
+        let height = usize::from(region.height);
+        ensure!(
+            right <= usize::from(full.width) && y + height <= usize::from(full.height),
+            "write region exceeds prepared frame"
+        );
+        let rows = || prepared.rows().skip(y).take(height);
+        for (offset, _) in rows() {
+            self.check_range(offset + x, usize::from(region.width))?;
         }
-        for (offset, row) in prepared.rows() {
-            self.write_at(offset, row)?;
+        for (offset, row) in rows() {
+            self.write_at(offset + x, &row[x..right])?;
         }
-        Ok(prepared.region())
+        Ok(())
     }
 
     /// Fill only an explicitly validated 8-bit benchmark rectangle. All row

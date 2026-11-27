@@ -12,7 +12,7 @@ use crate::ui::screen::ScreenRect;
 #[cfg(test)]
 use super::controller;
 use super::opened::OpenedFramebuffer;
-use super::pixels::prepare_remote;
+use super::pixels::{PreparedRemote, prepare_remote};
 use super::region::remote_frame_region;
 use super::system_pixels::rasterize_system_ui;
 use super::update_abi::UpdateDataMtk;
@@ -78,13 +78,25 @@ pub(super) fn present_remote_region_with_waveform(
     frame: RemoteFrame<'_>,
     region: ScreenRect,
     waveform: MxcfbWaveform,
-    mut submit: impl FnMut(&File, &mut UpdateDataMtk, u32, u32) -> Result<()>,
+    submit: impl FnMut(&File, &mut UpdateDataMtk, u32, u32) -> Result<()>,
 ) -> Result<SubmittedUpdate> {
     let info = &opened.info;
     // Finish conversion and all bounds checks before the first framebuffer
     // store. The update request is also validated before writing pixels.
     let prepared = prepare_remote(frame, info.screen, info.spec, info.mapping_len)
         .context("MXCFB prepare remote frame")?;
+    present_prepared_remote(opened, markers, &prepared, region, waveform, submit)
+}
+
+pub(super) fn present_prepared_remote(
+    opened: &mut OpenedFramebuffer,
+    markers: &mut UpdateMarkerSequence,
+    prepared: &PreparedRemote,
+    region: ScreenRect,
+    waveform: MxcfbWaveform,
+    mut submit: impl FnMut(&File, &mut UpdateDataMtk, u32, u32) -> Result<()>,
+) -> Result<SubmittedUpdate> {
+    let info = &opened.info;
     let region = remote_frame_region(
         info.screen,
         region,
@@ -105,7 +117,7 @@ pub(super) fn present_remote_region_with_waveform(
 
     opened
         .mapping
-        .write_prepared(&prepared)
+        .write_prepared_region(prepared, region)
         .context("MXCFB write remote framebuffer rows")?;
     let marker = request.update_marker;
     submit(
@@ -319,6 +331,14 @@ mod tests {
         )
         .unwrap();
         assert_eq!(submitted.region, dirty);
+        let pixels = opened.mapping.snapshot_visible().unwrap();
+        assert!(pixels[..16].iter().all(|&value| value == 0));
+        assert!(
+            pixels[16..40]
+                .chunks_exact(8)
+                .all(|byte_pixels| { byte_pixels == [0, 255, 255, 255, 255, 255, 255, 255] })
+        );
+        assert!(pixels[40..].iter().all(|&value| value == 0));
     }
 
     #[test]

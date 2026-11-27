@@ -5,12 +5,12 @@
       "priority": 0,
       "items": [
         {
-          "name": "Run Paperpad GC16 (5m)",
-          "action": "PAPERPAD_WATCHDOG_SECONDS=300 PAPERPAD_MXCFB_WAVEFORM=gc16 sh bin/run.sh"
+          "name": "Run Paperpad DU (5m)",
+          "action": "PAPERPAD_WATCHDOG_SECONDS=300 PAPERPAD_MXCFB_WAVEFORM=du sh bin/run.sh"
         },
         {
-          "name": "Run Paperpad DU (5m, experimental)",
-          "action": "PAPERPAD_WATCHDOG_SECONDS=300 PAPERPAD_MXCFB_WAVEFORM=du sh bin/run.sh"
+          "name": "Run Paperpad GC16 (5m)",
+          "action": "PAPERPAD_WATCHDOG_SECONDS=300 PAPERPAD_MXCFB_WAVEFORM=gc16 sh bin/run.sh"
         },
         {
           "name": "Run Paperpad A2 (5m, experimental)",

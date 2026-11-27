@@ -14,7 +14,6 @@ use crate::text_renderer::{
 use paper_protocol::Gray8Frame;
 
 const BLACK: u8 = 0;
-const MID_GRAY: u8 = 128;
 const MAX_RENDERED_TEXT_CHARS: usize = 256;
 
 struct HeaderLayout {
@@ -22,6 +21,7 @@ struct HeaderLayout {
     inner_width: u16,
     artwork_side: u16,
     artwork_y: u16,
+    artwork_gap: u16,
     line_gap: u16,
 }
 
@@ -35,6 +35,7 @@ impl HeaderLayout {
             inner_width,
             artwork_side: inner_width.min(artwork_cap).min(artwork_max).max(1),
             artwork_y: margin.min(height.saturating_sub(1)),
+            artwork_gap: margin,
             line_gap: (margin / 3).clamp(2, 8),
         }
     }
@@ -42,7 +43,7 @@ impl HeaderLayout {
     fn text_start(&self) -> u16 {
         self.artwork_y
             .saturating_add(self.artwork_side)
-            .saturating_add(self.margin)
+            .saturating_add(self.artwork_gap)
     }
 
     fn metadata_height(&self) -> u16 {
@@ -82,7 +83,7 @@ impl NowPlayingRenderer {
             snapshot.artwork.as_ref(),
             Some(state),
             (width, height),
-            height,
+            &HeaderLayout::new(width, height, height),
         )?
         .into_frame()
     }
@@ -93,17 +94,17 @@ impl NowPlayingRenderer {
         artwork: Option<&DynamicImage>,
         state: Option<&str>,
         (width, height): (u16, u16),
-        max_artwork_height: u16,
+        layout: &HeaderLayout,
     ) -> Result<GrayCanvas, String> {
         let mut canvas = GrayCanvas::new(width, height)?;
-        let layout = HeaderLayout::new(width, height, max_artwork_height);
         let HeaderLayout {
             margin,
             inner_width,
             artwork_side,
             artwork_y,
             line_gap,
-        } = layout;
+            ..
+        } = *layout;
         let artwork_x = width.saturating_sub(artwork_side) / 2;
 
         let artwork_rendered = artwork.is_some_and(|artwork| {
@@ -275,7 +276,7 @@ impl NowPlayingRenderer {
                 canvas_height,
             )
             .map_err(|error| format!("failed to rasterize {role:?} text: {error}"))?;
-        canvas.draw_coverage(&raster.mask, luminance);
+        canvas.draw_binary_coverage(&raster.mask, luminance);
         Ok(Some(y.saturating_add(line_height).saturating_add(gap)))
     }
 
@@ -301,7 +302,7 @@ impl NowPlayingRenderer {
             "NO ART",
             TextRole::NowPlayingState,
             HorizontalAlignment::Center,
-            MID_GRAY,
+            BLACK,
             0,
             canvas_width,
             canvas_height,
@@ -340,7 +341,7 @@ impl NowPlayingRenderer {
                 bar_y.saturating_add(1),
                 filled,
                 bar_height - 2,
-                MID_GRAY,
+                BLACK,
             );
         }
 
@@ -406,7 +407,7 @@ impl ControlRect {
 }
 
 pub struct LiveLayout {
-    artwork_max: u16,
+    header: HeaderLayout,
     controls: Option<LiveControls>,
 }
 
@@ -460,19 +461,29 @@ impl LiveLayout {
         } else {
             TextRole::Status
         };
-        let header = HeaderLayout::new(width, height, height);
+        let mut header = HeaderLayout::new(width, height, height);
         let text_height = header.metadata_height()
             + TextRole::NowPlayingState.style().line_height
             + header.line_gap;
         let time_height = text_role.style().line_height;
         let timeline_height = progress_height + time_height;
-        let reserved = header.margin * 2 + text_height + timeline_height + button_height + GAP * 2;
+        let bottom_gap = (short_side / 40).clamp(4, 24);
+        let artwork_gap = header.margin * 4;
+        let reserved = header.margin
+            + artwork_gap
+            + text_height
+            + timeline_height
+            + button_height
+            + GAP * 2
+            + bottom_gap;
         let modes_height = button_height + BUTTON_GAP;
         let show_modes = header.inner_width >= 260 && height > reserved + modes_height;
         let reserved = reserved + if show_modes { modes_height } else { 0 };
         let artwork_max = height.saturating_sub(reserved);
         let controls = (artwork_max > 0 && header.inner_width >= 88).then(|| {
-            let header = HeaderLayout::new(width, height, artwork_max);
+            header.artwork_side = header.artwork_side.min(artwork_max);
+            header.artwork_y += artwork_max - header.artwork_side;
+            header.artwork_gap = artwork_gap;
             let timeline_y = header.text_start() + text_height + GAP;
             let progress = ControlRect {
                 x: header.margin,
@@ -509,14 +520,7 @@ impl LiveLayout {
                 mode_buttons,
             }
         });
-        Self {
-            artwork_max: if controls.is_some() {
-                artwork_max
-            } else {
-                height
-            },
-            controls,
-        }
+        Self { header, controls }
     }
 
     pub fn control_at(&self, x: u16, y: u16) -> Option<LiveControl> {
@@ -611,13 +615,9 @@ impl LiveNowPlayingRenderer {
                 bundle_name: None,
                 artwork: None,
             };
-            let canvas = self.renderer.render_canvas(
-                &snapshot,
-                artwork,
-                None,
-                viewport,
-                layout.artwork_max,
-            )?;
+            let canvas =
+                self.renderer
+                    .render_canvas(&snapshot, artwork, None, viewport, &layout.header)?;
             self.header = Some((header, canvas));
         }
         let mut canvas = self
@@ -627,7 +627,7 @@ impl LiveNowPlayingRenderer {
             .1
             .clone();
         let (width, height) = viewport;
-        let header = HeaderLayout::new(width, height, layout.artwork_max);
+        let header = layout.header;
         self.renderer.draw_line(
             &mut canvas,
             header.margin,
@@ -670,13 +670,10 @@ impl LiveNowPlayingRenderer {
         let bar_y = y + (hit_height - bar_height) / 2;
         let position = playback.position(now);
         let duration = playback.track().and_then(|track| track.duration());
-        let outline = if LiveControl::Seek.enabled(playback) {
-            BLACK
-        } else {
-            MID_GRAY
-        };
-        canvas.outline_rect(x, bar_y, bar_width, bar_height, outline);
-        canvas.outline_rect(x + 1, bar_y + 1, bar_width - 2, bar_height - 2, outline);
+        canvas.outline_rect(x, bar_y, bar_width, bar_height, BLACK);
+        if LiveControl::Seek.enabled(playback) {
+            canvas.outline_rect(x + 1, bar_y + 1, bar_width - 2, bar_height - 2, BLACK);
+        }
         if let Some((position, duration)) = position.zip(duration) {
             let filled = (f64::from(bar_width - 4) * (position / duration)).round() as u16;
             canvas.fill_rect(x + 2, bar_y + 2, filled, bar_height - 4, BLACK);
@@ -707,20 +704,17 @@ impl LiveNowPlayingRenderer {
         }
         let track = playback.track();
         for (control, rect) in controls.buttons() {
-            let background = if control.enabled(playback) {
-                BLACK
-            } else {
-                MID_GRAY
-            };
             let armed = pressed == Some(control);
-            canvas.outline_rect(rect.x, rect.y, rect.width, rect.height, background);
-            canvas.outline_rect(
-                rect.x + 1,
-                rect.y + 1,
-                rect.width - 2,
-                rect.height - 2,
-                background,
-            );
+            canvas.outline_rect(rect.x, rect.y, rect.width, rect.height, BLACK);
+            if control.enabled(playback) {
+                canvas.outline_rect(
+                    rect.x + 1,
+                    rect.y + 1,
+                    rect.width - 2,
+                    rect.height - 2,
+                    BLACK,
+                );
+            }
             if armed {
                 canvas.fill_rect(rect.x, rect.y, rect.width, rect.height, BLACK);
             }
@@ -750,7 +744,7 @@ impl LiveNowPlayingRenderer {
                 label,
                 controls.text_role,
                 HorizontalAlignment::Center,
-                if armed { u8::MAX } else { background },
+                if armed { u8::MAX } else { BLACK },
                 0,
                 width,
                 height,
@@ -894,6 +888,58 @@ mod tests {
         assert_eq!(layout.control_at(last + 1, outline_y), None);
     }
 
+    #[test]
+    fn live_widget_anchors_the_rendered_buttons_and_hit_boxes_above_the_viewport_edge() {
+        let now = Instant::now();
+        let playback = FakeMusic::default().sample_at(now).unwrap();
+        let mut renderer = LiveNowPlayingRenderer::new().unwrap();
+        for (viewport, gap) in [((1272, 1624), 24), ((800, 480), 12), ((240, 420), 6)] {
+            let (width, height) = viewport;
+            let layout = LiveLayout::new(viewport);
+            let (control, button) = layout.controls.as_ref().unwrap().buttons().last().unwrap();
+            let button_bottom = height - gap;
+            assert_eq!(button.y + button.height, button_bottom);
+            let x = button.x + button.width / 2;
+            assert_eq!(layout.control_at(x, button_bottom - 1), Some(control));
+            assert_eq!(layout.control_at(x, button_bottom), None);
+
+            let frame = renderer
+                .render(viewport, &playback, None, 0, None, now)
+                .unwrap();
+            let width = usize::from(width);
+            assert_eq!(
+                frame.pixels()[usize::from(button_bottom - 1) * width + usize::from(x)],
+                BLACK
+            );
+            assert!(
+                frame.pixels()[usize::from(button_bottom) * width..]
+                    .iter()
+                    .all(|&pixel| pixel == u8::MAX)
+            );
+            assert!(
+                frame.pixels()[..usize::from(layout.header.artwork_y) * width]
+                    .iter()
+                    .all(|&pixel| pixel == u8::MAX)
+            );
+            if viewport == (1272, 1624) {
+                assert!(layout.header.artwork_y > layout.header.margin);
+                assert_eq!(
+                    layout.header.artwork_side,
+                    HeaderLayout::new(1272, 1624, 1624).artwork_side
+                );
+                let artwork_bottom = layout.header.artwork_y + layout.header.artwork_side;
+                let title_y = layout.header.text_start();
+                assert_eq!(title_y - artwork_bottom, 96);
+                assert!(
+                    frame.pixels()
+                        [usize::from(artwork_bottom) * width..usize::from(title_y) * width]
+                        .iter()
+                        .all(|&pixel| pixel == u8::MAX)
+                );
+            }
+        }
+    }
+
     fn complete_snapshot(artwork: Option<DynamicImage>) -> NowPlayingSnapshot {
         NowPlayingSnapshot {
             title: "A Track".to_string(),
@@ -921,8 +967,8 @@ mod tests {
     }
 
     #[test]
-    fn complete_track_uses_antialiased_text_in_portrait_gray8() {
-        let artwork = DynamicImage::ImageLuma8(ImageBuffer::from_pixel(8, 4, Luma([u8::MAX])));
+    fn complete_track_uses_binary_ui_and_grayscale_artwork() {
+        let artwork = DynamicImage::ImageLuma8(ImageBuffer::from_pixel(8, 4, Luma([127])));
         let (width, height) = default_now_playing_viewport();
         let frame = render_now_playing(&complete_snapshot(Some(artwork)), width, height)
             .expect("render Now Playing");
@@ -935,11 +981,13 @@ mod tests {
             usize::from(width) * usize::from(height)
         );
         assert!(frame.pixels().contains(&BLACK));
+        assert!(frame.pixels().contains(&127));
+        let layout = HeaderLayout::new(width, height, height);
+        let metadata = usize::from(width) * usize::from(layout.text_start());
         assert!(
-            frame
-                .pixels()
+            frame.pixels()[metadata..]
                 .iter()
-                .any(|&pixel| pixel > BLACK && pixel < u8::MAX)
+                .all(|&pixel| matches!(pixel, 0 | 255))
         );
     }
 
@@ -953,7 +1001,8 @@ mod tests {
             (frame.width(), frame.height(), frame.stride()),
             (321, 479, 321)
         );
-        assert!(frame.pixels().contains(&MID_GRAY));
+        assert!(frame.pixels().contains(&BLACK));
+        assert!(frame.pixels().iter().all(|&pixel| matches!(pixel, 0 | 255)));
     }
 
     #[test]
@@ -1027,7 +1076,7 @@ mod tests {
             .fold(0xcbf2_9ce4_8422_2325_u64, |hash, &byte| {
                 (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
             });
-        assert_eq!(checksum, 0x3f70_9b2f_14d1_f996);
+        assert_eq!(checksum, 0xe911_2b92_5887_a885);
     }
 
     #[test]

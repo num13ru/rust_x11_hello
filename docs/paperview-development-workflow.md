@@ -109,8 +109,8 @@ layout or source pixels:
 - `Home`: recenter the bounded source-pixel pan.
 - `S`: save the current validated source frame as an 8-bit grayscale PNG.
 
-At 1x, 2x, and 4x, inspect antialiased Now Playing text without introducing a
-second font or text-rendering path. When the scaled source exceeds the window,
+At 1x, 2x, and 4x, inspect the binary Now Playing text and grayscale artwork.
+When the scaled source exceeds the window,
 use the arrow keys to reach its edges. The title's pan coordinates make the
 crop explicit.
 
@@ -135,6 +135,9 @@ details, the three playback buttons, and a row for **Shuffle** and
 **Repeat**. The seek bar spans the content width, with elapsed and
 remaining time below it. Smaller viewports may omit the mode controls
 or show only track details.
+
+On the Paperwhite 6 viewport, the widget sits 24 pixels above the
+device-local Exit strip, with 96 pixels between the artwork and title.
 
 | PaperSpoon stdin | Effect |
 | --- | --- |
@@ -196,9 +199,26 @@ reconnecting Gray8 client receives the current view at its negotiated size.
 The PaperSpoon log records acquisition, command, artwork, render, and
 socket-write durations, along with payload size, changed pixels, and the
 bounding area of changed pixels. The logged state change after a command
-describes a subsequent sample consistent with that command. Panel refresh
-and ghosting require observations on the Kindle. Use **Run Paperpad GC16
-(5m)** for this baseline and record any waveform experiments separately.
+describes a subsequent sample consistent with that command. On the Kindle,
+use **Run Paperpad DU (5m)** for the binary UI and grayscale artwork.
+PaperPad selects DU only when both frames' pixels in the update region
+are black or white. Continuous-tone regions and transitions away from
+grayscale use GC16. A progress tick leaves unchanged artwork outside the
+update region.
+
+Use the same fake track and progress interval when comparing the KUAL
+waveforms. Check timer readability, control latency, artwork fidelity,
+and ghosting after several track changes and backward seeks. Compare
+**A2** with **DU** on binary text and controls. **DU4** also accepts exact
+Gray8 levels `85` and `170` in both frames. Evaluate those intermediate
+levels with a separate text sample to judge whether antialiasing helps.
+The device log reports each submitted rectangle and waveform, plus
+marker wait time on waveform switches.
+
+In the earlier full-viewport black/white benchmark, A2 had a 120 ms
+median kernel-timed update versus 156 ms for DU. That measurement used
+serialized solid frames. The Now Playing comparison also needs observed
+text fidelity and ghosting. [Benchmark results](archive/mxcfb-benchmarks.md)
 
 ### Host verification on 2026-11-27
 

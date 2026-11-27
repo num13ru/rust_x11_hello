@@ -13,8 +13,6 @@ mod benchmark;
 #[cfg(target_os = "linux")]
 mod controller;
 #[cfg(any(target_os = "linux", test))]
-mod dirty;
-#[cfg(any(target_os = "linux", test))]
 mod exit_label_bitmap;
 #[cfg(target_os = "linux")]
 mod hwtcon;
@@ -53,6 +51,8 @@ mod update_abi;
 // On non-Linux hosts only its unit tests use these Linux presentation helpers.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 mod pixels;
+#[cfg(any(target_os = "linux", test))]
+mod waveform_policy;
 
 #[cfg(target_os = "linux")]
 pub(crate) use benchmark::{BenchmarkConfig, BenchmarkOutcome, MxcfbBenchmark};
