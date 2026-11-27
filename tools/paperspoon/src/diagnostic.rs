@@ -1,5 +1,6 @@
 //! Explicit stdin commands for host-generated framebuffers.
 
+use paperspoon::now_playing_provider::FakeChange;
 use std::path::PathBuf;
 
 use paper_protocol::{
@@ -165,12 +166,22 @@ impl DiagnosticFrame {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum StdinCommand {
     Frame(DiagnosticFrame),
     Jpeg(PathBuf),
     NowPlaying,
+    LiveNowPlaying(LiveCommand),
     ApplicationFrame { width: u16, height: u16 },
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum LiveCommand {
+    Start,
+    Stop,
+    Status,
+    Refresh,
+    Fake(FakeChange),
 }
 
 pub(crate) fn parse_stdin_command(line: &str) -> Result<StdinCommand, String> {
@@ -179,6 +190,7 @@ pub(crate) fn parse_stdin_command(line: &str) -> Result<StdinCommand, String> {
     }
     let mut parts = line.split_whitespace();
     match parts.next() {
+        Some("nowplaying") => return parse_live_command(parts).map(StdinCommand::LiveNowPlaying),
         Some("ui") => {
             let dimensions = parts
                 .next()
@@ -232,6 +244,30 @@ pub(crate) fn parse_stdin_command(line: &str) -> Result<StdinCommand, String> {
         width,
         height,
     }))
+}
+
+fn parse_live_command(parts: std::str::SplitWhitespace<'_>) -> Result<LiveCommand, String> {
+    let parts: Vec<_> = parts.collect();
+    Ok(match parts.as_slice() {
+        ["start"] => LiveCommand::Start,
+        ["stop"] => LiveCommand::Stop,
+        ["status"] => LiveCommand::Status,
+        ["refresh"] => LiveCommand::Refresh,
+        ["fake", "play"] => LiveCommand::Fake(FakeChange::Play),
+        ["fake", "pause"] => LiveCommand::Fake(FakeChange::Pause),
+        ["fake", "next"] => LiveCommand::Fake(FakeChange::Next),
+        ["fake", "fail"] => LiveCommand::Fake(FakeChange::Fail),
+        ["fake", "recover"] => LiveCommand::Fake(FakeChange::Recover),
+        ["fake", "slow"] => LiveCommand::Fake(FakeChange::Slow),
+        ["fake", "normal"] => LiveCommand::Fake(FakeChange::Normal),
+        ["fake", "seek", position] => {
+            let position = position.parse::<f64>().ok()
+                .filter(|position| position.is_finite() && *position >= 0.0)
+                .ok_or("fake seek requires a finite, nonnegative position in seconds")?;
+            LiveCommand::Fake(FakeChange::Seek(position))
+        }
+        _ => return Err("usage: nowplaying <start|stop|status|refresh|fake play|pause|next|seek SECONDS|fail|recover|slow|normal>".into()),
+    })
 }
 
 fn parse_jpeg_path(line: &str) -> Result<Option<PathBuf>, String> {

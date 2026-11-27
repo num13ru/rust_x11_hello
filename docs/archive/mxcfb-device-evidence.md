@@ -872,3 +872,61 @@ artifact's SHA-256 `bfbf40545347ee4703f256372590d91a9d35d6d14b420334b8f821c714e8
 The retained rollback also matched the binary read back before the update.
 The operator reported the overall device result, with individual acceptance
 checks unrecorded.
+
+## Live Now Playing GC16 baseline (2026-11-27)
+
+On the Paperwhite 6 with firmware 5.17.1.0.4, the independently read-back
+PaperPad binary matched the verified native Nix artifact at SHA-256
+`bfbf40545347ee4703f256372590d91a9d35d6d14b420334b8f821c714e82126`.
+PaperSpoon used its fake provider at a 1,000 ms progress interval over Wi-Fi.
+The native device log recorded 177 Gray8 submissions at `1272×1624`.
+Among 173 timeline updates, the median rectangle was `1172×65`
+(`76,180` pixels). The operator saw a black-gray band blink once per second
+across the progress and timer area and provided a photo of the band.
+
+The Kindle log recorded an exclusive evdev open and a native press and
+release for **Next**. PaperSpoon logged one successful command and a track
+change. Local **Exit** released the input grab, ran framebuffer restoration
+for 2,157,312 bytes, and ended with `STOPPED status=0 reason=process_exit`.
+
+### Compact timeline comparison
+
+The compact seek bar and timers shared one centered row in PaperSpoon.
+A second independent MTP readback matched the same PaperPad binary.
+With the same 1,000 ms interval, the Kindle submitted 19 Gray8 frames in
+GC16. The median of 17 timeline updates was `443×20` pixels (`8,860`
+pixels), 88% smaller than the baseline. Short operator-run DU and A2
+comparisons recorded seven and five timeline updates, respectively,
+with the same median area. These rectangles describe kernel submissions.
+
+All three runs recorded a native touch on local **Exit**, released the
+input grab, submitted framebuffer restoration, and exited with status 0.
+
+### Pixel-based waveform build (2026-11-27)
+
+The native Nix checks and static ARMv7 verification passed before updating
+the Paperwhite 6. Independent MTP readback matched the host binary at
+SHA-256 `16e87ac240b9bd757d5260bcd1a7eb0d8623e60cc0e6a7e80ec026621beb514d`.
+The retained rollback matched the pre-update binary. The menu readback
+matched the host file and lists **Run Paperpad DU (5m)** first.
+
+The operator ran the fake track at the default 1,000 ms interval in DU
+mode. Initial artwork used one GC16 submission at `(190,25) 891×891`.
+The remaining 19 remote submissions used DU. The seek feedback and
+backward seek submitted `(24,1160) 1224×20` and
+`(24,1160) 1224×71`, both below the artwork. The user reported that the
+black-gray flash was gone. Native evdev recorded Play, Pause, seek, and
+local Exit. The runtime released the input grab, restored the framebuffer
+with GC16, and exited with status 0.
+
+The A2 comparison used the same fake track and progress interval. Initial
+artwork again used one GC16 submission, at the same rectangle. The remaining
+31 remote submissions used A2, including six seeks. In both runs, every fast
+rectangle was outside the initial GC16 artwork rectangle. The operator
+confirmed that the artwork stayed steady when seeking. The median device
+write-and-submit time for lower UI regions was 406 µs in DU and 405 µs in
+A2. The runs did not capture visible completion timing or a ghosting
+comparison. Local Exit completed with status 0 in both modes.
+
+The operator also reported a successful visual check in DU mode with
+multiple real Apple Music covers.

@@ -99,6 +99,27 @@ impl GrayCanvas {
     /// `foreground_luminance`. Intermediate values use rounded source-over
     /// blending and remain Gray8 rather than being thresholded.
     pub fn draw_coverage(&mut self, mask: &CoverageMask, foreground_luminance: u8) {
+        self.map_coverage(mask, |destination, coverage| {
+            let destination = u32::from(destination);
+            let foreground = u32::from(foreground_luminance);
+            let alpha = u32::from(coverage);
+            ((destination * (255 - alpha) + foreground * alpha + 127) / 255) as u8
+        });
+    }
+
+    /// Draw a one-bit glyph mask on a Gray8 canvas.
+    pub fn draw_binary_coverage(&mut self, mask: &CoverageMask, foreground_luminance: u8) {
+        debug_assert!(matches!(foreground_luminance, 0 | 255));
+        self.map_coverage(mask, |destination, coverage| {
+            if coverage >= 128 {
+                foreground_luminance
+            } else {
+                destination
+            }
+        });
+    }
+
+    fn map_coverage(&mut self, mask: &CoverageMask, map: impl Fn(u8, u8) -> u8) {
         let (origin_x, origin_y) = mask.origin();
         let (width, height) = mask.dimensions();
         for y in 0..height {
@@ -118,11 +139,7 @@ impl GrayCanvas {
                 }
 
                 let index = usize::from(target_y) * usize::from(self.width) + usize::from(target_x);
-                let destination = u32::from(self.pixels[index]);
-                let foreground = u32::from(foreground_luminance);
-                let alpha = u32::from(coverage);
-                self.pixels[index] =
-                    ((destination * (255 - alpha) + foreground * alpha + 127) / 255) as u8;
+                self.pixels[index] = map(self.pixels[index], coverage);
             }
         }
     }

@@ -109,8 +109,8 @@ layout or source pixels:
 - `Home`: recenter the bounded source-pixel pan.
 - `S`: save the current validated source frame as an 8-bit grayscale PNG.
 
-At 1x, 2x, and 4x, inspect antialiased Now Playing text without introducing a
-second font or text-rendering path. When the scaled source exceeds the window,
+At 1x, 2x, and 4x, inspect the binary Now Playing text and grayscale artwork.
+When the scaled source exceeds the window,
 use the arrow keys to reach its edges. The title's pan coordinates make the
 crop explicit.
 
@@ -124,6 +124,127 @@ An operating-system screenshot is useful for manual inspection but is not a
 canonical source-frame fixture: window scaling, capture, and display color
 management may affect it. Do not commit screenshots containing personal music
 metadata or artwork.
+
+## Live Now Playing
+
+Add `--now-playing-fake` to the PaperSpoon command in Terminal 1 and
+`--interactive` to the PaperView command in Terminal 2. Keep PaperSpoon's
+stdin open and enter `nowplaying start`. The live view needs a client that
+advertises Gray8. The standard `1272x1624` viewport fits artwork, track
+details, the three playback buttons, and a row for **Shuffle** and
+**Repeat**. The seek bar spans the content width, with elapsed and
+remaining time below it. Smaller viewports may omit the mode controls
+or show only track details.
+
+On the Paperwhite 6 viewport, the widget sits 24 pixels above the
+device-local Exit strip, with 96 pixels between the artwork and title.
+
+| PaperSpoon stdin | Effect |
+| --- | --- |
+| `nowplaying status` | Report playback and Gray8 connection state |
+| `nowplaying refresh` | Request a fresh playback sample and artwork |
+| `nowplaying stop` | Stop live updates and restore the grid for a Mono1-capable client |
+| `nowplaying fake play`, `nowplaying fake pause`, `nowplaying fake next` | Simulate a change in the player |
+| `nowplaying fake seek 45` | Simulate an external seek to 45 seconds |
+| `nowplaying fake fail`, `nowplaying fake recover` | Exercise stale playback and recovery |
+| `nowplaying fake slow`, `nowplaying fake normal` | Toggle an 800 ms command delay |
+
+The fixture includes three tracks, long metadata, a delayed artwork response,
+and a stream with unknown duration. Tap the seek bar to see one seek on
+release. A missing duration disables the seek bar. Try pressing a button and
+releasing over the artwork, then repeat with a disconnect between the two
+events. Enter a valid `ui` or `frame` command to leave live mode and show that
+command's output. If a diagnostic fails, its previous displayed pixels stay
+in place. Start live mode again with `nowplaying start`.
+
+Tap **Shuffle** to toggle on or off. **Repeat** cycles through **Off**,
+**All**, and **One**. The buttons display the state reported by the player,
+including changes made directly in Apple Music. A setting that Music
+cannot report disables its button. The fake provider changes the button
+states while keeping its track sequence deterministic.
+
+### Apple Music
+
+Restart PaperSpoon with `--now-playing-apple-music` and keep
+`--no-forward-url` to disable Hammerspoon forwarding for grid actions.
+The Apple Music flag authorizes direct playback commands separately.
+Tap the cover to bring Music to the front and reveal the current track
+where Music supports it. This also works with the cover placeholder.
+Open Music and allow Automation access for the terminal or application
+that launches PaperSpoon. Start playback in Music before testing the
+controls. PaperSpoon polls and controls Music through AppleScript, so
+switching system audio to another app leaves the widget on Music. The
+system-wide `frame nowplaying` snapshot continues to use MediaRemote.
+
+The pinned MediaRemote Perl adapter exposes a system session stream with
+metadata, source identity, position, rate, and artwork. Its playback commands
+target the active system session. The live provider uses Music for both
+acquisition and commands so that controls act on the source shown in the
+widget. Music reports state and position through AppleScript at a nominal
+1× playback rate. Track identity uses Music's persistent ID when available
+and its track ID otherwise. Artwork is limited to JPEG or PNG and cached by
+track identity. Use `nowplaying refresh` if artwork changes for the same
+track. Stopped playback, missing track identity, and stale samples disable
+the controls.
+
+### Refresh and measurement
+
+PaperSpoon polls Music about once per second during playback, every two
+seconds when paused, and at intervals of up to five seconds when stopped,
+unavailable, or failing. It interpolates progress with a monotonic clock.
+Progress refresh defaults to `1000` ms. Select `100`, `250`, `500`, `1000`,
+or `2000` with `--now-playing-progress-ms=VALUE`. Track changes and button
+feedback can publish between progress ticks. Unchanged pixels suppress
+publication, so steady paused playback sends no periodic frames. A
+reconnecting Gray8 client receives the current view at its negotiated size.
+
+The PaperSpoon log records acquisition, command, artwork, render, and
+socket-write durations, along with payload size, changed pixels, and the
+bounding area of changed pixels. The logged state change after a command
+describes a subsequent sample consistent with that command. On the Kindle,
+use **Run Paperpad DU (5m)** for the binary UI and grayscale artwork.
+PaperPad selects DU only when both frames' pixels in the update region
+are black or white. Continuous-tone regions and transitions away from
+grayscale use GC16. A progress tick leaves unchanged artwork outside the
+update region.
+
+Use the same fake track and progress interval when comparing the KUAL
+waveforms. Check timer readability, control latency, artwork fidelity,
+and ghosting after several track changes and backward seeks. Compare
+**A2** with **DU** on binary text and controls. **DU4** also accepts exact
+Gray8 levels `85` and `170` in both frames. Evaluate those intermediate
+levels with a separate text sample to judge whether antialiasing helps.
+The device log reports each submitted rectangle and waveform, plus
+marker wait time on waveform switches.
+
+In the earlier full-viewport black/white benchmark, A2 had a 120 ms
+median kernel-timed update versus 156 ms for DU. That measurement used
+serialized solid frames. The Now Playing comparison also needs observed
+text fidelity and ghosting. [Benchmark results](archive/mxcfb-benchmarks.md)
+
+### Host verification on 2026-11-27
+
+On macOS 26.7.1, PaperView at `1272x1624` showed progress, elapsed and
+remaining time, long-title ellipsis, and delayed artwork. Prev, Play/Pause,
+Next, and tap-to-seek worked with the fake provider. A localhost PPFB test
+covered pause, provider failure and recovery, reconnect, viewport changes,
+a stalled reader, and diagnostic takeover. The Apple Music provider
+acquired playback data and grayscale artwork, and applied a seek while
+Music was paused. The test restored the original position.
+
+Short loopback runs at `1272x1624` used a debug build and the first fake
+track. Each published Gray8 PPFB frame used 2,065,756 bytes.
+
+| Progress interval | Received frames per second |
+| ---: | ---: |
+| 100 ms | 7.43 |
+| 250 ms | 4.17 |
+| 500 ms | 2.10 |
+| 1000 ms | 1.05 |
+| 2000 ms | 0.52 |
+
+Physical Kindle results and operator observations are recorded with the
+[GC16 device evidence](archive/mxcfb-device-evidence.md#live-now-playing-gc16-baseline-2026-11-27).
 
 ## Stop and clean up
 

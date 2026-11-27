@@ -12,9 +12,10 @@ steps an agent should follow, especially around physical-device work.
   Container remain available via `BUILD_BACKEND=container`.
 - Host artifact: `kindle-extension/rust_x11_hello/bin/rust_x11_hello` (untracked, rebuilt by `make build`).
 - Device extension root: `/extensions/rust_x11_hello` (MTP) = `/mnt/us/extensions/rust_x11_hello` (runtime).
-- KUAL actions **Run Paperpad GC16/DU/A2/DU4 (5m)** use the connected native
-  runtime with the selected remote-frame waveform, direct framebuffer output,
-  and exclusive evdev input, without opening X11. Local system UI, startup
+- KUAL actions **Run Paperpad DU/GC16/A2/DU4 (5m)** use the connected native
+  runtime with direct framebuffer output and exclusive evdev input. DU is
+  the default for binary remote pixels, with GC16 for grayscale. GC16 is
+  also available for all remote updates. Local system UI, startup
   clearing, and framebuffer restoration remain GC16 in every mode.
   Stop it from the device-local **Exit** button or let the watchdog end it. A
   first MXCFB

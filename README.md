@@ -30,9 +30,10 @@ Payloads are capped at 16 MiB and validated before becoming authoritative.
 
 PaperSpoon embeds pinned IBM Plex Mono and Inter font assets, so host UI
 rendering does not depend on installed macOS fonts or network access. Mono1
-controls use thresholded IBM Plex Mono; Gray8 Now Playing text uses
-antialiased Inter. PaperPad's device-local Exit label is a baked one-bit IBM
-Plex Mono bitmap; the Kindle binary does not parse or bundle OpenType fonts.
+controls use thresholded IBM Plex Mono. Gray8 Now Playing uses binary
+text alongside grayscale artwork. PaperPad's device-local Exit label is
+a baked one-bit IBM Plex Mono bitmap. The Kindle binary does not parse or
+bundle OpenType fonts.
 Pixel format does not select the Kindle update waveform.
 
 PaperPad retains only a successfully displayed frame. Invalid dimensions,
@@ -162,12 +163,13 @@ mtp-rs rm /extensions/rust_x11_hello/bin/rust_x11_hello.previous --yes
 
 KUAL provides normal run, explicit benchmark, and diagnostic actions:
 
-- **Run Paperpad GC16/DU/A2/DU4 (5m)** — connected native runtime with an
-  explicit remote-frame waveform, direct framebuffer display, exclusive evdev
-  touch, no X11 connection, and a five-minute watchdog. GC16 is the
-  conservative default; DU, A2, and DU4 are experimental fidelity/ghosting
-  tradeoffs. Local system UI, startup clearing, and framebuffer restoration
-  remain GC16 in every mode.
+- **Run Paperpad DU (5m)** uses DU for binary pixel transitions and GC16
+  for grayscale. **Run Paperpad GC16 (5m)** uses GC16 for all remote
+  updates. The experimental **A2** and **DU4** runs use those waveforms
+  where pixel levels qualify and fall back to GC16 elsewhere. All runs
+  use direct framebuffer output, exclusive evdev input, and a five-minute
+  watchdog. The local system strip, startup clearing, and framebuffer
+  restoration use GC16.
 - **Test MXCFB TERM cleanup (15s)** — normal MXCFB runtime with a short
   watchdog for verifying graceful `TERM`, framebuffer restoration, and clean
   process exit; it is not a benchmark.
@@ -218,7 +220,7 @@ Other runtime overrides are:
 
 | Variable | Meaning |
 | --- | --- |
-| `PAPERPAD_MXCFB_WAVEFORM=gc16\|du\|a2\|du4` | Normal runtime remote-frame waveform; defaults to GC16 |
+| `PAPERPAD_MXCFB_WAVEFORM=gc16\|du\|a2\|du4` | Remote update policy. Defaults to `du` with GC16 for grayscale |
 | `PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=gc16\|du\|a2\|du4` | Explicit benchmark waveform; defaults to GC16 |
 | `PAPERPAD_MXCFB_BENCHMARK_FRAMES=2..120` | Completed benchmark samples; defaults to 8 |
 | `PAPERPAD_MXCFB_BENCHMARK_REGION=full\|WIDTHxHEIGHT` | Centered benchmark region inside the remote viewport; defaults to full |
@@ -238,9 +240,9 @@ PaperPad has no X11 source modules or client dependencies. The historical
 `rust_x11_hello` package and extension names remain for deployment
 compatibility; they are not runtime dependencies.
 
-MXCFB startup requires the tested framebuffer layout and HWTCON capabilities;
-unsupported devices fail during initialization. Both formats currently use the
-GC16 update path. The native runtime derives fixed geometry from `/dev/fb0`,
+MXCFB startup requires the tested framebuffer layout and HWTCON capabilities.
+PaperPad compares both frames' pixel values and can submit separate waveform
+updates within one viewport. The native runtime derives fixed geometry from `/dev/fb0`,
 uses exclusive evdev input, and opens no X11 connection. Direct framebuffer
 output, native touch, local Exit, Gray8, JPEG, and Apple Music Now Playing have
 been observed on the documented Paperwhite 6. Subsequent
@@ -334,9 +336,24 @@ and Perl adapter after each invocation.
 
 Successful JPEG and Now Playing results retain their rendered pixels for a
 matching reconnect instead of reopening the file or reacquiring system state.
-See [the Now Playing design and validation record](docs/frame-nowplaying-via-MediaRemote.md)
+See [the Now Playing design and validation record](docs/archive/frame-nowplaying-via-MediaRemote.md)
 for acquisition limits, lifecycle details, tests, and the exact host/device
 evidence.
+
+### Live Now Playing
+
+Start PaperSpoon with `--now-playing-fake` for development or
+`--now-playing-apple-music` on macOS for Apple Music. With a Gray8 client
+connected, enter `nowplaying start`. Tap **Prev**, **Play/Pause**, **Next**,
+**Shuffle**, **Repeat**, or the progress bar. Tap the cover to show Apple
+Music on the Mac and reveal the current track when available. Enter `nowplaying stop` to
+return to the application grid. On Kindle, use **Run Paperpad DU (5m)**
+for binary controls and GC16 artwork.
+
+Apple Music must be running, and macOS must allow the launching application
+to control Music under **Privacy & Security → Automation**. See the
+[live Now Playing workflow](docs/paperview-development-workflow.md#live-now-playing)
+for commands, refresh settings, and testing conditions.
 
 ## Touch and Mac actions
 

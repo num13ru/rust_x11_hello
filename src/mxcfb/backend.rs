@@ -9,14 +9,15 @@ use anyhow::{Context, Result, bail};
 use crate::display::{RemoteFrame, RemoteFrameCache};
 
 use super::controller;
-use super::dirty::changed_region;
 use super::opened::OpenedFramebuffer;
+use super::pixels::prepare_remote;
 use super::present::{
-    present_remote_region_with_waveform, present_remote_with_waveform, present_system_ui_with,
+    present_prepared_remote, present_remote_with_waveform, present_system_ui_with,
 };
 use super::update_abi::UpdateDataMtk;
 use super::update_marker::UpdateMarkerSequence;
 use super::update_request::{MxcfbWaveform, next_full_screen_gc16_request, next_remote_request};
+use super::waveform_policy::{PreviousPixels, plan_updates};
 
 type SubmitUpdate = fn(&File, &mut UpdateDataMtk, u32, u32) -> Result<()>;
 type WaitUpdate = fn(&File, u32) -> Result<()>;
@@ -31,6 +32,8 @@ pub(crate) struct MxcfbDisplayBackend {
     submit_update: SubmitUpdate,
     wait_update: WaitUpdate,
     remote_waveform: MxcfbWaveform,
+    remote_pixels_known: bool,
+    last_remote_update: Option<(MxcfbWaveform, u32)>,
     initial_screen: Option<Vec<u8>>,
     screen_modified: bool,
     startup_refresh_at: Option<Instant>,
@@ -85,6 +88,8 @@ impl MxcfbDisplayBackend {
             wait_update,
             remote_waveform,
             initial_screen: Some(initial_screen),
+            remote_pixels_known: false,
+            last_remote_update: None,
             screen_modified: false,
             startup_refresh_at: None,
             last_connected: None,
@@ -94,6 +99,9 @@ impl MxcfbDisplayBackend {
     fn restore_initial_screen(&mut self) -> Result<()> {
         if !self.screen_modified {
             return Ok(());
+        }
+        if let Err(error) = self.wait_on_waveform_change(MxcfbWaveform::Gc16) {
+            eprintln!("mxcfb cleanup could not wait for previous remote update: {error:#}");
         }
         let snapshot = self
             .initial_screen
@@ -130,6 +138,7 @@ impl MxcfbDisplayBackend {
         );
         self.screen_modified = false;
         self.initial_screen = None;
+        self.last_remote_update = None;
         Ok(())
     }
 
@@ -156,6 +165,8 @@ impl MxcfbDisplayBackend {
             info.spec.visible_height,
         )
         .context("submit full MXCFB startup clear update")?;
+        self.remote_pixels_known = true;
+        self.last_remote_update = Some((MxcfbWaveform::Gc16, marker));
         eprintln!(
             "mxcfb startup remote viewport cleared value=0xff marker={} region=({},{} {}x{})",
             marker,
@@ -168,6 +179,13 @@ impl MxcfbDisplayBackend {
     }
 
     fn present_cached_remote(&mut self, reason: &str) -> Result<bool> {
+        // Startup reassertion recovers from a possible write by the Kindle UI.
+        // The prior panel pixels are unknown, so use GC16.
+        let waveform = MxcfbWaveform::Gc16;
+        if self.remote_frame_cache.current().is_none() {
+            return Ok(false);
+        }
+        self.wait_on_waveform_change(waveform)?;
         let Some(cached) = self.remote_frame_cache.current() else {
             return Ok(false);
         };
@@ -188,9 +206,11 @@ impl MxcfbDisplayBackend {
             &mut self.opened,
             &mut self.markers,
             frame,
-            self.remote_waveform,
+            waveform,
             self.submit_update,
         )?;
+        self.remote_pixels_known = true;
+        self.last_remote_update = Some((waveform, submitted.marker));
         eprintln!(
             "mxcfb cached frame submitted id={} format={:?} marker={} region=({},{} {}x{}) reason={reason}",
             frame.frame_id(),
@@ -202,6 +222,23 @@ impl MxcfbDisplayBackend {
             submitted.region.height
         );
         Ok(true)
+    }
+
+    fn wait_on_waveform_change(&self, waveform: MxcfbWaveform) -> Result<()> {
+        if let Some((previous, marker)) = self.last_remote_update
+            && previous != waveform
+        {
+            let started = Instant::now();
+            (self.wait_update)(&self.opened.file, marker)
+                .context("wait for previous MXCFB waveform")?;
+            eprintln!(
+                "mxcfb waveform transition from={} to={} marker={marker} wait_us={}",
+                previous.name(),
+                waveform.name(),
+                started.elapsed().as_micros()
+            );
+        }
+        Ok(())
     }
 }
 
@@ -228,23 +265,28 @@ impl MxcfbDisplayBackend {
             return;
         }
 
-        let previous = self
-            .remote_frame_cache
-            .current()
-            .filter(|cached| {
-                cached.dimensions() == (frame.width(), frame.height())
-                    && cached.pixel_format() == frame.pixel_format()
-                    && cached.stride() == frame.stride()
-            })
-            .map(|cached| cached.payload().as_slice());
-        let dirty = changed_region(
-            frame.width(),
-            frame.height(),
-            frame.pixel_format(),
-            frame.stride(),
-            previous,
-            frame.pixels(),
-        );
+        let previous = if !self.remote_pixels_known {
+            PreviousPixels::Unknown
+        } else if let Some(cached) = self.remote_frame_cache.current() {
+            let (width, height) = cached.dimensions();
+            match RemoteFrame::new(
+                cached.frame_id(),
+                width,
+                height,
+                cached.pixel_format(),
+                cached.stride(),
+                cached.payload(),
+                0,
+            ) {
+                Ok(cached) if (width, height) == (frame.width(), frame.height()) => {
+                    PreviousPixels::Frame(cached)
+                }
+                _ => PreviousPixels::Unknown,
+            }
+        } else {
+            PreviousPixels::White
+        };
+        let updates = plan_updates(previous, frame, self.remote_waveform);
 
         // Reserve the cache payload before presentation. After a successful
         // kernel submission, cache replacement itself cannot fail to allocate.
@@ -258,30 +300,57 @@ impl MxcfbDisplayBackend {
         }
         cached_pixels.extend_from_slice(frame.pixels());
 
-        let Some(dirty) = dirty else {
-            self.remote_frame_cache.replace(frame, cached_pixels);
+        if updates.is_empty() {
             eprintln!(
                 "mxcfb frame unchanged id={} format={:?} cache=updated receive_decode_us={}",
                 frame.frame_id(),
                 frame.pixel_format(),
                 frame.receive_decode_us()
             );
-            return;
-        };
-
-        self.screen_modified = true;
-        match present_remote_region_with_waveform(
-            &mut self.opened,
-            &mut self.markers,
-            frame,
-            dirty,
-            self.remote_waveform,
-            self.submit_update,
-        ) {
-            Ok(submitted) => {
-                self.remote_frame_cache.replace(frame, cached_pixels);
+        } else {
+            let info = &self.opened.info;
+            let prepared = match prepare_remote(frame, info.screen, info.spec, info.mapping_len) {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    eprintln!(
+                        "mxcfb frame preparation failed id={}: {error:#}",
+                        frame.frame_id()
+                    );
+                    return;
+                }
+            };
+            self.screen_modified = true;
+            for update in updates {
+                let started = Instant::now();
+                let result = self
+                    .wait_on_waveform_change(update.waveform)
+                    .and_then(|()| {
+                        present_prepared_remote(
+                            &mut self.opened,
+                            &mut self.markers,
+                            &prepared,
+                            update.region,
+                            update.waveform,
+                            self.submit_update,
+                        )
+                    });
+                let submitted = match result {
+                    Ok(submitted) => submitted,
+                    Err(error) => {
+                        // A partial presentation or a rejected request leaves the panel
+                        // unsuitable for a diff against the last accepted frame.
+                        self.remote_pixels_known = false;
+                        eprintln!(
+                            "mxcfb frame failed id={} format={:?}: {error:#}",
+                            frame.frame_id(),
+                            frame.pixel_format()
+                        );
+                        return;
+                    }
+                };
+                self.last_remote_update = Some((update.waveform, submitted.marker));
                 eprintln!(
-                    "mxcfb frame submitted id={} format={:?} stride={} bytes={} marker={} region=({},{} {}x{}) cache=updated receive_decode_us={}",
+                    "mxcfb frame submitted id={} format={:?} stride={} bytes={} marker={} region=({},{} {}x{}) waveform={} receive_decode_us={} present_us={}",
                     frame.frame_id(),
                     frame.pixel_format(),
                     frame.stride(),
@@ -291,15 +360,14 @@ impl MxcfbDisplayBackend {
                     submitted.region.y,
                     submitted.region.width,
                     submitted.region.height,
-                    frame.receive_decode_us()
+                    update.waveform.name(),
+                    frame.receive_decode_us(),
+                    started.elapsed().as_micros()
                 );
             }
-            Err(error) => eprintln!(
-                "mxcfb frame failed id={} format={:?}: {error:#}",
-                frame.frame_id(),
-                frame.pixel_format()
-            ),
         }
+        self.remote_frame_cache.replace(frame, cached_pixels);
+        self.remote_pixels_known = true;
     }
 
     pub(crate) fn draw_system_ui(&mut self, connected: bool) -> Result<()> {
@@ -371,7 +439,7 @@ fn waveform_from_env() -> Result<MxcfbWaveform> {
 
 fn parse_waveform(value: Option<&str>) -> Result<MxcfbWaveform> {
     match value {
-        None => Ok(MxcfbWaveform::Gc16),
+        None => Ok(MxcfbWaveform::Du),
         Some(name) => MxcfbWaveform::from_name(name).with_context(|| {
             format!("invalid {WAVEFORM_ENV}={name:?}; expected gc16, du, a2, or du4")
         }),
@@ -398,8 +466,8 @@ mod tests {
     use crate::ui::screen::ScreenLayout;
 
     #[test]
-    fn runtime_waveform_defaults_to_gc16_and_accepts_supported_modes() {
-        assert_eq!(parse_waveform(None).unwrap(), MxcfbWaveform::Gc16);
+    fn runtime_waveform_defaults_to_du_and_accepts_supported_modes() {
+        assert_eq!(parse_waveform(None).unwrap(), MxcfbWaveform::Du);
         for (name, expected) in [
             ("gc16", MxcfbWaveform::Gc16),
             ("du", MxcfbWaveform::Du),
@@ -476,6 +544,50 @@ mod tests {
 
     fn accept_wait(_: &File, _: u32) -> Result<()> {
         Ok(())
+    }
+
+    #[test]
+    fn rejected_fast_update_after_grayscale_recovers_with_full_gc16() {
+        use paper_protocol::PixelFormat;
+
+        let mut backend = fake_backend(accept_update);
+        backend.remote_waveform = MxcfbWaveform::Du;
+        backend.clear_remote_viewport().unwrap();
+        let white = [255; 64];
+        backend.display_remote_frame(
+            RemoteFrame::new(1, 64, 1, PixelFormat::Gray8, 64, &white, 0).unwrap(),
+        );
+        let mut mixed = white;
+        mixed[2] = 80;
+        mixed[60] = 0;
+        backend.submit_update = |_, request, _, _| {
+            if request.update_region.left == 60 {
+                anyhow::bail!("simulated fast update rejection");
+            }
+            assert_eq!(request.update_region.left, 2);
+            assert_eq!(request.update_region.width, 1);
+            Ok(())
+        };
+        backend.display_remote_frame(
+            RemoteFrame::new(2, 64, 1, PixelFormat::Gray8, 64, &mixed, 0).unwrap(),
+        );
+        assert!(!backend.remote_pixels_known);
+        assert_eq!(backend.remote_frame_cache.current().unwrap().frame_id(), 1);
+        let gray_marker = backend.last_remote_update.unwrap();
+        assert_eq!(gray_marker.0, MxcfbWaveform::Gc16);
+
+        backend.submit_update = |_, request, _, _| {
+            assert_eq!(request.update_region.left, 0);
+            assert_eq!(request.update_region.width, 64);
+            Ok(())
+        };
+        backend.display_remote_frame(
+            RemoteFrame::new(3, 64, 1, PixelFormat::Gray8, 64, &white, 0).unwrap(),
+        );
+        assert!(backend.remote_pixels_known);
+        assert_eq!(backend.remote_frame_cache.current().unwrap().frame_id(), 3);
+        backend.submit_update = accept_update;
+        backend.shutdown().unwrap();
     }
 
     #[test]
