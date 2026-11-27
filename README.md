@@ -334,9 +334,23 @@ and Perl adapter after each invocation.
 
 Successful JPEG and Now Playing results retain their rendered pixels for a
 matching reconnect instead of reopening the file or reacquiring system state.
-See [the Now Playing design and validation record](docs/frame-nowplaying-via-MediaRemote.md)
+See [the Now Playing design and validation record](docs/archive/frame-nowplaying-via-MediaRemote.md)
 for acquisition limits, lifecycle details, tests, and the exact host/device
 evidence.
+
+### Live Now Playing
+
+Start PaperSpoon with `--now-playing-fake` for development or
+`--now-playing-apple-music` on macOS for Apple Music. With a Gray8 client
+connected, enter `nowplaying start`. Tap **Prev**, **Play/Pause**, **Next**,
+**Shuffle**, **Repeat**, or the progress bar. Enter `nowplaying stop` to
+return to the application grid. On Kindle, use **Run Paperpad GC16 (5m)**
+for the baseline waveform.
+
+Apple Music must be running, and macOS must allow the launching application
+to control Music under **Privacy & Security → Automation**. See the
+[live Now Playing workflow](docs/paperview-development-workflow.md#live-now-playing)
+for commands, refresh settings, and testing conditions.
 
 ## Touch and Mac actions
 

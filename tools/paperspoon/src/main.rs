@@ -42,11 +42,13 @@ mod discovery;
 mod image_frame;
 mod inbound;
 mod latency;
+mod live_now_playing;
 mod server;
 
-use diagnostic::{DiagnosticFrame, StdinCommand, parse_stdin_command};
+use diagnostic::{DiagnosticFrame, LiveCommand, StdinCommand, parse_stdin_command};
 use image_frame::decode_jpeg_path_fit_contain;
 use inbound::{SessionMessage, read_session_hello, read_session_message};
+use live_now_playing::{LiveNowPlaying, ProviderKind};
 use server::{CurrentConnection, FrameForward, FrameTarget, FrameTargetError};
 
 /// Default TCP port. Must match `rust_x11_hello`'s `COMPANION_PORT`.
@@ -64,18 +66,41 @@ struct Options {
     latency_log_path: String,
     /// None means URL forwarding is disabled.
     forward_url: bool,
+    live_provider: Option<ProviderKind>,
+    progress_interval: Duration,
 }
 
-fn parse_options(args: &[String]) -> Options {
+fn parse_options(args: &[String]) -> Result<Options, String> {
     let mut port = DEFAULT_PORT;
     let mut log_path = DEFAULT_LOG_FILE.to_string();
     let mut latency_log_path = DEFAULT_LATENCY_LOG_FILE.to_string();
     let mut forward_url = FORWARD_TO_HAMMERSPOON;
+    let mut live_provider = None;
+    let mut progress_interval = Duration::from_secs(1);
     let positional = args.iter().skip(1);
     for arg in positional {
         match arg.as_str() {
             "--no-forward-url" => {
                 forward_url = false;
+            }
+            "--now-playing-fake" | "--now-playing-apple-music" => {
+                let provider = if arg == "--now-playing-fake" {
+                    ProviderKind::Fake
+                } else {
+                    ProviderKind::AppleMusic
+                };
+                if live_provider.is_some_and(|selected| selected != provider) {
+                    return Err("choose one Now Playing provider".into());
+                }
+                live_provider = Some(provider);
+            }
+            value if value.starts_with("--now-playing-progress-ms=") => {
+                let interval = value["--now-playing-progress-ms=".len()..]
+                    .parse::<u64>()
+                    .ok()
+                    .filter(|interval| matches!(interval, 100 | 250 | 500 | 1000 | 2000))
+                    .ok_or("--now-playing-progress-ms expects 100, 250, 500, 1000, or 2000")?;
+                progress_interval = Duration::from_millis(interval);
             }
             value if value.starts_with("--latency-log=") => {
                 if let Some(path) = value.strip_prefix("--latency-log=")
@@ -99,12 +124,14 @@ fn parse_options(args: &[String]) -> Options {
             }
         }
     }
-    Options {
+    Ok(Options {
         port,
         log_path,
         latency_log_path,
         forward_url,
-    }
+        live_provider,
+        progress_interval,
+    })
 }
 
 /// Forward one action line to Hammerspoon via `open -g hammerspoon://`.
@@ -177,6 +204,7 @@ struct FrameSender {
 
 struct FrameSenderState {
     next_frame_id: u64,
+    live_active: bool,
     authoritative: Option<AuthoritativeFrame>,
     last_application_frame: Option<Mono1Frame>,
     application_renderer: Option<ApplicationRenderer>,
@@ -256,11 +284,16 @@ impl FrameSender {
             current,
             state: Arc::new(Mutex::new(FrameSenderState {
                 next_frame_id: 1,
+                live_active: false,
                 authoritative: None,
                 last_application_frame: None,
                 application_renderer: None,
             })),
         }
+    }
+
+    fn set_live_active(&self, active: bool) {
+        self.state.lock().expect("frame sender lock").live_active = active;
     }
 
     #[cfg(test)]
@@ -425,12 +458,39 @@ impl FrameSender {
         Ok(sent.map(|sent| SentNowPlaying { sent, viewport }))
     }
 
+    fn send_live_frame(
+        &self,
+        frame: &Gray8Frame,
+        target: &FrameTarget,
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<Option<SentFrame>, String> {
+        let mut state = self.state.lock().expect("frame sender lock");
+        if !state.live_active || cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            return Ok(None);
+        }
+        let sent = self.send_locked(
+            &mut state,
+            PixelFormat::Gray8,
+            Some(target),
+            |id| encode_v2_frame(id, frame).map_err(|error| error.to_string()),
+            None,
+        )?;
+        if sent.is_some() {
+            state.authoritative = None;
+            state.last_application_frame = None;
+        }
+        Ok(sent)
+    }
+
     fn send_application(
         &self,
         ui: &ApplicationUi,
         viewport: (u16, u16),
     ) -> Result<ApplicationSend, String> {
         let mut state = self.state.lock().expect("frame sender lock");
+        if state.live_active && self.current.frame_target(PixelFormat::Gray8).is_ok() {
+            return Ok(ApplicationSend::Unchanged);
+        }
         self.send_application_locked(&mut state, ui, viewport, true)
     }
 
@@ -483,6 +543,9 @@ impl FrameSender {
         viewport: (u16, u16),
     ) -> Result<Option<SentFrame>, String> {
         let mut state = self.state.lock().expect("frame sender lock");
+        if state.live_active && self.current.frame_target(PixelFormat::Gray8).is_ok() {
+            return Ok(None);
+        }
         state.last_application_frame = None;
         match self.send_application_locked(&mut state, ui, viewport, false)? {
             ApplicationSend::Sent(sent) => Ok(Some(sent)),
@@ -500,6 +563,9 @@ impl FrameSender {
         pixel_formats: V2PixelFormats,
     ) -> Result<Option<HelloFrame>, String> {
         let mut state = self.state.lock().expect("frame sender lock");
+        if state.live_active && pixel_formats.supports(PixelFormat::Gray8) {
+            return Ok(None);
+        }
         let retained = state
             .authoritative
             .as_ref()
@@ -609,7 +675,8 @@ fn main() -> io::Result<()> {
         let height = parse_dimension(&args[3], "height")?;
         paperspoon::now_playing::run_helper(width, height);
     }
-    let opts = parse_options(&args);
+    let opts =
+        parse_options(&args).map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
     latency::init(&opts.latency_log_path);
 
     let listener = TcpListener::bind(("0.0.0.0", opts.port))?;
@@ -642,10 +709,34 @@ fn main() -> io::Result<()> {
 
     let current = CurrentConnection::default();
     let frame_sender = FrameSender::new(current.clone());
+    let live = Arc::new(LiveNowPlaying::new(
+        frame_sender.clone(),
+        opts.live_provider,
+        opts.progress_interval,
+        opts.log_path.clone(),
+    ));
+    #[cfg(target_os = "macos")]
+    if opts.live_provider.is_some() {
+        let mut signals = signal_hook::iterator::Signals::new([
+            signal_hook::consts::SIGINT,
+            signal_hook::consts::SIGTERM,
+        ])?;
+        let live = Arc::clone(&live);
+        std::thread::Builder::new()
+            .name("paperspoon-shutdown".to_string())
+            .spawn(move || {
+                if let Some(signal) = signals.forever().next() {
+                    live.shutdown();
+                    std::process::exit(128 + signal);
+                }
+            })?;
+    }
+    println!("type 'nowplaying <start|stop|status|refresh>' for live Now Playing");
     let (application_viewport_tx, application_viewport_rx) = mpsc::channel();
 
     let _stdin_worker = {
         let frame_sender = frame_sender.clone();
+        let live = Arc::clone(&live);
         let log_path = opts.log_path.clone();
         std::thread::Builder::new()
             .name("paperspoon-stdin".to_string())
@@ -664,7 +755,45 @@ fn main() -> io::Result<()> {
                     if line.is_empty() {
                         continue;
                 }
-                match parse_stdin_command(line) {
+                let command = parse_stdin_command(line);
+                if matches!(command, Ok(StdinCommand::Frame(_) | StdinCommand::Jpeg(_) | StdinCommand::NowPlaying | StdinCommand::ApplicationFrame { .. })) {
+                    live.stop();
+                }
+                match command {
+                    Ok(StdinCommand::LiveNowPlaying(command)) => {
+                        let result = match command {
+                            LiveCommand::Start => live.start().map(|()| {
+                                if live.connection_changed() {
+                                    let _ = application_viewport_tx.send(None);
+                                }
+                                println!("{}", live.status());
+                            }),
+                            LiveCommand::Stop => {
+                                if live.stop() && let Ok(target) = frame_sender.current.frame_target(PixelFormat::Mono1) {
+                                    let viewport = target.viewport();
+                                    match frame_sender.send_application(&application_ui, viewport) {
+                                        Ok(ApplicationSend::Sent(_) | ApplicationSend::Unchanged) => {
+                                            let _ = application_viewport_tx.send(Some(viewport));
+                                        }
+                                        Ok(ApplicationSend::NoConnection) => {}
+                                        Err(error) => eprintln!("applying grid after Now Playing stop: {error}"),
+                                    }
+                                }
+                                println!("{}", live.status());
+                                Ok(())
+                            }
+                            LiveCommand::Status => {
+                                println!("{}", live.status());
+                                Ok(())
+                            }
+                            LiveCommand::Refresh => live.refresh(),
+                            LiveCommand::Fake(change) => live.fake(change),
+                        };
+                        if let Err(error) = result {
+                            eprintln!("Now Playing command: {error}");
+                        }
+                        flush_stdout("after live Now Playing command");
+                    }
                     Ok(StdinCommand::Frame(frame)) => {
                         match frame_sender.send_diagnostic(frame) {
                             Ok(Some(sent)) => {
@@ -773,6 +902,7 @@ fn main() -> io::Result<()> {
                         Err(error) => eprintln!("stdin command error: {error}"),
                     }
                 }
+                live.stop();
             })?
     };
 
@@ -841,45 +971,47 @@ fn main() -> io::Result<()> {
         let mut reported_viewport = (hello.viewport_width(), hello.viewport_height());
         let mut application_input = ApplicationInput::default();
         let mut rendered_application_viewport = None;
-        match replace_hello_frame(
-            &frame_sender,
-            &mut application_ui,
-            &mut application_input,
-            &mut rendered_application_viewport,
-            reported_viewport,
-            hello.pixel_formats(),
-        ) {
-            Ok(Some(hello_frame)) => {
-                let sent = hello_frame.sent;
-                let (kind, pattern) = match hello_frame.frame {
-                    AuthoritativeFrame::Application { .. } => ("application", String::new()),
-                    AuthoritativeFrame::Diagnostic(frame) => {
-                        ("diagnostic", format!(" pattern={}", frame.pattern_name()))
+        if !live.connection_changed() {
+            match replace_hello_frame(
+                &frame_sender,
+                &mut application_ui,
+                &mut application_input,
+                &mut rendered_application_viewport,
+                reported_viewport,
+                hello.pixel_formats(),
+            ) {
+                Ok(Some(hello_frame)) => {
+                    let sent = hello_frame.sent;
+                    let (kind, pattern) = match hello_frame.frame {
+                        AuthoritativeFrame::Application { .. } => ("application", String::new()),
+                        AuthoritativeFrame::Diagnostic(frame) => {
+                            ("diagnostic", format!(" pattern={}", frame.pattern_name()))
+                        }
+                        AuthoritativeFrame::Jpeg(_) => ("jpeg", String::new()),
+                        AuthoritativeFrame::NowPlaying(_) => ("nowplaying", String::new()),
+                    };
+                    let record = format!(
+                        "sent {kind} frame id={}{pattern} width={} height={} bytes={} encode_us={} socket_write_us={} source=hello retained={}",
+                        sent.frame_id,
+                        reported_viewport.0,
+                        reported_viewport.1,
+                        sent.encoded_len,
+                        sent.encode_elapsed.as_micros(),
+                        sent.socket_write_elapsed.as_micros(),
+                        hello_frame.retained
+                    );
+                    println!("{record}");
+                    flush_stdout("after automatic hello frame");
+                    if let Err(error) = write_log_record(&mut file, &peer.to_string(), &record) {
+                        eprintln!("frame log error: {error}");
                     }
-                    AuthoritativeFrame::Jpeg(_) => ("jpeg", String::new()),
-                    AuthoritativeFrame::NowPlaying(_) => ("nowplaying", String::new()),
-                };
-                let record = format!(
-                    "sent {kind} frame id={}{pattern} width={} height={} bytes={} encode_us={} socket_write_us={} source=hello retained={}",
-                    sent.frame_id,
-                    reported_viewport.0,
-                    reported_viewport.1,
-                    sent.encoded_len,
-                    sent.encode_elapsed.as_micros(),
-                    sent.socket_write_elapsed.as_micros(),
-                    hello_frame.retained
-                );
-                println!("{record}");
-                flush_stdout("after automatic hello frame");
-                if let Err(error) = write_log_record(&mut file, &peer.to_string(), &record) {
-                    eprintln!("frame log error: {error}");
                 }
-            }
-            Ok(None) => {
-                eprintln!("automatic hello frame not sent: no PaperPad connected");
-            }
-            Err(error) => {
-                eprintln!("automatic hello frame error: {error}");
+                Ok(None) => {
+                    eprintln!("automatic hello frame not sent: no PaperPad connected");
+                }
+                Err(error) => {
+                    eprintln!("automatic hello frame error: {error}");
+                }
             }
         }
         loop {
@@ -909,6 +1041,11 @@ fn main() -> io::Result<()> {
                     flush_stdout("after received viewport change");
                     if let Err(error) = write_log_record(&mut file, &peer.to_string(), &record) {
                         eprintln!("log write error: {error}");
+                    }
+                    if live.connection_changed() {
+                        rendered_application_viewport = None;
+                        application_input.set_viewport(&mut application_ui, None);
+                        continue;
                     }
                     match replace_application_frame(
                         &frame_sender,
@@ -974,6 +1111,12 @@ fn main() -> io::Result<()> {
                 pointer.x(),
                 pointer.y()
             );
+            if live.pointer(pointer) {
+                if let Err(error) = write_log_record(&mut file, &peer.to_string(), &record) {
+                    eprintln!("log write error: {error}");
+                }
+                continue;
+            }
             let input_result = application_input.handle_pointer(&mut application_ui, pointer);
             latency::record(
                 "input_processed",
@@ -1102,6 +1245,7 @@ fn main() -> io::Result<()> {
             }
         }
         current.clear_if_current(&connection_token);
+        live.connection_changed();
 
         println!("disconnected: {peer}");
         flush_stdout("after disconnected banner");
@@ -2035,7 +2179,8 @@ mod tests {
             "paperspoon".to_string(),
             "5581".to_string(),
             "/tmp/paperspoon.log".to_string(),
-        ]);
+        ])
+        .unwrap();
         assert_eq!(opts.port, 5581);
         assert_eq!(opts.log_path, "/tmp/paperspoon.log");
         assert_eq!(opts.latency_log_path, DEFAULT_LATENCY_LOG_FILE);
@@ -2044,13 +2189,14 @@ mod tests {
 
     #[test]
     fn parse_options_forward_url_default_on() {
-        let opts = parse_options(&["paperspoon".to_string()]);
+        let opts = parse_options(&["paperspoon".to_string()]).unwrap();
         assert!(opts.forward_url);
     }
 
     #[test]
     fn parse_options_without_forward_url_disables() {
-        let opts = parse_options(&["paperspoon".to_string(), "--no-forward-url".to_string()]);
+        let opts =
+            parse_options(&["paperspoon".to_string(), "--no-forward-url".to_string()]).unwrap();
         assert!(!opts.forward_url);
     }
 
@@ -2061,7 +2207,8 @@ mod tests {
             "5582".to_string(),
             "/tmp/x.log".to_string(),
             "--no-forward-url".to_string(),
-        ]);
+        ])
+        .unwrap();
         assert_eq!(opts.port, 5582);
         assert_eq!(opts.log_path, "/tmp/x.log");
         assert!(!opts.forward_url);
@@ -2072,7 +2219,8 @@ mod tests {
         let opts = parse_options(&[
             "paperspoon".to_string(),
             "--latency-log=/tmp/paperspoon-trace.jsonl".to_string(),
-        ]);
+        ])
+        .unwrap();
         assert_eq!(opts.latency_log_path, "/tmp/paperspoon-trace.jsonl");
     }
 }

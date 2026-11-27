@@ -872,3 +872,32 @@ artifact's SHA-256 `bfbf40545347ee4703f256372590d91a9d35d6d14b420334b8f821c714e8
 The retained rollback also matched the binary read back before the update.
 The operator reported the overall device result, with individual acceptance
 checks unrecorded.
+
+## Live Now Playing GC16 baseline (2026-11-27)
+
+On the Paperwhite 6 with firmware 5.17.1.0.4, the independently read-back
+PaperPad binary matched the verified native Nix artifact at SHA-256
+`bfbf40545347ee4703f256372590d91a9d35d6d14b420334b8f821c714e82126`.
+PaperSpoon used its fake provider at a 1,000 ms progress interval over Wi-Fi.
+The native device log recorded 177 Gray8 submissions at `1272×1624`.
+Among 173 timeline updates, the median rectangle was `1172×65`
+(`76,180` pixels). The operator saw a black-gray band blink once per second
+across the progress and timer area and provided a photo of the band.
+
+The Kindle log recorded an exclusive evdev open and a native press and
+release for **Next**. PaperSpoon logged one successful command and a track
+change. Local **Exit** released the input grab, ran framebuffer restoration
+for 2,157,312 bytes, and ended with `STOPPED status=0 reason=process_exit`.
+
+### Compact timeline comparison
+
+The compact seek bar and timers shared one centered row in PaperSpoon.
+A second independent MTP readback matched the same PaperPad binary.
+With the same 1,000 ms interval, the Kindle submitted 19 Gray8 frames in
+GC16. The median of 17 timeline updates was `443×20` pixels (`8,860`
+pixels), 88% smaller than the baseline. Short operator-run DU and A2
+comparisons recorded seven and five timeline updates, respectively,
+with the same median area. These rectangles describe kernel submissions.
+
+All three runs recorded a native touch on local **Exit**, released the
+input grab, submitted framebuffer restoration, and exited with status 0.

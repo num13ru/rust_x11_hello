@@ -3,6 +3,7 @@
 use std::io::{self, Write};
 use std::net::{Shutdown, TcpStream};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use paper_protocol::{V2PixelFormat, V2PixelFormats};
 
@@ -30,6 +31,10 @@ pub(crate) struct FrameTarget {
 impl FrameTarget {
     pub(crate) fn viewport(&self) -> (u16, u16) {
         self.viewport
+    }
+
+    pub(crate) fn is_same(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.token.0, &other.token.0) && self.viewport == other.viewport
     }
 }
 
@@ -156,7 +161,12 @@ impl CurrentConnection {
         if !active.pixel_formats.supports(pixel_format) {
             return Ok(FrameForward::UnsupportedPixelFormat);
         }
-        if let Err(error) = active.stream.write_all(bytes) {
+        let write_result = if target.is_some() {
+            write_targeted_frame(&mut active.stream, bytes)
+        } else {
+            active.stream.write_all(bytes)
+        };
+        if let Err(error) = write_result {
             let _ = active.stream.shutdown(Shutdown::Both);
             guard.take();
             return Err(error);
@@ -212,6 +222,29 @@ impl CurrentConnection {
         }
         Ok(true)
     }
+}
+
+// A client that keeps reading small amounts still has a finite frame deadline.
+fn write_targeted_frame(stream: &mut TcpStream, mut bytes: &[u8]) -> io::Result<()> {
+    let original = stream.write_timeout()?;
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !bytes.is_empty() {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "frame write deadline",
+            ));
+        }
+        stream.set_write_timeout(Some(remaining.max(Duration::from_millis(1))))?;
+        match stream.write(bytes) {
+            Ok(0) => return Err(io::Error::new(io::ErrorKind::WriteZero, "writing frame")),
+            Ok(written) => bytes = &bytes[written..],
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(error) => return Err(error),
+        }
+    }
+    stream.set_write_timeout(original)
 }
 
 #[cfg(test)]
