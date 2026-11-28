@@ -14,7 +14,8 @@ use paperspoon::now_playing_provider::{
 use paperspoon::now_playing_renderer::{LiveControl, LiveLayout, LiveNowPlayingRenderer};
 
 use crate::server::FrameTarget;
-use crate::{FrameSender, append_host_log_record, operator_log};
+use crate::{FrameSender, operator_log};
+use paperspoon::operator_log::append_host_log_record;
 
 const MEDIA_QUEUE_CAPACITY: usize = 8;
 const ARTWORK_CACHE_CAPACITY: usize = 8;
@@ -421,7 +422,6 @@ impl LiveNowPlaying {
         true
     }
 
-    #[cfg(target_os = "macos")]
     pub(crate) fn shutdown(&self) {
         self.shutting_down.store(true, Ordering::Relaxed);
         self.stop();
@@ -480,6 +480,19 @@ impl LiveNowPlaying {
             return "Now Playing stopped".into();
         };
         let state = session.shared.state.lock().expect("Now Playing state");
+        Self::describe(&state)
+    }
+
+    pub(crate) fn try_status(&self) -> Option<String> {
+        let slot = self.session.try_lock().ok()?;
+        let Some(session) = slot.as_ref() else {
+            return Some("Now Playing stopped".into());
+        };
+        let state = session.shared.state.try_lock().ok()?;
+        Some(Self::describe(&state))
+    }
+
+    fn describe(state: &State) -> String {
         let client = if state.target.is_some() {
             "Gray8 connected"
         } else {

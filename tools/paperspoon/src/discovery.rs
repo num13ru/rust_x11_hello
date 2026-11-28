@@ -22,10 +22,24 @@ fn bind_discovery_socket_at(addr: SocketAddr) -> std::io::Result<UdpSocket> {
 /// Run the discovery responder forever on an already-bound socket.
 ///
 /// Returns only on socket failure; malformed requests are logged and skipped.
-pub fn run_discovery_listener(socket: UdpSocket, tcp_port: u16) -> std::io::Result<()> {
-    loop {
-        respond_once(&socket, tcp_port)?;
+pub fn run_discovery_listener(
+    socket: UdpSocket,
+    tcp_port: u16,
+    stopping: impl Fn() -> bool,
+) -> std::io::Result<()> {
+    while !stopping() {
+        match respond_once(&socket, tcp_port) {
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock
+                        | std::io::ErrorKind::TimedOut
+                        | std::io::ErrorKind::Interrupted
+                ) => {}
+            result => result?,
+        }
     }
+    Ok(())
 }
 
 fn respond_once(socket: &UdpSocket, tcp_port: u16) -> std::io::Result<()> {

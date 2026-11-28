@@ -1,12 +1,95 @@
 //! Shared ownership of the current PaperPad TCP connection.
 
 use std::io::{self, Write};
-use std::net::{Shutdown, TcpStream};
+use std::net::{Shutdown, SocketAddr, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use paper_protocol::v3;
 use paper_protocol::{V2PixelFormat, V2PixelFormats};
+
+/// Published connection details and the socket needed to interrupt a blocked session.
+#[derive(Clone, Default)]
+pub(crate) struct SharedStatus {
+    display: Arc<Mutex<Option<DisplayStatus>>>,
+    stop: Arc<AtomicBool>,
+    stream: Arc<Mutex<Option<TcpStream>>>,
+}
+
+#[derive(Clone)]
+pub(crate) struct DisplayStatus {
+    pub(crate) peer: SocketAddr,
+    pub(crate) encodings: Option<v3::Encodings>,
+    pub(crate) formats: V2PixelFormats,
+    pub(crate) target: FrameTarget,
+}
+
+impl SharedStatus {
+    #[cfg(unix)]
+    pub(crate) fn stop_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.stop)
+    }
+
+    pub(crate) fn stopping(&self) -> bool {
+        self.stop.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn track(&self, stream: &TcpStream) -> io::Result<TrackedStream<'_>> {
+        let mut active = self.stream.lock().expect("session stream lock");
+        if self.stopping() {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "PaperSpoon is stopping",
+            ));
+        }
+        *active = Some(stream.try_clone()?);
+        Ok(TrackedStream(self))
+    }
+
+    pub(crate) fn stop(&self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(stream) = self.stream.lock().expect("session stream lock").as_ref() {
+            let _ = stream.shutdown(Shutdown::Both);
+        }
+    }
+
+    pub(crate) fn snapshot(&self) -> Option<DisplayStatus> {
+        self.display.lock().expect("display status lock").clone()
+    }
+}
+
+pub(crate) struct TrackedStream<'a>(&'a SharedStatus);
+
+impl TrackedStream<'_> {
+    pub(crate) fn negotiated(
+        &self,
+        peer: SocketAddr,
+        target: FrameTarget,
+        encodings: Option<v3::Encodings>,
+        formats: V2PixelFormats,
+    ) {
+        *self.0.display.lock().expect("display status lock") = Some(DisplayStatus {
+            peer,
+            encodings,
+            formats,
+            target,
+        });
+    }
+
+    pub(crate) fn resized(&self, target: FrameTarget) {
+        if let Some(display) = self.0.display.lock().expect("display status lock").as_mut() {
+            display.target = target;
+        }
+    }
+}
+
+impl Drop for TrackedStream<'_> {
+    fn drop(&mut self) {
+        self.0.display.lock().expect("display status lock").take();
+        self.0.stream.lock().expect("session stream lock").take();
+    }
+}
 
 #[derive(Clone, Default)]
 pub(crate) struct CurrentConnection {
@@ -27,6 +110,13 @@ pub(crate) struct ConnectionToken(Arc<()>);
 impl ConnectionToken {
     pub(crate) fn matches(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.0, &other.0)
+    }
+
+    pub(crate) fn at_viewport(&self, viewport: (u16, u16)) -> FrameTarget {
+        FrameTarget {
+            token: self.clone(),
+            viewport,
+        }
     }
 }
 

@@ -2,9 +2,11 @@
 
 use std::collections::VecDeque;
 use std::fmt::{self, Write as _};
+use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock, TryLockError};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAX_RECORDS: usize = 5_000;
 const MAX_MESSAGE_BYTES: usize = 4_096;
@@ -39,6 +41,10 @@ pub fn start_capture() -> &'static LogBuffer {
     CAPTURE.get_or_init(LogBuffer::new)
 }
 
+pub fn is_capturing() -> bool {
+    CAPTURE.get().is_some()
+}
+
 pub fn write(stream: Stream, message: fmt::Arguments<'_>) {
     if let Some(log) = CAPTURE.get() {
         log.push(stream, message);
@@ -51,7 +57,7 @@ pub fn write(stream: Stream, message: fmt::Arguments<'_>) {
 }
 
 pub fn flush() -> io::Result<()> {
-    if CAPTURE.get().is_some() {
+    if is_capturing() {
         return Ok(());
     }
     io::stdout().flush()
@@ -60,6 +66,32 @@ pub fn flush() -> io::Result<()> {
 pub fn flush_stdout(context: &str) {
     if let Err(cause) = flush() {
         error!("stdout flush error {context}: {cause}");
+    }
+}
+
+/// Record a timestamped event to the persistent session log.
+pub fn write_log_record(file: &mut impl Write, origin: &str, record: &str) -> io::Result<()> {
+    let timestamp_us = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_micros())
+        .unwrap_or(0);
+    let line = format!(
+        "{}.{:06} {origin} {record}\n",
+        timestamp_us / 1_000_000,
+        timestamp_us % 1_000_000
+    );
+    file.write_all(line.as_bytes())?;
+    file.flush()
+}
+
+pub fn append_host_log_record(path: &str, record: &str) {
+    let result = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .and_then(|mut file| write_log_record(&mut file, "host", record));
+    if let Err(cause) = result {
+        error!("frame log error: {cause}");
     }
 }
 

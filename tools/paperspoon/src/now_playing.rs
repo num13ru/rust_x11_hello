@@ -41,7 +41,7 @@ pub struct NowPlayingSnapshot {
 /// the Perl adapter. This function returns only after that group is gone.
 #[cfg(target_os = "macos")]
 pub fn load_now_playing_frame(width: u16, height: u16) -> Result<Gray8Frame, String> {
-    use std::io::Read;
+    use std::io::{Read, Seek};
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
     use std::sync::mpsc;
@@ -55,7 +55,21 @@ pub fn load_now_playing_frame(width: u16, height: u16) -> Result<Gray8Frame, Str
 
     let executable = std::env::current_exe()
         .map_err(|error| format!("failed to locate PaperSpoon executable: {error}"))?;
-    let helper_stderr = if std::env::var_os(HELPER_TIMING_ENV).is_some() {
+    let timings = std::env::var_os(HELPER_TIMING_ENV).is_some();
+    let mut diagnostics = if timings && crate::operator_log::is_capturing() {
+        Some(
+            tempfile::tempfile()
+                .map_err(|error| format!("capture Now Playing diagnostics: {error}"))?,
+        )
+    } else {
+        None
+    };
+    let helper_stderr = if let Some(file) = &diagnostics {
+        Stdio::from(
+            file.try_clone()
+                .map_err(|error| format!("clone Now Playing diagnostics: {error}"))?,
+        )
+    } else if timings {
         Stdio::inherit()
     } else {
         Stdio::null()
@@ -121,6 +135,20 @@ pub fn load_now_playing_frame(width: u16, height: u16) -> Result<Gray8Frame, Str
             }
         });
     let cleanup = terminate_process_group(&mut child);
+    if let Some(file) = &mut diagnostics {
+        let mut bytes = Vec::new();
+        match file
+            .rewind()
+            .and_then(|()| file.take(16 * 1024).read_to_end(&mut bytes))
+        {
+            Ok(_) => {
+                for line in String::from_utf8_lossy(&bytes).lines() {
+                    crate::operator_log::error!("{line}");
+                }
+            }
+            Err(error) => crate::operator_log::error!("reading Now Playing diagnostics: {error}"),
+        }
+    }
     let reader_result = reader.join();
     cleanup?;
     if reader_result.is_err() && response.is_ok() {

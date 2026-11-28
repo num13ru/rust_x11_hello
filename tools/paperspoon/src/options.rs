@@ -1,0 +1,181 @@
+//! Command-line options parsing and TTY resolution for PaperSpoon.
+
+use std::time::Duration;
+
+use paper_protocol::v3;
+
+use crate::live_now_playing::ProviderKind;
+
+/// Default TCP port. Must match `rust_x11_hello`'s `COMPANION_PORT`.
+pub(crate) const DEFAULT_PORT: u16 = paper_protocol::DEFAULT_TCP_PORT;
+/// Default log file name for received activation lines.
+pub(crate) const DEFAULT_LOG_FILE: &str = "paperspoon.log";
+pub(crate) const DEFAULT_LATENCY_LOG_FILE: &str = "paperspoon.latency.jsonl";
+/// Whether to forward actions to Hammerspoon via `open -g hammerspoon://`.
+pub(crate) const FORWARD_TO_HAMMERSPOON: bool = true;
+
+/// Requested console mode from CLI flags.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum TuiMode {
+    /// TUI when both stdin and stdout are terminals, otherwise legacy.
+    #[default]
+    Auto,
+    /// Force the TUI; error when stdin/stdout are not terminals.
+    Force,
+    /// Always use the legacy line-oriented console.
+    Disabled,
+}
+
+/// Resolve the requested TUI mode against terminal availability.
+///
+/// `Auto` yields the TUI only when both stdin and stdout are terminals;
+/// `Force` errors in that case. `Disabled` always yields the legacy console.
+pub(crate) fn resolve_tui_mode(
+    requested: TuiMode,
+    stdin_tty: bool,
+    stdout_tty: bool,
+) -> Result<TuiMode, String> {
+    match requested {
+        TuiMode::Disabled => Ok(TuiMode::Disabled),
+        TuiMode::Force => {
+            if stdin_tty && stdout_tty {
+                Ok(TuiMode::Force)
+            } else {
+                Err("--tui requires stdin and stdout to be terminals".into())
+            }
+        }
+        TuiMode::Auto => Ok(if stdin_tty && stdout_tty {
+            TuiMode::Auto
+        } else {
+            TuiMode::Disabled
+        }),
+    }
+}
+
+/// Parsed command line.
+#[derive(Debug)]
+pub(crate) struct Options {
+    pub(crate) port: u16,
+    pub(crate) log_path: String,
+    pub(crate) latency_log_path: String,
+    /// None means URL forwarding is disabled.
+    pub(crate) forward_url: bool,
+    pub(crate) live_provider: Option<ProviderKind>,
+    pub(crate) progress_interval: Duration,
+    pub(crate) compression: HostCompression,
+    pub(crate) tui_mode: TuiMode,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum HostCompression {
+    Raw,
+    #[default]
+    Auto,
+    Zstd,
+}
+
+impl HostCompression {
+    pub(crate) fn negotiate(
+        self,
+        offered: Option<v3::Encodings>,
+    ) -> Result<Option<v3::Encodings>, &'static str> {
+        let supported = if self == Self::Raw {
+            v3::Encodings::RAW
+        } else {
+            v3::Encodings::RAW_ZSTD
+        };
+        let agreed = offered.map(|offered| offered.intersection(supported));
+        if self == Self::Zstd && !agreed.is_some_and(|agreed| agreed.supports(v3::Encoding::Zstd)) {
+            return Err(
+                "Zstandard is required. Enable PPFB v3 Zstandard on the client or select --compression=auto",
+            );
+        }
+        Ok(agreed)
+    }
+}
+
+pub(crate) fn parse_options(args: &[String]) -> Result<Options, String> {
+    let mut port = DEFAULT_PORT;
+    let mut log_path = DEFAULT_LOG_FILE.to_string();
+    let mut latency_log_path = DEFAULT_LATENCY_LOG_FILE.to_string();
+    let mut forward_url = FORWARD_TO_HAMMERSPOON;
+    let mut live_provider = None;
+    let mut progress_interval = Duration::from_secs(1);
+    let mut compression = HostCompression::default();
+    let mut tui_mode = TuiMode::Auto;
+    let positional = args.iter().skip(1);
+    for arg in positional {
+        match arg.as_str() {
+            "--tui" => {
+                if tui_mode == TuiMode::Disabled {
+                    return Err("--tui and --no-tui are mutually exclusive".into());
+                }
+                tui_mode = TuiMode::Force;
+            }
+            "--no-tui" => {
+                if tui_mode == TuiMode::Force {
+                    return Err("--tui and --no-tui are mutually exclusive".into());
+                }
+                tui_mode = TuiMode::Disabled;
+            }
+            "--compression=raw" => compression = HostCompression::Raw,
+            "--compression=auto" => compression = HostCompression::Auto,
+            "--compression=zstd" => compression = HostCompression::Zstd,
+            value if value.starts_with("--compression=") => {
+                return Err("--compression requires raw, auto, or zstd".into());
+            }
+            "--no-forward-url" => {
+                forward_url = false;
+            }
+            "--now-playing-fake" | "--now-playing-apple-music" => {
+                let provider = if arg == "--now-playing-fake" {
+                    ProviderKind::Fake
+                } else {
+                    ProviderKind::AppleMusic
+                };
+                if live_provider.is_some_and(|selected| selected != provider) {
+                    return Err("choose one Now Playing provider".into());
+                }
+                live_provider = Some(provider);
+            }
+            value if value.starts_with("--now-playing-progress-ms=") => {
+                let interval = value["--now-playing-progress-ms=".len()..]
+                    .parse::<u64>()
+                    .ok()
+                    .filter(|interval| matches!(interval, 100 | 250 | 500 | 1000 | 2000))
+                    .ok_or("--now-playing-progress-ms expects 100, 250, 500, 1000, or 2000")?;
+                progress_interval = Duration::from_millis(interval);
+            }
+            value if value.starts_with("--latency-log=") => {
+                if let Some(path) = value.strip_prefix("--latency-log=")
+                    && !path.is_empty()
+                {
+                    latency_log_path = path.to_string();
+                }
+            }
+            _ => {
+                // Positional: try port first, then log file.
+                if port == DEFAULT_PORT
+                    && let Ok(parsed) = arg.parse()
+                {
+                    port = parsed;
+                    continue;
+                }
+                if log_path == DEFAULT_LOG_FILE {
+                    log_path = arg.clone();
+                    continue;
+                }
+            }
+        }
+    }
+    Ok(Options {
+        port,
+        log_path,
+        latency_log_path,
+        forward_url,
+        live_provider,
+        progress_interval,
+        compression,
+        tui_mode,
+    })
+}
