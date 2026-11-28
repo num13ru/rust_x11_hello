@@ -12,6 +12,9 @@ steps an agent should follow, especially around physical-device work.
   Container remain available via `BUILD_BACKEND=container`.
 - Host artifact: `kindle-extension/rust_x11_hello/bin/rust_x11_hello` (untracked, rebuilt by `make build`).
 - Device extension root: `/extensions/rust_x11_hello` (MTP) = `/mnt/us/extensions/rust_x11_hello` (runtime).
+- Keep all PaperPad KUAL actions, including diagnostics and benchmarks, in the
+  single top-level group named exactly **PaperPad**. Add new actions inside that
+  group. Run `make check-menu` after editing the menu.
 - KUAL actions **Run Paperpad DU/GC16/A2/DU4 (5m)** use the connected native
   runtime with direct framebuffer output and exclusive evdev input. DU is
   the default for binary remote pixels, with GC16 for grayscale. GC16 is

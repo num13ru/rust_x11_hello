@@ -17,12 +17,11 @@ fi
 jq -e '
     type == "object" and
     (keys == ["items"]) and
-    (.items | type == "array" and length > 0) and
-    ([.items[].name] | length == (unique | length)) and
-    all(.items[];
+    (.items | type == "array" and length == 1) and
+    (.items[0] |
         type == "object" and
         (keys == ["items", "name", "priority"]) and
-        (.name | type == "string" and length > 0) and
+        (.name == "PaperPad") and
         (.priority | type == "number") and
         (.items | type == "array" and length > 0) and
         all(

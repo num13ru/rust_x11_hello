@@ -39,13 +39,7 @@
         {
           "name": "Trace input events (15s; tap)",
           "action": "sh bin/probe-input.sh trace"
-        }
-      ]
-    },
-    {
-      "name": "PaperPad Benchmarks",
-      "priority": 1,
-      "items": [
+        },
         {
           "name": "Measure PPFB v3 Zstandard (15m)",
           "action": "PAPERPAD_MEASURE_TRANSPORT=1 PAPERPAD_TRANSPORT=v3-zstd PAPERPAD_WATCHDOG_SECONDS=900 PAPERPAD_MXCFB_WAVEFORM=du sh bin/run.sh"

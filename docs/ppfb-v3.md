@@ -43,8 +43,8 @@ device evidence separately.
 ### Matched Kindle measurements
 
 Start PaperSpoon with the fake provider and `--compression=auto` as above.
-In KUAL’s **PaperPad Benchmarks** group, use **Measure PPFB v3 Raw (15m)** for one pass and **Measure PPFB
-v3 Zstandard (15m)** for the other. Both use the DU display policy and the
+In KUAL’s **PaperPad** group, use **Measure PPFB v3 Raw (15m)** for one pass
+and **Measure PPFB v3 Zstandard (15m)** for the other. Both use the DU display policy and the
 same watchdog. Start fresh fake Now Playing for each pass by entering
 `nowplaying stop` and then `nowplaying start` in PaperSpoon. Use the same
 playback duration, controls, and network conditions on both runs. Tap

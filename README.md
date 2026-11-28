@@ -164,7 +164,7 @@ mtp-rs rm /extensions/rust_x11_hello/bin/rust_x11_hello.previous --yes
 
 ### 4. Run from KUAL
 
-KUAL separates regular **PaperPad** actions from **PaperPad Benchmarks**.
+Open the **PaperPad** group in KUAL for all PaperPad actions.
 
 - **Run Paperpad DU (5m)** uses DU for binary pixel transitions and GC16
   for grayscale. **Run Paperpad GC16 (5m)** uses GC16 for all remote
@@ -177,7 +177,7 @@ KUAL separates regular **PaperPad** actions from **PaperPad Benchmarks**.
 - **Test MXCFB TERM cleanup (15s)** — normal MXCFB runtime with a short
   watchdog for verifying graceful `TERM`, framebuffer restoration, and clean
   process exit; it is not a benchmark.
-- In **PaperPad Benchmarks**, **Benchmark MXCFB GC16/DU/A2/DU4** — separate, explicit 12-frame local
+- **Benchmark MXCFB GC16/DU/A2/DU4** runs explicit 12-frame local
   completion benchmarks with a one-minute watchdog. They use native evdev for
   local Exit, derive geometry from `/dev/fb0`, and open no X11 or PaperSpoon
   connection; DU, A2, and DU4 are experimental fidelity/ghosting tradeoffs.
