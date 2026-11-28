@@ -505,3 +505,38 @@ Both sessions ended through local Exit with status 0 and restored the
 framebuffer snapshot. PPFB v2 remains the default. The opt-in v3 rollout
 uses Zstandard level 1 with Raw fallback. Dense Gray8 still exceeds the
 10 ms decode P95 target. [Paperwhite 6 decoder comparison](#identical-payload-decoder-comparison-on-paperwhite-6)
+
+### Zstandard backend comparison on macOS ARM64
+
+Isolated builds at `b64a027` used the Rust backend or the vendored reference C
+backend in Zstandard 1.6.0. Both release decoder builds reproduced the saved
+40-frame dense Gray8 scrolling corpus byte for byte and passed all 42 shared
+protocol tests, including malformed-frame checks. The timing used the same
+level-1 compressed payloads and fresh output buffers. Each backend ran five
+processes in alternating order, with two warm-up passes and ten measured
+passes per process.
+
+| Backend | Median of per-process decode P95 (ms) | Per-process P95 range (ms) |
+|---|---:|---:|
+| Rust | 1.447 | 1.417–1.460 |
+| Reference C | 1.284 | 1.272–1.322 |
+
+PaperView's network worker sent alternating seeks to PaperSpoon's paused Fake
+Now Playing track over loopback. The desktop timer ran from queuing the release
+to converting the first frame showing the new seek position into PaperView's
+RGB presentation buffer. Each run excluded two warm-up seeks and timed 20
+seeks. The exported Application Grid and both settled seek frames matched
+byte for byte across all three modes.
+
+| PaperView mode | Median (ms) | P95 (ms) |
+|---|---:|---:|
+| Raw with Rust build | 75.9 | 82.0 |
+| Zstandard with Rust backend | 73.7 | 81.2 |
+| Zstandard with reference C backend | 70.3 | 77.8 |
+
+The PaperView check used debug receiver builds and a release PaperSpoon build.
+It measures desktop software response over loopback. The reference C candidate
+failed to build in the current ARMv7 environment. The wrapped compiler rejected
+an injected flag and the unwrapped compiler lacked target C headers. Kindle
+performance and the 10 ms decode target remain unverified for this candidate.
+The production build continues to use the Rust backend.
