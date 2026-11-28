@@ -17,3 +17,6 @@ libc = "0.2"
 media-remote = "=0.5.2"
 signal-hook = "0.3"
 tempfile = "3"
+
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"

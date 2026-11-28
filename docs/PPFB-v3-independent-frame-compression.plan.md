@@ -899,18 +899,18 @@ After PaperView validation, test on the Kindle Paperwhite 6.
 
 Verify:
 
-- [ ] Gray8 album artwork remains visually unchanged by transport compression.
-- [ ] Binary metadata remains readable.
-- [ ] Seekbar updates retain their existing waveform behavior.
-- [ ] Timer updates remain stable.
+- [x] Gray8 album artwork remains visually unchanged by transport compression.
+- [x] Binary metadata remains readable.
+- [x] Seekbar updates retain their existing waveform behavior.
+- [x] Timer updates remain stable.
 - [ ] Mixed-waveform selection remains unchanged for equivalent framebuffers.
-- [ ] Playback controls remain responsive.
-- [ ] Repeated seeking works.
-- [ ] Track changes work.
-- [ ] Application transitions work.
-- [ ] Reconnection restores the latest framebuffer.
-- [ ] Local Exit remains responsive.
-- [ ] Framebuffer restoration remains correct.
+- [x] Playback controls remain responsive.
+- [x] Repeated seeking works.
+- [x] Track changes work.
+- [x] Application transitions work.
+- [x] Reconnection restores the latest framebuffer.
+- [x] Local Exit remains responsive.
+- [x] Framebuffer restoration remains correct.
 - [ ] Extended operation does not produce increasing memory consumption.
 
 Use raw transport as the behavioral baseline.
@@ -961,71 +961,78 @@ Battery validation may remain a separate follow-up if reliable telemetry is unav
 
 ## 24. Automated tests
 
+Checked items have workspace test or controlled loopback evidence. The
+transport tests replace a connection during frame encoding, close a peer after
+it reads only part of the payload, and deliver fragmented input to PaperPad.
+When the display loop pauses during a burst of 1,024 frames, the inbound
+mailbox retains the latest complete frame only.
+[PPFB v3 validation results](benchmarks/ppfb-v3-validation.md)
+
 ### Protocol negotiation
 
-- [ ] Existing v2 host and client behavior remains unchanged.
-- [ ] Compression-capable peers negotiate supported encodings.
-- [ ] Raw-only peers receive raw frames.
-- [ ] Unsupported encodings are never transmitted.
-- [ ] Unknown capability identifiers are handled safely.
-- [ ] Unsupported versions fail explicitly.
-- [ ] Reconnection performs fresh negotiation.
-- [ ] Legacy fallback does not introduce ambiguous framing.
+- [x] Existing v2 host and client behavior remains unchanged.
+- [x] Compression-capable peers negotiate supported encodings.
+- [x] Raw-only peers receive raw frames.
+- [x] Unsupported encodings are never transmitted.
+- [x] Unknown capability identifiers are handled safely.
+- [x] Unsupported versions fail explicitly.
+- [x] Reconnection performs fresh negotiation.
+- [x] Legacy fallback does not introduce ambiguous framing.
 
 ### Frame encoding and decoding
 
-- [ ] Mono1 Raw round-trip.
-- [ ] Gray8 Raw round-trip.
-- [ ] Mono1 Zstandard round-trip.
-- [ ] Gray8 Zstandard round-trip.
-- [ ] Odd-width Mono1 round-trip.
-- [ ] Canonical Mono1 padding is preserved.
-- [ ] Realistic grayscale artwork remains byte-identical.
-- [ ] Multiple independent frames decode correctly.
-- [ ] Reused codec contexts preserve frame independence.
-- [ ] Raw and Zstandard frames can alternate within one supported connection.
-- [ ] Incompressible data selects Raw.
+- [x] Mono1 Raw round-trip.
+- [x] Gray8 Raw round-trip.
+- [x] Mono1 Zstandard round-trip.
+- [x] Gray8 Zstandard round-trip.
+- [x] Odd-width Mono1 round-trip.
+- [x] Canonical Mono1 padding is preserved.
+- [x] Realistic grayscale artwork remains byte-identical.
+- [x] Multiple independent frames decode correctly.
+- [x] Reused codec contexts preserve frame independence.
+- [x] Raw and Zstandard frames can alternate within one supported connection.
+- [x] Incompressible data selects Raw.
 
 ### Decoder robustness
 
-- [ ] Truncated messages are rejected.
-- [ ] Malformed Zstandard payloads are rejected.
-- [ ] Invalid encoding identifiers are rejected.
-- [ ] Invalid decoded lengths are rejected.
-- [ ] Oversized payloads are rejected.
-- [ ] Oversized window requirements are rejected.
-- [ ] Invalid dimensions are rejected.
-- [ ] Integer overflow is prevented.
-- [ ] Unsupported trailing data is rejected.
-- [ ] Decoder failures do not modify the last valid framebuffer.
-- [ ] Recovery follows documented connection semantics.
-- [ ] Malformed inputs do not panic.
+- [x] Truncated messages are rejected.
+- [x] Malformed Zstandard payloads are rejected.
+- [x] Invalid encoding identifiers are rejected.
+- [x] Invalid decoded lengths are rejected.
+- [x] Oversized payloads are rejected.
+- [x] Oversized window requirements are rejected.
+- [x] Invalid dimensions are rejected.
+- [x] Integer overflow is prevented.
+- [x] Unsupported trailing data is rejected.
+- [x] Decoder failures do not modify the last valid framebuffer.
+- [x] Recovery follows documented connection semantics.
+- [x] Malformed inputs do not panic.
 
 ### Transport lifecycle
 
-- [ ] Disconnect during compression.
-- [ ] Disconnect during payload transmission.
-- [ ] Disconnect during payload reception.
-- [ ] Slow receiver.
-- [ ] Slow network.
-- [ ] Rapid frame replacement.
-- [ ] Frame coalescing.
-- [ ] Reconnection after interrupted transmission.
-- [ ] No unbounded queue growth.
-- [ ] No stale-frame dependency.
+- [x] Disconnect during compression.
+- [x] Disconnect during payload transmission.
+- [x] Disconnect during payload reception.
+- [x] Slow receiver.
+- [x] Slow network.
+- [x] Rapid frame replacement.
+- [x] Frame coalescing.
+- [x] Reconnection after interrupted transmission.
+- [x] No unbounded queue growth.
+- [x] No stale-frame dependency.
 
 ### Application compatibility
 
-- [ ] Static framebuffer commands.
-- [ ] Application Grid.
-- [ ] Interactive Now Playing.
-- [ ] Album artwork changes.
-- [ ] Playback controls.
-- [ ] Seeking.
-- [ ] Mono1 rendering.
-- [ ] Gray8 rendering.
-- [ ] PaperView export.
-- [ ] Mixed-waveform classification.
+- [x] Static framebuffer commands.
+- [x] Application Grid.
+- [x] Interactive Now Playing.
+- [x] Album artwork changes.
+- [x] Playback controls.
+- [x] Seeking.
+- [x] Mono1 rendering.
+- [x] Gray8 rendering.
+- [x] PaperView export.
+- [x] Mixed-waveform classification.
 
 ## 25. Build and dependency verification
 

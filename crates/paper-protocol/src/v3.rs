@@ -661,6 +661,53 @@ mod tests {
     }
 
     #[test]
+    fn rejects_unknown_frame_encoding_before_reading_the_body() {
+        let (header, body) = header_and_body(ZSTD);
+        let mut invalid_encoding = body.to_vec();
+        invalid_encoding[13] = u8::MAX;
+        let mut stream = invalid_encoding.as_slice();
+        let viewport = Viewport {
+            width: 32,
+            height: 16,
+            formats: V2PixelFormats::GRAY8,
+        };
+
+        let error = FrameDecoder::default()
+            .read_frame(&mut stream, header, viewport, Encodings::RAW_ZSTD)
+            .expect_err("unknown frame encoding is rejected");
+        assert_eq!(error.kind(), ErrorKind::InvalidData);
+        assert_eq!(stream, &invalid_encoding[RAW_PREFIX_LEN..]);
+    }
+
+    #[test]
+    fn rejects_invalid_frame_dimensions_before_reading_the_body() {
+        let (header, body) = header_and_body(ZSTD);
+        let mut decoder = FrameDecoder::default();
+        for (width, height, viewport_width, viewport_height) in [
+            (0, 16, 0, 16),
+            (32, 0, 32, 0),
+            (31, 16, 32, 16),
+            (u16::MAX, u16::MAX, u16::MAX, u16::MAX),
+        ] {
+            let mut invalid_dimensions = body.to_vec();
+            invalid_dimensions[8..10].copy_from_slice(&width.to_be_bytes());
+            invalid_dimensions[10..12].copy_from_slice(&height.to_be_bytes());
+            let mut stream = invalid_dimensions.as_slice();
+            let viewport = Viewport {
+                width: viewport_width,
+                height: viewport_height,
+                formats: V2PixelFormats::GRAY8,
+            };
+
+            let error = decoder
+                .read_frame(&mut stream, header, viewport, Encodings::RAW_ZSTD)
+                .expect_err("invalid frame dimensions are rejected");
+            assert_eq!(error.kind(), ErrorKind::InvalidData);
+            assert_eq!(stream, &invalid_dimensions[RAW_PREFIX_LEN..]);
+        }
+    }
+
+    #[test]
     fn v3_controls_keep_existing_payload_fields() {
         let trace = crate::V2PointerTrace::new(8, 9, 10);
         let pointer = crate::V2Pointer::new_traced(crate::V2PointerPhase::Up, 14, 7, trace);

@@ -1973,6 +1973,80 @@ mod tests {
     }
 
     #[test]
+    fn v3_paced_stream_keeps_only_the_latest_frame_for_a_stalled_display() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let formats = V2PixelFormats::GRAY8;
+        let mut paperspoon = Paperspoon::start_with_transport(
+            move || connect_stream(addr).map(|stream| (addr, stream)),
+            None,
+            (64, 64),
+            formats,
+            RuntimeWake::default(),
+            v3::ClientMode::Auto,
+        );
+        let mut peer = accept_before(&listener, Duration::from_secs(3));
+        peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        peer.set_write_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut hello = [0; v3::HEADER_LEN + 8];
+        peer.read_exact(&mut hello).unwrap();
+        let header = v3::Header::decode(hello[..v3::HEADER_LEN].try_into().unwrap()).unwrap();
+        assert_eq!(header.kind, v3::Kind::Hello);
+        let hello = v3::Hello::decode(&hello[v3::HEADER_LEN..]).unwrap();
+        assert_eq!(hello.encodings, v3::Encodings::RAW_ZSTD);
+        peer.write_all(&v3::encode_ack(v3::Encodings::RAW_ZSTD))
+            .unwrap();
+
+        let first = paper_protocol::Gray8Frame::new(64, 64, vec![42; 4096]).unwrap();
+        let latest = paper_protocol::Gray8Frame::new(64, 64, vec![176; 4096]).unwrap();
+        let mut encoder = paper_protocol::compression::ZstdEncoder::new(1).unwrap();
+        let mut message = Vec::new();
+        let mut scratch = Vec::new();
+        assert!(v3::compressed_frame(1, &first, &mut encoder, &mut scratch, &mut message).unwrap());
+
+        // Keep the first frame incomplete while the network reader runs.
+        for byte in &message[..message.len() - 1] {
+            peer.write_all(std::slice::from_ref(byte)).unwrap();
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(paperspoon.poll_frame().is_none());
+        peer.write_all(&message[message.len() - 1..]).unwrap();
+
+        // Leave display consumption paused throughout the burst.
+        const FINAL_ID: u64 = 1024;
+        for id in 2..=FINAL_ID {
+            assert!(
+                v3::compressed_frame(id, &latest, &mut encoder, &mut scratch, &mut message)
+                    .unwrap()
+            );
+            peer.write_all(&message).unwrap();
+        }
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            if paperspoon
+                .frames
+                .state
+                .lock()
+                .unwrap()
+                .pending
+                .as_ref()
+                .map(ReceivedFrame::frame_id)
+                == Some(FINAL_ID)
+            {
+                break;
+            }
+            assert!(Instant::now() < deadline, "the latest frame did not arrive");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let frame = paperspoon.poll_frame().unwrap();
+        assert_eq!(frame.frame_id(), FINAL_ID);
+        assert_eq!(frame.pixels(), latest.pixels());
+        assert!(paperspoon.poll_frame().is_none());
+        assert!(paperspoon.is_connected());
+    }
+
+    #[test]
     fn v3_reconnects_after_a_partial_frame_and_renegotiates_raw() {
         let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let addr = listener.local_addr().unwrap();

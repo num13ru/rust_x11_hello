@@ -319,7 +319,9 @@ Five physical seek releases reached the fake provider and succeeded, including
 backward seeks. On the device's monotonic clock, the first subsequent
 `frame_present_return` was 46–220 ms after input receipt. The frame IDs were
 correlated by event order. This timing covers software presentation return.
-A Raw seek comparison and camera-observed panel completion remain open.
+A subsequent run compared Raw and Zstandard seeks. Camera-observed panel
+completion remains open.
+[Paired seek and track-change sessions](#paired-seek-and-track-change-sessions)
 
 Both runs logged DU and GC16 submissions and stopped with status 0 after
 releasing evdev and restoring the 2,157,312-byte framebuffer snapshot. PPFB v2
@@ -361,3 +363,28 @@ disconnected and back. The display backend recognized the replay as unchanged
 and updated its cache. The operator confirmed the bars were visible after
 reconnect. Local Exit returned status 0, released evdev, and restored the
 framebuffer snapshot.
+
+### Paired seek and track-change sessions
+
+On 2026-11-28, the Paperwhite 6 ran **Measure PPFB v3 Raw (15m)** and
+**Measure PPFB v3 Zstandard (15m)** with the same Fake Now Playing provider,
+1272×1624 viewport, and DU display policy. PaperPad received 47 live Raw
+frames and 42 live Zstandard frames. Each frame's PPFB byte count matched
+PaperSpoon's log. The operator saw the same grayscale cover and a clear
+track title in both modes.
+
+Both modes accepted two physical seek releases at similar positions. The
+first following frame requested DU in all four cases. The times below cover
+input receipt to software presentation return on the Kindle's monotonic
+clock. Frame association uses event order.
+
+| Mode | Seek targets (s) | Release to first presentation return (ms) | Successful Next actions |
+|---|---|---|---:|
+| Raw | 40.3, 125.7 | 202.4, 196.1 | 4 |
+| Zstandard level 1 | 45.3, 124.7 | 84.2, 49.8 | 3 |
+
+Both sessions logged DU and GC16 submissions after track changes and exited
+with status 0, releasing evdev and restoring the framebuffer snapshot. The
+operator tapped Next at different intervals in the two passes. A scripted
+rapid-track benchmark and a waveform comparison with identical before-and-after
+pixels remain open.

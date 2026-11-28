@@ -1487,6 +1487,139 @@ mod tests {
         }
     }
 
+    #[test]
+    fn v3_connection_change_during_encoding_discards_the_pending_frame() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let current = CurrentConnection::default();
+        let original = TcpStream::connect(addr).unwrap();
+        let (_original_peer, _) = listener.accept().unwrap();
+        let replacement = TcpStream::connect(addr).unwrap();
+        let (mut peer, _) = listener.accept().unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let dimensions = (64, 64);
+        let formats = V2PixelFormats::GRAY8;
+        let encodings = v3::Encodings::RAW_ZSTD;
+        current
+            .install_negotiated(&original, formats, dimensions, Some(encodings))
+            .unwrap();
+        let sender = FrameSender::new(current.clone());
+        let original_target = current.frame_target(PixelFormat::Gray8).unwrap();
+        let stale = Arc::new(Gray8Frame::new(64, 64, vec![42; 4096]).unwrap());
+        let mut state = sender.state.lock().unwrap();
+        let result = sender.send_locked(
+            &mut state,
+            PixelFormat::Gray8,
+            Some(&original_target),
+            |id| {
+                original.shutdown(Shutdown::Both).unwrap();
+                current
+                    .install_negotiated(&replacement, formats, dimensions, Some(encodings))
+                    .unwrap();
+                encode_v2_frame(id, stale.as_ref()).map_err(|error| error.to_string())
+            },
+            Some(AuthoritativeFrame::NowPlaying(Arc::clone(&stale))),
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            "PaperPad connection changed while preparing frame"
+        );
+        assert!(state.authoritative.is_none());
+        assert_eq!(state.next_frame_id, 1);
+        assert!(!state.compression_scratch.is_empty());
+        drop(state);
+
+        let fresh = Arc::new(Gray8Frame::new(64, 64, vec![176; 4096]).unwrap());
+        let target = current.frame_target(PixelFormat::Gray8).unwrap();
+        let sent = sender
+            .send_now_playing_frame(Arc::clone(&fresh), target)
+            .unwrap()
+            .unwrap();
+        let mut header = [0; v3::HEADER_LEN];
+        peer.read_exact(&mut header).unwrap();
+        let received = v3::FrameDecoder::default()
+            .read_frame(
+                &mut peer,
+                v3::Header::decode(header).unwrap(),
+                v3::Viewport {
+                    width: 64,
+                    height: 64,
+                    formats,
+                },
+                encodings,
+            )
+            .unwrap();
+        assert_eq!(received.id, sent.sent.frame_id);
+        assert_eq!(received.id, 1);
+        assert_eq!(received.encoding, v3::Encoding::Zstd);
+        assert_eq!(received.frame.pixels(), fresh.pixels());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn v3_disconnect_during_a_partial_write_retires_the_connection() {
+        use std::os::fd::AsRawFd;
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut peer, _) = listener.accept().unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let buffer_size: libc::c_int = 4096;
+        for (socket, option) in [(&client, libc::SO_SNDBUF), (&peer, libc::SO_RCVBUF)] {
+            // The pointer refers to a socket-option integer for the duration of the call.
+            let status = unsafe {
+                libc::setsockopt(
+                    socket.as_raw_fd(),
+                    libc::SOL_SOCKET,
+                    option,
+                    (&raw const buffer_size).cast(),
+                    size_of_val(&buffer_size) as libc::socklen_t,
+                )
+            };
+            assert_eq!(status, 0, "{}", io::Error::last_os_error());
+        }
+
+        const WIDTH: u16 = 2048;
+        const HEIGHT: u16 = 1024;
+        let pixel_count = usize::from(WIDTH) * usize::from(HEIGHT);
+        let current = CurrentConnection::default();
+        current
+            .install_negotiated(
+                &client,
+                V2PixelFormats::GRAY8,
+                (WIDTH, HEIGHT),
+                Some(v3::Encodings::RAW),
+            )
+            .unwrap();
+        let sender = FrameSender::new(current.clone());
+        let target = current.frame_target(PixelFormat::Gray8).unwrap();
+        let frame = Arc::new(Gray8Frame::new(WIDTH, HEIGHT, vec![42; pixel_count]).unwrap());
+
+        let result = std::thread::scope(|scope| {
+            let sending = scope.spawn(|| sender.send_now_playing_frame(frame, target));
+            let mut header = [0; v3::HEADER_LEN];
+            peer.read_exact(&mut header).unwrap();
+            let header = v3::Header::decode(header).unwrap();
+            assert_eq!(header.kind, v3::Kind::Frame);
+            assert_eq!(header.payload_len, v3::RAW_PREFIX_LEN + pixel_count);
+            let mut prefix_and_pixel = [0; v3::RAW_PREFIX_LEN + 1];
+            peer.read_exact(&mut prefix_and_pixel).unwrap();
+            assert_eq!(prefix_and_pixel[v3::RAW_PREFIX_LEN], 42);
+            assert!(
+                !sending.is_finished(),
+                "payload fit in the test socket buffers"
+            );
+            peer.shutdown(Shutdown::Both).unwrap();
+            sending.join().unwrap()
+        });
+
+        assert!(result.unwrap_err().contains("failed to write frame"));
+        assert!(!current.is_active());
+        let state = sender.state.lock().unwrap();
+        assert_eq!(state.next_frame_id, 1);
+        assert!(state.authoritative.is_none());
+    }
+
     fn read_sent_owned_frame(peer: &mut TcpStream, sent: SentFrame) -> (u64, Frame) {
         let mut encoded = vec![0; sent.encoded_len];
         peer.read_exact(&mut encoded).expect("read encoded frame");
