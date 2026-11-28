@@ -51,7 +51,7 @@ impl DiagnosticPattern {
         }
     }
 
-    fn pixel_format(self) -> PixelFormat {
+    pub fn pixel_format(self) -> PixelFormat {
         match self {
             Self::White
             | Self::Black
@@ -179,7 +179,7 @@ impl DiagnosticFrame {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum StdinCommand {
     Frame(DiagnosticFrame),
     Jpeg(PathBuf),
@@ -196,7 +196,7 @@ impl StdinCommand {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum LiveCommand {
     Start,
     Stop,
@@ -323,7 +323,7 @@ fn validate_dimensions(width: u16, height: u16) -> Result<(), String> {
     Ok(())
 }
 
-fn parse_dimensions(dimensions: &str) -> Result<(u16, u16), String> {
+pub fn parse_dimensions(dimensions: &str) -> Result<(u16, u16), String> {
     let (width, height) = dimensions
         .split_once('x')
         .ok_or_else(|| "dimensions must use <width>x<height>".to_string())?;

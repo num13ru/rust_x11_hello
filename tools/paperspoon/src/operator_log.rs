@@ -96,8 +96,15 @@ struct History {
     next_id: u64,
 }
 
+impl Default for LogBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LogBuffer {
-    fn new() -> Self {
+    /// Creates an empty, bounded log store.
+    pub fn new() -> Self {
         Self {
             history: Mutex::new(History {
                 records: VecDeque::with_capacity(MAX_RECORDS),
@@ -105,6 +112,11 @@ impl LogBuffer {
             }),
             dropped: AtomicU64::new(0),
         }
+    }
+
+    /// Pushes one record built from a string. Used by tests and simple callers.
+    pub fn push_str(&self, stream: Stream, message: &str) {
+        self.push(stream, format_args!("{message}"));
     }
 
     fn push(&self, stream: Stream, message: fmt::Arguments<'_>) {
