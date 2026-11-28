@@ -2,12 +2,14 @@
 
 use crate::config::PaperpadConfig;
 use crate::input::evdev::{DecodedInput, EvdevReader};
+use crate::kindle_power::KindlePowerMonitor;
 use crate::latency;
 use crate::mxcfb::MxcfbDisplayBackend;
 use crate::net::Paperspoon;
 use crate::runtime::{PaperpadRuntime, RuntimeControl, RuntimePointerInput, remote_viewport_size};
 use crate::runtime_wait::{RuntimeNotifier, RuntimeWait};
 use anyhow::{Context, Result};
+use std::time::Instant;
 
 pub(crate) fn run(
     shutdown_requested: impl Fn() -> bool,
@@ -17,54 +19,14 @@ pub(crate) fn run(
     let run_label = "PaperPad native runtime";
     eprintln!("{run_label} starting transport=true eviocgrab=true");
 
+    let mut power = KindlePowerMonitor::start()?;
     let mut display = MxcfbDisplayBackend::open()?;
     let size = display.dimensions();
-    let mut input_reader = match EvdevReader::open_exclusive(size) {
-        Ok(reader) => reader,
-        Err(primary) => {
-            if let Err(cleanup_error) = display.shutdown() {
-                eprintln!(
-                    "MXCFB cleanup after native input initialization failure also failed: {cleanup_error:#}"
-                );
-            }
-            return Err(primary);
-        }
-    };
-    let (runtime_wait, runtime_notifier) = match RuntimeWait::new(input_reader.raw_fd()) {
-        Ok(pair) => pair,
-        Err(error) => {
-            let primary = anyhow::Error::new(error)
-                .context("initialize native PaperPad runtime readiness wait");
-            if let Err(release_error) = input_reader.release_exclusive_grab() {
-                eprintln!(
-                    "EVIOCGRAB release after runtime waiter initialization failure also failed: {release_error:#}"
-                );
-            }
-            drop(input_reader);
-            if let Err(cleanup_error) = display.shutdown() {
-                eprintln!(
-                    "MXCFB cleanup after runtime waiter initialization failure also failed: {cleanup_error:#}"
-                );
-            }
-            return Err(primary);
-        }
-    };
-    if let Err(error) = register_shutdown_wake(runtime_notifier.clone()) {
-        let primary = error.context("register native PaperPad shutdown wake");
-        if let Err(release_error) = input_reader.release_exclusive_grab() {
-            eprintln!(
-                "EVIOCGRAB release after shutdown wake registration failure also failed: {release_error:#}"
-            );
-        }
-        drop(runtime_wait);
-        drop(input_reader);
-        if let Err(cleanup_error) = display.shutdown() {
-            eprintln!(
-                "MXCFB cleanup after shutdown wake registration failure also failed: {cleanup_error:#}"
-            );
-        }
-        return Err(primary);
-    }
+    let mut input_reader = EvdevReader::open_exclusive(size)?;
+    let (runtime_wait, runtime_notifier) = RuntimeWait::new(input_reader.raw_fd())
+        .context("initialize native PaperPad runtime readiness wait")?;
+    register_shutdown_wake(runtime_notifier.clone())
+        .context("register native PaperPad shutdown wake")?;
     let mut paperspoon = Paperspoon::start(
         config,
         remote_viewport_size(size),
@@ -79,11 +41,17 @@ pub(crate) fn run(
             size.0, size.1
         );
 
+        let ready = runtime_wait
+            .wait_for_session(power.fd(), Some(Instant::now()))
+            .context("check Kindle power before initial draw")?;
+        if ready.power.is_some() {
+            return Ok(());
+        }
         if shutdown_requested() {
-            runtime.cancel_contact();
             eprintln!("{run_label} stopped reason=signal");
             return Ok(());
         }
+        display.start()?;
         runtime
             .service(&mut display, &mut paperspoon)
             .context("service initial native PaperPad state")?;
@@ -96,8 +64,11 @@ pub(crate) fn run(
             }
 
             let ready = runtime_wait
-                .wait(display.next_maintenance_deadline())
+                .wait_for_session(power.fd(), display.next_maintenance_deadline())
                 .context("wait for native PaperPad runtime readiness")?;
+            if ready.power.is_some() {
+                return Ok(());
+            }
             if shutdown_requested() {
                 runtime.cancel_contact();
                 eprintln!("{run_label} stopped reason=signal");
@@ -160,8 +131,8 @@ pub(crate) fn run(
         }
     })();
 
+    runtime.cancel_contact();
     if input_reader.shutdown().is_some() {
-        runtime.cancel_contact();
         eprintln!("input source=evdev action=cancel reason=runtime_shutdown");
     }
     if let Err(release_error) = input_reader.release_exclusive_grab() {
@@ -173,16 +144,26 @@ pub(crate) fn run(
             run_result = Err(release_error);
         }
     }
-    drop(paperspoon);
+    // A power transition may race a manual exit or a runtime error.
+    let ready = runtime_wait
+        .wait_for_session(power.fd(), Some(Instant::now()))
+        .context("check Kindle power before restoring the launch screen");
     drop(runtime_wait);
     drop(input_reader);
 
-    let cleanup_result = display.shutdown();
+    let cleanup_result = ready.and_then(|ready| match ready.power {
+        Some(status) if status.readable || status.hung_up => power.report_transition(),
+        Some(status) => anyhow::bail!("Kindle power listener readiness failed: {status:?}"),
+        None => display.shutdown(),
+    });
     drop(display);
+    drop(paperspoon);
 
     match (run_result, cleanup_result) {
         (Err(primary), Err(cleanup_error)) => {
-            eprintln!("MXCFB cleanup after native runtime failure also failed: {cleanup_error:#}");
+            eprintln!(
+                "Display cleanup after native runtime failure also failed: {cleanup_error:#}"
+            );
             Err(primary)
         }
         (Err(primary), Ok(())) => Err(primary),

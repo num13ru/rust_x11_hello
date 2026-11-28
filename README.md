@@ -63,8 +63,9 @@ verify the transferred files and publish the menu last.
 
 ### Launch from KUAL
 
-Unplug USB and choose **PaperPad → Run Paperpad DU**. The app stays open until you
-tap **Exit** or the process ends. Exit works even if PaperSpoon is disconnected.
+Unplug USB and choose **PaperPad → Run Paperpad DU**. **Exit** works even if
+PaperSpoon is disconnected. PaperPad also exits when Kindle goes to sleep. After
+waking, launch it again from KUAL.
 
 - **Run Paperpad DU** uses DU for binary updates and GC16 for grayscale.
 - **Run Paperpad DU with PPFB v2** forces legacy Raw transport.
@@ -72,9 +73,10 @@ tap **Exit** or the process ends. Exit works even if PaperSpoon is disconnected.
 - **Run Paperpad A2** and **Run Paperpad DU4** are experimental waveform modes.
   Pixel transitions outside their supported levels use GC16.
 
-PaperPad uses native MXCFB display updates and exclusive evdev touch input.
-On exit it releases input, restores the original display, and closes the
-temporary discovery firewall rule.
+PaperPad uses native MXCFB display updates and exclusive evdev touch input. It
+releases touch and removes the temporary discovery firewall rule on exit. The
+**Exit** button restores the launch screen. When Kindle goes to sleep, its
+firmware takes over the display.
 
 ### Preview on the desktop
 
