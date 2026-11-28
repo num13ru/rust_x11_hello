@@ -10,7 +10,7 @@ Options:
   --port PORT             PaperSpoon TCP port (default: 5581)
   --viewport WIDTHxHEIGHT Negotiated PPFB viewport (default: 1272x1624)
   --save-dir DIR          Existing directory for source PNGs written with S
-  --transport MODE         v2 (default), v3-raw, v3-auto, or v3-zstd
+  --transport MODE         auto (default), v2, v3-raw, v3-auto, or v3-zstd
   --transport-diagnostics   Log receive statistics every five seconds
   --interactive           Send primary-button clicks as PPFB pointer input
   -h, --help              Print this help";
@@ -40,7 +40,7 @@ impl Default for Options {
             viewport_height: DEFAULT_VIEWPORT_HEIGHT,
             save_dir: None,
             interactive: false,
-            transport: v3::ClientMode::Legacy,
+            transport: v3::ClientMode::default(),
             transport_diagnostics: false,
         }
     }
@@ -224,7 +224,7 @@ mod tests {
                 viewport_height: 1624,
                 save_dir: None,
                 interactive: false,
-                transport: v3::ClientMode::Legacy,
+                transport: v3::ClientMode::default(),
                 transport_diagnostics: false,
             }))
         );
@@ -251,7 +251,7 @@ mod tests {
                 viewport_height: 600,
                 save_dir: Some(PathBuf::from("exports")),
                 interactive: true,
-                transport: v3::ClientMode::Legacy,
+                transport: v3::ClientMode::default(),
                 transport_diagnostics: false,
             }))
         );

@@ -157,7 +157,7 @@ impl CurrentConnection {
         bytes: &[u8],
         pixel_format: V2PixelFormat,
     ) -> io::Result<FrameForward> {
-        self.forward_frame_inner(bytes, pixel_format, None, None)
+        self.forward_frame_inner(bytes, pixel_format, None, None, None)
     }
 
     #[cfg(test)]
@@ -167,7 +167,7 @@ impl CurrentConnection {
         pixel_format: V2PixelFormat,
         target: &FrameTarget,
     ) -> io::Result<FrameForward> {
-        self.forward_frame_inner(bytes, pixel_format, Some(target), None)
+        self.forward_frame_inner(bytes, pixel_format, Some(target), None, None)
     }
 
     pub(crate) fn forward_negotiated(
@@ -176,8 +176,9 @@ impl CurrentConnection {
         pixel_format: V2PixelFormat,
         target: Option<&FrameTarget>,
         connection: &ConnectionToken,
+        dimensions: Option<(u16, u16)>,
     ) -> io::Result<FrameForward> {
-        self.forward_frame_inner(bytes, pixel_format, target, Some(connection))
+        self.forward_frame_inner(bytes, pixel_format, target, Some(connection), dimensions)
     }
 
     fn forward_frame_inner(
@@ -186,6 +187,7 @@ impl CurrentConnection {
         pixel_format: V2PixelFormat,
         target: Option<&FrameTarget>,
         connection: Option<&ConnectionToken>,
+        dimensions: Option<(u16, u16)>,
     ) -> io::Result<FrameForward> {
         let mut guard = self.inner.lock().expect("current connection lock");
         let Some(active) = guard.as_mut() else {
@@ -201,6 +203,9 @@ impl CurrentConnection {
             if active.viewport != Some(target.viewport) {
                 return Ok(FrameForward::ViewportChanged);
             }
+        }
+        if active.encodings.is_some() && dimensions.is_some() && dimensions != active.viewport {
+            return Ok(FrameForward::ViewportChanged);
         }
         if !active.pixel_formats.supports(pixel_format) {
             return Ok(FrameForward::UnsupportedPixelFormat);

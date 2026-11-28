@@ -62,7 +62,7 @@ impl PaperpadConfig {
         Ok(Self {
             host: host.map(str::to_owned),
             port,
-            transport: ClientMode::Legacy,
+            transport: ClientMode::default(),
         })
     }
 }
@@ -88,7 +88,7 @@ mod tests {
             PaperpadConfig {
                 host: None,
                 port: DEFAULT_COMPANION_PORT,
-                transport: ClientMode::Legacy,
+                transport: ClientMode::default(),
             }
         );
     }

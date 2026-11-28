@@ -77,8 +77,8 @@ struct Options {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 enum HostCompression {
-    #[default]
     Raw,
+    #[default]
     Auto,
     Zstd,
 }
@@ -438,7 +438,13 @@ impl FrameSender {
         let socket_write_started = Instant::now();
         let forwarded = self
             .current
-            .forward_negotiated(&encoded, pixel_format, target, &connection)
+            .forward_negotiated(
+                &encoded,
+                pixel_format,
+                target,
+                &connection,
+                authoritative.as_ref().map(AuthoritativeFrame::dimensions),
+            )
             .map_err(|error| format!("failed to write frame: {error}"))?;
         let socket_write_elapsed = socket_write_started.elapsed();
         match forwarded {
@@ -1448,6 +1454,11 @@ mod tests {
             .unwrap();
         let sender = FrameSender::new(current.clone());
         let target = current.frame_target(PixelFormat::Gray8).unwrap();
+        let wrong_size = diagnostic("frame gray 42 4x2");
+        assert_eq!(
+            sender.send_diagnostic(wrong_size).unwrap_err(),
+            "PaperPad viewport changed while preparing frame"
+        );
 
         let mut state = 0x5eed_u32;
         let noise = (0..4096)
@@ -2509,6 +2520,12 @@ mod tests {
         assert_eq!(opts.port, 5581);
         assert_eq!(opts.log_path, "/tmp/paperspoon.log");
         assert_eq!(opts.latency_log_path, DEFAULT_LATENCY_LOG_FILE);
+        assert_eq!(
+            opts.compression.negotiate(Some(v3::Encodings::RAW_ZSTD)),
+            Ok(Some(v3::Encodings::RAW_ZSTD))
+        );
+        assert_eq!(opts.compression.negotiate(None), Ok(None));
+        assert_eq!(opts.compression_level, 1);
         assert!(opts.forward_url);
     }
 

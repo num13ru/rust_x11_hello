@@ -540,3 +540,34 @@ failed to build in the current ARMv7 environment. The wrapped compiler rejected
 an injected flag and the unwrapped compiler lacked target C headers. Kindle
 performance and the 10 ms decode target remain unverified for this candidate.
 The production build continues to use the Rust backend.
+
+## Production conclusion
+
+PPFB v3 uses independent full-frame Zstandard level 1 with per-frame Raw
+fallback. PaperPad and PaperView share the bounded decoder for Mono1 and Gray8.
+The Kindle uses the existing mixed-waveform display backend.
+
+In the matched one-minute Kindle samples, Zstandard reduced Wi-Fi receive
+bytes by 95.3%. Now Playing receive-and-decode P95 fell from 321.0 ms to
+13.6 ms. Savings varied by content. All three high-entropy test frames used
+Raw fallback. [Matched Wi-Fi sessions](#matched-wi-fi-sessions-on-paperwhite-6) ·
+[Matched waveform and motion sessions](#matched-waveform-and-motion-sessions)
+
+Compatible peers negotiate v3 by default. When a v2-only host closes the probe
+before acknowledging it, the client retries v2 Raw on a fresh connection.
+Explicit v2 and Raw modes remain available. The deployment workflow retains
+and verifies the previous Kindle binary for rollback.
+[Protocol and compatibility](../ppfb-v3.md#connection-setup)
+
+Dense Gray8 exceeded the provisional 10 ms decode P95 goal. The videos show
+a visible seekbar response in both modes. Exact touch-to-panel latency, battery
+impact, and stability beyond the measured playback window remain unmeasured.
+These observations are accepted limitations for this release.
+[Decoder comparison](#identical-payload-decoder-comparison-on-paperwhite-6) ·
+[Filmed Kindle seeks](#filmed-kindle-seeks) ·
+[Playback stability](#matched-nine-minute-playback-stability)
+
+Future work covers Kindle sleep/wake and display recovery, Dirty Tiles and
+absolute framebuffer patches, adaptive full-frame versus patch encoding,
+dense Gray8 optimization, spatial predictive filters, alternative codecs,
+battery measurements, and extended stability testing.

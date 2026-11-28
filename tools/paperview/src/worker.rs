@@ -45,7 +45,7 @@ impl WorkerConfig {
             write_timeout: DEFAULT_WRITE_TIMEOUT,
             read_timeout: DEFAULT_READ_TIMEOUT,
             reconnect_delay: DEFAULT_RECONNECT_DELAY,
-            transport: v3::ClientMode::Legacy,
+            transport: v3::ClientMode::default(),
             transport_diagnostics: false,
         }
     }

@@ -65,6 +65,12 @@ impl fmt::Display for ConnectionError {
     }
 }
 
+impl From<io::Error> for ConnectionError {
+    fn from(error: io::Error) -> Self {
+        Self::Negotiate(error)
+    }
+}
+
 impl std::error::Error for ConnectionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
@@ -143,7 +149,7 @@ pub(crate) fn connect_session(
         };
         match TcpStream::connect_timeout(&address, remaining) {
             Ok(stream) => {
-                connected = Some(stream);
+                connected = Some((address, stream));
                 break;
             }
             Err(error) => last_error = Some(error),
@@ -156,7 +162,7 @@ pub(crate) fn connect_session(
             port,
         });
     }
-    let mut stream = connected.ok_or_else(|| ConnectionError::Connect {
+    let (address, stream) = connected.ok_or_else(|| ConnectionError::Connect {
         host: host.to_string(),
         port,
         source: last_error.unwrap_or_else(|| {
@@ -166,19 +172,7 @@ pub(crate) fn connect_session(
             )
         }),
     })?;
-
-    stream
-        .set_nodelay(true)
-        .map_err(|source| ConnectionError::Configure {
-            operation: "enable TCP_NODELAY",
-            source,
-        })?;
-    stream
-        .set_write_timeout(Some(write_timeout))
-        .map_err(|source| ConnectionError::Configure {
-            operation: "set write timeout",
-            source,
-        })?;
+    let mut stream = configure_stream(stream, write_timeout)?;
     if mode == v3::ClientMode::Legacy {
         let encoded = V2Hello::with_pixel_formats(viewport_width, viewport_height, formats)
             .encode_message()
@@ -195,17 +189,44 @@ pub(crate) fn connect_session(
             operation: "set HelloAck read timeout",
             source,
         })?;
-    let agreed = mode
-        .negotiate(
-            &mut stream,
-            v3::Viewport {
-                width: viewport_width,
-                height: viewport_height,
-                formats,
-            },
-        )
-        .map_err(ConnectionError::Negotiate)?;
-    Ok((stream, agreed))
+    mode.negotiate(
+        stream,
+        v3::Viewport {
+            width: viewport_width,
+            height: viewport_height,
+            formats,
+        },
+        || {
+            let stream =
+                TcpStream::connect_timeout(&address, connect_timeout).map_err(|source| {
+                    ConnectionError::Connect {
+                        host: host.to_string(),
+                        port,
+                        source,
+                    }
+                })?;
+            configure_stream(stream, write_timeout)
+        },
+    )
+}
+
+fn configure_stream(
+    stream: TcpStream,
+    write_timeout: Duration,
+) -> Result<TcpStream, ConnectionError> {
+    stream
+        .set_nodelay(true)
+        .map_err(|source| ConnectionError::Configure {
+            operation: "enable TCP_NODELAY",
+            source,
+        })?;
+    stream
+        .set_write_timeout(Some(write_timeout))
+        .map_err(|source| ConnectionError::Configure {
+            operation: "set write timeout",
+            source,
+        })?;
+    Ok(stream)
 }
 
 pub(crate) fn validate_inputs(

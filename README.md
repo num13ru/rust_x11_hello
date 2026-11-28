@@ -12,7 +12,7 @@ for a macOS companion called PaperSpoon.
 ```text
 macOS                                      Kindle
 
-PaperSpoon -- PPFB v2 framebuffer ------> PaperPad -- MXCFB
+PaperSpoon -- PPFB framebuffer ------> PaperPad -- MXCFB
            <----- pointer events ---------          -- local Exit
 ```
 
@@ -27,8 +27,9 @@ PPFB v2 uses typed binary messages for capability negotiation, viewport
 changes, pointer phases, and frames. Mono1 is row-major and MSB-first (`0` is
 white); Gray8 uses one byte per pixel (`0` is black and `255` is white).
 Payloads are capped at 16 MiB and validated before becoming authoritative.
-Raw v2 is the default. Opt-in PPFB v3 can negotiate independent Zstandard
-frames with raw fallback. See the [PPFB v3 setup and wire format](docs/ppfb-v3.md).
+Compatible peers negotiate PPFB v3 by default for independent Zstandard
+level-1 frames with Raw fallback. Automatic mode retries a v2-only host
+on a fresh connection. See the [PPFB v3 setup and wire format](docs/ppfb-v3.md).
 
 PaperSpoon embeds pinned IBM Plex Mono and Inter font assets, so host UI
 rendering does not depend on installed macOS fonts or network access. Mono1
@@ -163,7 +164,7 @@ mtp-rs rm /extensions/rust_x11_hello/bin/rust_x11_hello.previous --yes
 
 ### 4. Run from KUAL
 
-KUAL provides normal run, explicit benchmark, and diagnostic actions:
+KUAL separates regular **PaperPad** actions from **PaperPad Benchmarks**.
 
 - **Run Paperpad DU (5m)** uses DU for binary pixel transitions and GC16
   for grayscale. **Run Paperpad GC16 (5m)** uses GC16 for all remote
@@ -172,10 +173,11 @@ KUAL provides normal run, explicit benchmark, and diagnostic actions:
   use direct framebuffer output, exclusive evdev input, and a five-minute
   watchdog. The local system strip, startup clearing, and framebuffer
   restoration use GC16.
+- **Run Paperpad DU with PPFB v2 (5m)** forces legacy Raw transport.
 - **Test MXCFB TERM cleanup (15s)** — normal MXCFB runtime with a short
   watchdog for verifying graceful `TERM`, framebuffer restoration, and clean
   process exit; it is not a benchmark.
-- **Benchmark MXCFB GC16/DU/A2/DU4** — separate, explicit 12-frame local
+- In **PaperPad Benchmarks**, **Benchmark MXCFB GC16/DU/A2/DU4** — separate, explicit 12-frame local
   completion benchmarks with a one-minute watchdog. They use native evdev for
   local Exit, derive geometry from `/dev/fb0`, and open no X11 or PaperSpoon
   connection; DU, A2, and DU4 are experimental fidelity/ghosting tradeoffs.
@@ -199,7 +201,7 @@ PaperPad normally discovers PaperSpoon automatically:
 ```text
 Kindle UDP 5582 -- DISCOVER --> broadcast UDP 5580
 Kindle UDP 5582 <-- HERE ----- PaperSpoon
-Kindle          -- PPFB v2 --> advertised TCP port
+Kindle          -- PPFB    --> advertised TCP port
 ```
 
 Discovery accepts exactly one distinct responder, uses three bounded 500 ms
@@ -226,6 +228,7 @@ Other runtime overrides are:
 | `PAPERPAD_MXCFB_BENCHMARK_WAVEFORM=gc16\|du\|a2\|du4` | Explicit benchmark waveform; defaults to GC16 |
 | `PAPERPAD_MXCFB_BENCHMARK_FRAMES=2..120` | Completed benchmark samples; defaults to 8 |
 | `PAPERPAD_MXCFB_BENCHMARK_REGION=full\|WIDTHxHEIGHT` | Centered benchmark region inside the remote viewport; defaults to full |
+| `PAPERPAD_TRANSPORT=auto\|v2\|v3-raw\|v3-auto\|v3-zstd` | Defaults to `auto` with v2 compatibility |
 | `PAPERPAD_EXT_DIR` | KUAL extension directory |
 | `PAPERPAD_WATCHDOG_SECONDS` | Maximum run duration |
 | `PAPERPAD_WATCHDOG_TERM_GRACE_SECONDS` | Grace period before forced stop; defaults to 15 seconds |

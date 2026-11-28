@@ -281,17 +281,16 @@ fn write_hello(
 }
 
 fn negotiate(
-    stream: &mut TcpStream,
+    stream: TcpStream,
+    addr: SocketAddr,
     viewport: (u16, u16),
     formats: V2PixelFormats,
     mode: v3::ClientMode,
-) -> Result<Option<v3::Encodings>> {
-    if mode == v3::ClientMode::Legacy {
-        write_hello(stream, viewport, formats)?;
-        return Ok(None);
+) -> Result<(TcpStream, Option<v3::Encodings>)> {
+    if mode != v3::ClientMode::Legacy {
+        stream.set_read_timeout(Some(Duration::from_secs(2)))?;
     }
-    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
-    let encodings = mode
+    let (stream, encodings) = mode
         .negotiate(
             stream,
             v3::Viewport {
@@ -299,11 +298,15 @@ fn negotiate(
                 height: viewport.1,
                 formats,
             },
+            || connect_stream(addr),
         )
         .context("PaperSpoon transport negotiation failed")?;
     stream.set_read_timeout(None)?;
-    eprintln!("PaperSpoon: negotiated PPFB v3 encodings={encodings:?}");
-    Ok(encodings)
+    match encodings {
+        Some(encodings) => eprintln!("PaperSpoon: negotiated PPFB v3 encodings={encodings:?}"),
+        None => eprintln!("PaperSpoon: using PPFB v2 Raw"),
+    }
+    Ok((stream, encodings))
 }
 
 struct QueuedOutbound {
@@ -683,13 +686,13 @@ impl Paperspoon {
                 if worker_stopping.is_requested() {
                     break;
                 }
-                let connected = connect().and_then(|(addr, mut stream)| {
-                    let encodings = if transport == v3::ClientMode::Legacy {
-                        None
-                    } else {
-                        let viewport = *worker_viewport.lock().expect("remote viewport lock");
-                        negotiate(&mut stream, viewport, pixel_formats, transport)?
-                    };
+                let connected = connect().and_then(|(addr, stream)| {
+                    if transport == v3::ClientMode::Legacy {
+                        return Ok((addr, stream, None));
+                    }
+                    let viewport = *worker_viewport.lock().expect("remote viewport lock");
+                    let (stream, encodings) =
+                        negotiate(stream, addr, viewport, pixel_formats, transport)?;
                     Ok((addr, stream, encodings))
                 });
                 match connected {
@@ -792,7 +795,10 @@ impl Paperspoon {
         // fresh socket — proactive auto-reconnect without user input.
         frames.set_viewport(remote_viewport);
         let runtime_wake = frames.runtime_wake.clone();
-        let connection = Arc::new(Mutex::new(ConnectionState::connected(stream)));
+        let connection = Arc::new(Mutex::new(ConnectionState::connected(
+            stream,
+            encodings.is_some(),
+        )));
         let remote_viewport = Arc::new(Mutex::new(remote_viewport));
         let (outbound_tx, outbound_rx) = mpsc::sync_channel(OUTBOUND_QUEUE_CAPACITY);
         let (wake_tx, wake_rx) = mpsc::channel::<()>();
@@ -848,31 +854,12 @@ impl Paperspoon {
                     if worker_stopping.is_requested() {
                         break 'reconnector;
                     }
-                    match TcpStream::connect_timeout(&addr, TCP_CONNECT_TIMEOUT) {
-                        Ok(mut new_stream) => {
-                            if configure_stream(&new_stream).is_err() {
-                                let _ = new_stream.shutdown(Shutdown::Both);
-                                std::thread::sleep(TCP_CONNECT_TIMEOUT);
-                                continue;
-                            }
-                            let viewport =
-                                *worker_remote_viewport.lock().expect("remote viewport lock");
-                            let encodings = match negotiate(
-                                &mut new_stream,
-                                viewport,
-                                pixel_formats,
-                                transport,
-                            ) {
-                                Ok(encodings) => encodings,
-                                Err(error) => {
-                                    eprintln!("PaperSpoon reconnect: {error:#}");
-                                    let _ = new_stream.shutdown(Shutdown::Both);
-                                    if !worker_stopping.wait_retry(STARTUP_RETRY_INTERVAL) {
-                                        break 'reconnector;
-                                    }
-                                    continue;
-                                }
-                            };
+                    let viewport = *worker_remote_viewport.lock().expect("remote viewport lock");
+                    let session = connect_stream(addr).and_then(|stream| {
+                        negotiate(stream, addr, viewport, pixel_formats, transport)
+                    });
+                    match session {
+                        Ok((new_stream, encodings)) => {
                             let fresh_reader = new_stream.try_clone().expect("fresh clone");
                             {
                                 let mut guard =
@@ -881,7 +868,7 @@ impl Paperspoon {
                                     let _ = new_stream.shutdown(Shutdown::Both);
                                     break 'reconnector;
                                 }
-                                guard.reconnect(new_stream);
+                                guard.reconnect(new_stream, encodings.is_some());
                             }
                             worker_runtime_wake.notify();
                             active_reader = Some(spawn_reader(
@@ -893,7 +880,12 @@ impl Paperspoon {
                             ));
                             break;
                         }
-                        Err(_) => std::thread::sleep(TCP_CONNECT_TIMEOUT),
+                        Err(error) => {
+                            eprintln!("PaperSpoon reconnect: {error:#}");
+                            if !worker_stopping.wait_retry(STARTUP_RETRY_INTERVAL) {
+                                break 'reconnector;
+                            }
+                        }
                     }
                 }
             }
@@ -1006,13 +998,14 @@ impl Paperspoon {
         trace: Option<V2PointerTrace>,
     ) -> Result<()> {
         self.promote_startup();
-        if self.transport != v3::ClientMode::Legacy {
+        let (connection, uses_v3) = self
+            .connection
+            .lock()
+            .expect("shared stream lock")
+            .current_session()?;
+        if uses_v3 {
             v3::encode_control(&mut bytes)?;
         }
-        let connection = {
-            let guard = self.connection.lock().expect("shared stream lock");
-            guard.current_token()?
-        };
         let outbound_tx = self
             .outbound_tx
             .as_ref()
@@ -1304,11 +1297,11 @@ mod tests {
         let addr = listener.local_addr().expect("listener address");
         let stream = connect_stream(addr).expect("connect stream");
         let _peer = accept_before(&listener, Duration::from_secs(2));
-        let connection = Arc::new(Mutex::new(ConnectionState::connected(stream)));
+        let connection = Arc::new(Mutex::new(ConnectionState::connected(stream, false)));
         let (connection_token, shutdown_stream) = {
             let guard = connection.lock().expect("connection lock");
             (
-                guard.current_token().expect("current token"),
+                guard.current_session().expect("current token").0,
                 guard
                     .clone_stream()
                     .expect("clone stream for shutdown")
@@ -2044,6 +2037,71 @@ mod tests {
         assert_eq!(frame.pixels(), latest.pixels());
         assert!(paperspoon.poll_frame().is_none());
         assert!(paperspoon.is_connected());
+    }
+
+    #[test]
+    fn default_transport_retries_legacy_and_upgrades_after_reconnect() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let formats = V2PixelFormats::MONO1;
+        let mut paperspoon = Paperspoon::start_with_transport(
+            move || connect_stream(addr).map(|stream| (addr, stream)),
+            None,
+            TEST_VIEWPORT,
+            formats,
+            RuntimeWake::default(),
+            v3::ClientMode::default(),
+        );
+        let accept = || {
+            let peer = accept_before(&listener, Duration::from_secs(3));
+            peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+            peer
+        };
+        let read_v3_hello = |peer: &mut TcpStream| {
+            let mut message = [0; v3::HEADER_LEN + 8];
+            peer.read_exact(&mut message).unwrap();
+            let header = v3::Header::decode(message[..v3::HEADER_LEN].try_into().unwrap()).unwrap();
+            assert_eq!(header.kind, v3::Kind::Hello);
+            assert_eq!(
+                v3::Hello::decode(&message[v3::HEADER_LEN..])
+                    .unwrap()
+                    .encodings,
+                v3::Encodings::RAW_ZSTD
+            );
+        };
+        let send_pointer = |paperspoon: &mut Paperspoon| {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            loop {
+                if paperspoon.send_pointer(V2PointerPhase::Down, 7, 8).is_ok() {
+                    break;
+                }
+                assert!(Instant::now() < deadline, "session did not accept input");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+
+        let mut probe = accept();
+        read_v3_hello(&mut probe);
+        drop(probe);
+        let mut legacy = accept();
+        read_expected_hello(&mut legacy, TEST_VIEWPORT);
+        send_pointer(&mut paperspoon);
+        let pointer = V2Pointer::new(V2PointerPhase::Down, 7, 8);
+        read_expected_pointer(&mut legacy, pointer);
+        drop(legacy);
+
+        let mut upgraded = accept();
+        read_v3_hello(&mut upgraded);
+        upgraded
+            .write_all(&v3::encode_ack(v3::Encodings::RAW_ZSTD))
+            .unwrap();
+        send_pointer(&mut paperspoon);
+        let mut control = [0; v3::HEADER_LEN + paper_protocol::V2_POINTER_PAYLOAD_LEN];
+        upgraded.read_exact(&mut control).unwrap();
+        assert_eq!(
+            v3::decode_control(&mut control).unwrap(),
+            V2Payload::Pointer(pointer)
+        );
     }
 
     #[test]

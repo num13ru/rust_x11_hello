@@ -3,39 +3,39 @@
 This specification covers independent frame transport. PPFB version 2
 retains its existing framing and raw framebuffer payload.
 
-## Opt-in validation
+## Running PaperPad and PaperView
 
-Run the updated PaperSpoon with compression enabled and URL actions disabled
-for a safe local test. These settings use level 1 and the fake media provider.
+Start PaperSpoon with the fake provider and URL actions disabled for a local
+check. The default encoding level is 1.
 
 ```sh
 cargo run --release -p paperspoon -- 5581 /tmp/paperspoon-v3.log \
-    --compression=auto --now-playing-fake --no-forward-url
+    --now-playing-fake --no-forward-url
 ```
 
 For PaperView, open a second terminal and run:
 
 ```sh
-cargo run -p paperview -- --transport v3-auto --transport-diagnostics --interactive
+cargo run -p paperview -- --transport-diagnostics --interactive
 ```
 
 For PaperPad, deploy the verified ARMv7 build, unplug USB, open KUAL, and tap
-**PaperPad → Run Paperpad DU with PPFB v3 (5m)**. The connection indicator should
+**PaperPad → Run Paperpad DU (5m)**. The connection indicator should
 fill and the application grid should appear. Enter `nowplaying start` in
 PaperSpoon, try play/pause and seeking, then tap **Exit** on the Kindle. The
 launcher records transport events and the final cleanup status locally.
 
-PaperSpoon defaults to `--compression=raw`. `auto` allows a legacy v2 or raw
-v3 session and prefers Zstandard when negotiated. `zstd` requires a peer
-that offers Zstandard. All v3 sessions retain per-frame raw fallback.
-`--compression-level=1|3|6` selects the host encoder setting.
+PaperSpoon defaults to `--compression=auto`. It serves v2 clients with Raw
+and negotiates Zstandard with capable v3 clients. Use `--compression=raw`
+to serve Raw only, or `--compression=zstd` to require v3 clients that offer
+Zstandard. Each v3 session can fall back to Raw per frame. The host's
+`--compression-level=1|3|6` override remains available.
 
-PaperView's `--transport` and PaperPad's `PAPERPAD_TRANSPORT` take `v2`,
-`v3-raw`, `v3-auto`, or `v3-zstd`. Both default to `v2`. Select `v3-raw`
-for a raw v3 diagnostic session and `v3-zstd` to require the host's Zstandard
-capability. The KUAL v3 entry selects `v3-auto`. Use the regular **Run
-Paperpad DU (5m)** KUAL entry for a legacy raw comparison. A v3 acknowledgment
-error from a v2-only server requires an explicit switch to `v2`.
+PaperView's `--transport` and PaperPad's `PAPERPAD_TRANSPORT` default to
+`auto`. Use `v2` to force legacy Raw, `v3-raw` to force Raw under v3,
+`v3-auto` to require v3 with either codec, or `v3-zstd` to require v3 and
+Zstandard capability. In KUAL, **Run Paperpad DU with PPFB v2 (5m)** forces
+legacy Raw transport.
 
 The [validation report](benchmarks/ppfb-v3-validation.md) tracks desktop and
 device evidence separately.
@@ -43,7 +43,7 @@ device evidence separately.
 ### Matched Kindle measurements
 
 Start PaperSpoon with the fake provider and `--compression=auto` as above.
-In KUAL, use **Measure PPFB v3 Raw (15m)** for one pass and **Measure PPFB
+In KUAL’s **PaperPad Benchmarks** group, use **Measure PPFB v3 Raw (15m)** for one pass and **Measure PPFB
 v3 Zstandard (15m)** for the other. Both use the DU display policy and the
 same watchdog. Start fresh fake Now Playing for each pass by entering
 `nowplaying stop` and then `nowplaying start` in PaperSpoon. Use the same
@@ -59,20 +59,25 @@ Use device monotonic timestamps for receiver and presentation timings.
 
 ## Connection setup
 
-The client chooses v2 legacy mode or opts into v3 and sends Hello first.
-A dual-version host selects the session version from that first header.
-Version 2 sends no acknowledgment. Version 3 requires a HelloAck before any
-frame or control message. The acknowledgment confirms a subset of the
-client's advertised encodings. Raw is required. Zstandard is optional. The
-intersection is valid for one TCP connection and is negotiated again on
-reconnect. A strict Zstandard request requires Zstandard in the acknowledgment.
+In default `auto` mode the client sends a v3 Hello first. If the host closes
+or resets the connection before sending any HelloAck bytes, the client opens
+a fresh socket to the same endpoint and sends a v2 Hello. Explicit v3 modes
+report handshake errors. A malformed or partial reply fails the handshake.
+Use `v2` explicitly if a legacy peer leaves the v3 probe open until timeout.
+
+A dual-version host chooses the session version from the first Hello header.
+v2 sends no acknowledgment. v3 requires a HelloAck before any frame or
+control message. Its encoding mask is a subset of the offer. Raw is required
+and Zstandard is optional. A strict Zstandard request requires Zstandard in
+the acknowledgment. Version and encodings are negotiated on every reconnect.
 
 | Host | Client selection | Result |
 |---|---|---|
-| v2 | v2 legacy | Raw v2 |
-| v2 + v3 | v2 legacy | Raw v2 |
-| v2 | v3 | Unsupported version. Select v2 legacy and reconnect. |
-| v2 + v3 | v3 | Raw v3 with optional Zstandard |
+| v2 | `auto` or `v2` | Raw v2 |
+| v2 | explicit v3 | Handshake fails |
+| v2 + v3 | `v2` | Raw v2 |
+| v2 + v3 | `auto` or `v3-auto` | v3 with Zstandard if available, otherwise Raw |
+| v2 + v3 | `v3-raw` | Raw v3 |
 
 An endpoint closes the connection on unsupported versions, invalid handshake
 or frame metadata, or decompression failure. A new connection starts with

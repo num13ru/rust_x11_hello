@@ -1104,11 +1104,11 @@ Add production measurements separately so standalone benchmark results and integ
 
 ## 27. Implementation milestones
 
-The validation report records the codec, compatibility, and physical-device
-checks. PPFB v2 remains the default. The opt-in PPFB v3 mode uses Zstandard
-level 1 with per-frame Raw fallback. Dense Gray8 exceeded the 10 ms decode
-P95 target, so the initial rollout is opt-in.
-[PPFB v3 validation results](benchmarks/ppfb-v3-validation.md)
+PPFB v3 is the production default for compatible peers. It uses independent
+full-frame Zstandard level 1 with per-frame Raw fallback. Automatic negotiation
+retries PPFB v2 Raw on a fresh connection when a legacy host closes the v3
+probe. The release accepts the recorded measurement limitations.
+[Production conclusion](benchmarks/ppfb-v3-validation.md#production-conclusion)
 
 ### M0 — Additional evidence
 
@@ -1169,9 +1169,9 @@ P95 target, so the initial rollout is opt-in.
 - [x] Measure peak memory consumption.
 - [x] Measure production binary size.
 - [ ] Measure end-to-end responsiveness.
-  The paired videos confirm a visible seekbar response in both modes.
-  The fingertip obscures the contact point, so exact touch-to-panel timing
-  remains open. The device logs provide release-to-presentation timings.
+  The paired videos confirm a visible seekbar response in both modes. The
+  device logs provide release-to-software-presentation timing. Exact
+  touch-to-panel timing is unmeasured and deferred for this release.
   [Filmed Kindle seeks](benchmarks/ppfb-v3-validation.md#filmed-kindle-seeks)
 - [x] Perform extended playback tests.
   Matched nine-minute runs covered device RSS, CPU time, and Wi-Fi traffic.
@@ -1181,9 +1181,9 @@ P95 target, so the initial rollout is opt-in.
 
 - [x] Review compatibility results.
 - [x] Review physical device measurements.
-- [x] Decide whether to enable automatic compression by default.
-  Keep PPFB v2 as the default for this rollout. Revisit automatic compression
-  after dense Gray8 meets the decode target and responsiveness is verified.
+- [x] Enable automatic PPFB v3 negotiation for compatible peers.
+  Zstandard level 1 is preferred and Raw fallback is available. Legacy peers
+  can use automatic downgrade or explicit PPFB v2.
 - [x] Preserve explicit Raw configuration.
 - [x] Complete protocol documentation.
 - [x] Record production evidence.

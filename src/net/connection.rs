@@ -6,7 +6,11 @@ use std::sync::Arc;
 
 pub(super) enum ConnectionState {
     Disconnected,
-    Connected { token: Arc<()>, stream: TcpStream },
+    Connected {
+        token: Arc<()>,
+        stream: TcpStream,
+        uses_v3: bool,
+    },
 }
 
 #[derive(Debug)]
@@ -33,10 +37,11 @@ impl ConnectionState {
         Self::Disconnected
     }
 
-    pub(super) fn connected(stream: TcpStream) -> Self {
+    pub(super) fn connected(stream: TcpStream, uses_v3: bool) -> Self {
         Self::Connected {
             token: Arc::new(()),
             stream,
+            uses_v3,
         }
     }
 
@@ -44,15 +49,15 @@ impl ConnectionState {
         matches!(self, Self::Connected { .. })
     }
 
-    pub(super) fn current_token(&self) -> Result<ConnectionToken> {
-        let Self::Connected { token, .. } = self else {
+    pub(super) fn current_session(&self) -> Result<(ConnectionToken, bool)> {
+        let Self::Connected { token, uses_v3, .. } = self else {
             return Err(anyhow!("PaperSpoon not connected"));
         };
-        Ok(ConnectionToken(Arc::clone(token)))
+        Ok((ConnectionToken(Arc::clone(token)), *uses_v3))
     }
 
     pub(super) fn clone_stream(&self) -> Result<ConnectionStream> {
-        let Self::Connected { token, stream } = self else {
+        let Self::Connected { token, stream, .. } = self else {
             return Err(anyhow!("PaperSpoon not connected"));
         };
         Ok(ConnectionStream {
@@ -64,7 +69,7 @@ impl ConnectionState {
     }
 
     pub(super) fn clone_stream_for(&self, candidate: &ConnectionToken) -> Result<ConnectionStream> {
-        let Self::Connected { token, stream } = self else {
+        let Self::Connected { token, stream, .. } = self else {
             return Err(anyhow!("PaperSpoon not connected"));
         };
         if !Arc::ptr_eq(token, &candidate.0) {
@@ -78,9 +83,9 @@ impl ConnectionState {
         })
     }
 
-    pub(super) fn reconnect(&mut self, stream: TcpStream) {
+    pub(super) fn reconnect(&mut self, stream: TcpStream, uses_v3: bool) {
         self.disconnect();
-        *self = Self::connected(stream);
+        *self = Self::connected(stream, uses_v3);
     }
 
     pub(super) fn disconnect_if_current(&mut self, candidate: &ConnectionStream) -> bool {
@@ -125,7 +130,7 @@ mod tests {
         assert!(!state.is_connected());
         let error = state.clone_stream().expect_err("must be disconnected");
         assert!(error.to_string().contains("PaperSpoon not connected"));
-        state.current_token().expect_err("must have no token");
+        state.current_session().expect_err("must have no token");
     }
 
     #[test]
@@ -139,8 +144,8 @@ mod tests {
             .set_read_timeout(Some(Duration::from_secs(2)))
             .expect("set replacement peer timeout");
 
-        let mut state = ConnectionState::connected(first);
-        state.reconnect(replacement);
+        let mut state = ConnectionState::connected(first, false);
+        state.reconnect(replacement, false);
         assert!(state.is_connected());
 
         let mut byte = [0];
@@ -162,7 +167,7 @@ mod tests {
         let (client, mut peer) = tcp_pair();
         peer.set_read_timeout(Some(Duration::from_secs(2)))
             .expect("set peer timeout");
-        let mut state = ConnectionState::connected(client);
+        let mut state = ConnectionState::connected(client, false);
         let _clone = state.clone_stream().expect("clone connected stream");
 
         state.disconnect();
@@ -181,10 +186,10 @@ mod tests {
             .set_read_timeout(Some(Duration::from_secs(2)))
             .expect("set replacement peer timeout");
 
-        let mut state = ConnectionState::connected(first);
-        let stale_token = state.current_token().expect("first token");
+        let mut state = ConnectionState::connected(first, false);
+        let stale_token = state.current_session().expect("first token").0;
         let stale = state.clone_stream().expect("clone first stream");
-        state.reconnect(replacement);
+        state.reconnect(replacement, false);
 
         assert!(
             state

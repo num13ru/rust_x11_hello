@@ -158,10 +158,10 @@ pub fn decode_ack(payload: &[u8], offered: Encodings) -> io::Result<Encodings> {
     Ok(Encodings(mask))
 }
 
-/// Legacy is explicit because a v2-only host cannot answer a v3 Hello.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum ClientMode {
     #[default]
+    PreferV3,
     Legacy,
     Raw,
     Auto,
@@ -173,21 +173,43 @@ impl std::str::FromStr for ClientMode {
 
     fn from_str(value: &str) -> io::Result<Self> {
         match value {
+            "auto" => Ok(Self::PreferV3),
             "v2" => Ok(Self::Legacy),
             "v3-raw" => Ok(Self::Raw),
             "v3-auto" => Ok(Self::Auto),
             "v3-zstd" => Ok(Self::Zstd),
             _ => Err(io::Error::new(
                 ErrorKind::InvalidInput,
-                "expected v2, v3-raw, v3-auto, or v3-zstd",
+                "expected auto, v2, v3-raw, v3-auto, or v3-zstd",
             )),
         }
     }
 }
 
 impl ClientMode {
-    /// The caller sets bounded socket timeouts before requesting a v3 session.
-    pub fn negotiate(
+    /// Automatic mode retries v2 on a fresh connection when the peer closes
+    /// before acknowledging v3. Both connections must have bounded timeouts.
+    pub fn negotiate<S: Read + Write, E: From<io::Error>>(
+        self,
+        mut stream: S,
+        viewport: Viewport,
+        reconnect: impl FnOnce() -> Result<S, E>,
+    ) -> Result<(S, Option<Encodings>), E> {
+        if self != Self::Legacy {
+            if let Some(encodings) = self.negotiate_v3(&mut stream, viewport)? {
+                return Ok((stream, Some(encodings)));
+            }
+            drop(stream);
+            stream = reconnect()?;
+        }
+        let hello =
+            crate::V2Hello::with_pixel_formats(viewport.width, viewport.height, viewport.formats);
+        let encoded = hello.encode_message().map_err(io::Error::other)?;
+        stream.write_all(&encoded)?;
+        Ok((stream, None))
+    }
+
+    fn negotiate_v3(
         self,
         stream: &mut (impl Read + Write),
         viewport: Viewport,
@@ -197,12 +219,6 @@ impl ClientMode {
             height,
             formats,
         } = viewport;
-        if self == Self::Legacy {
-            let hello = crate::V2Hello::with_pixel_formats(width, height, formats);
-            let encoded = hello.encode_message().map_err(io::Error::other)?;
-            stream.write_all(&encoded)?;
-            return Ok(None);
-        }
         let encodings = if self == Self::Raw {
             Encodings::RAW
         } else {
@@ -218,12 +234,23 @@ impl ClientMode {
             .encode(),
         )?;
         let mut bytes = [0; HEADER_LEN];
-        stream.read_exact(&mut bytes).map_err(|error| {
-            io::Error::new(
+        if let Err(error) = stream.read_exact(&mut bytes[..1]) {
+            if self == Self::PreferV3
+                && matches!(
+                    error.kind(),
+                    ErrorKind::UnexpectedEof
+                        | ErrorKind::ConnectionReset
+                        | ErrorKind::ConnectionAborted
+                )
+            {
+                return Ok(None);
+            }
+            return Err(io::Error::new(
                 error.kind(),
                 format!("PPFB v3 HelloAck unavailable: {error}. Use v2 with a legacy host"),
-            )
-        })?;
+            ));
+        }
+        stream.read_exact(&mut bytes[1..])?;
         let header = Header::decode(bytes)?;
         if header.kind != Kind::HelloAck || header.payload_len != 4 {
             return Err(invalid("expected PPFB v3 HelloAck before frames"));
@@ -564,6 +591,26 @@ mod tests {
         ));
         let legacy = crate::V2Hello::new(1272, 1624).encode_message().unwrap();
         assert!(Header::decode(legacy[..HEADER_LEN].try_into().unwrap()).is_err());
+    }
+
+    #[test]
+    fn automatic_mode_rejects_partial_and_invalid_acknowledgments() {
+        let viewport = Viewport {
+            width: 1272,
+            height: 1624,
+            formats: V2PixelFormats::GRAY8,
+        };
+        let unknown_ack_bits = encode_ack(Encodings(7));
+        for reply in [&ACK[..1], &unknown_ack_bits] {
+            // Reserve the write portion before the simulated reply.
+            let mut exchange = vec![0; HELLO.len()];
+            exchange.extend_from_slice(reply);
+            let result: io::Result<_> =
+                ClientMode::default().negotiate(io::Cursor::new(exchange), viewport, || {
+                    panic!("v3 replies must not trigger a v2 retry")
+                });
+            assert!(result.is_err());
+        }
     }
 
     #[test]
