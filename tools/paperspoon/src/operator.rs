@@ -1,6 +1,6 @@
 //! Explicit stdin commands for host-generated framebuffers.
 
-use paperspoon::now_playing_provider::FakeChange;
+use crate::now_playing_provider::FakeChange;
 use std::path::PathBuf;
 
 use paper_protocol::{
@@ -9,7 +9,7 @@ use paper_protocol::{
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum DiagnosticPattern {
+pub enum DiagnosticPattern {
     White,
     Black,
     Horizontal,
@@ -22,7 +22,8 @@ enum DiagnosticPattern {
 }
 
 impl DiagnosticPattern {
-    fn parse(value: &str) -> Option<Self> {
+    /// Validated name lookup used by both stdin parsing and typed TUI construction.
+    pub fn parse(value: &str) -> Option<Self> {
         match value {
             "white" => Some(Self::White),
             "black" => Some(Self::Black),
@@ -36,7 +37,7 @@ impl DiagnosticPattern {
         }
     }
 
-    fn name(self) -> &'static str {
+    pub fn name(self) -> &'static str {
         match self {
             Self::White => "white",
             Self::Black => "black",
@@ -99,26 +100,38 @@ impl DiagnosticPattern {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct DiagnosticFrame {
+pub struct DiagnosticFrame {
     pattern: DiagnosticPattern,
     width: u16,
     height: u16,
 }
 
 impl DiagnosticFrame {
-    pub(crate) fn pattern_name(self) -> &'static str {
+    /// Validates non-zero dimensions, then wraps the pattern and size.
+    pub fn new(pattern: DiagnosticPattern, width: u16, height: u16) -> Result<Self, String> {
+        validate_dimensions(width, height)?;
+        Ok(Self {
+            pattern,
+            width,
+            height,
+        })
+    }
+}
+
+impl DiagnosticFrame {
+    pub fn pattern_name(self) -> &'static str {
         self.pattern.name()
     }
 
-    pub(crate) fn dimensions(self) -> (u16, u16) {
+    pub fn dimensions(self) -> (u16, u16) {
         (self.width, self.height)
     }
 
-    pub(crate) fn pixel_format(self) -> PixelFormat {
+    pub fn pixel_format(self) -> PixelFormat {
         self.pattern.pixel_format()
     }
 
-    pub(crate) fn encode(self, frame_id: u64) -> Result<Vec<u8>, String> {
+    pub fn encode(self, frame_id: u64) -> Result<Vec<u8>, String> {
         let pixel_bytes = match self.pixel_format() {
             PixelFormat::Mono1 => mono1_payload_len(self.width, self.height),
             PixelFormat::Gray8 => gray8_payload_len(self.width, self.height),
@@ -167,7 +180,7 @@ impl DiagnosticFrame {
 }
 
 #[derive(Debug, PartialEq)]
-pub(crate) enum StdinCommand {
+pub enum StdinCommand {
     Frame(DiagnosticFrame),
     Jpeg(PathBuf),
     NowPlaying,
@@ -175,8 +188,16 @@ pub(crate) enum StdinCommand {
     ApplicationFrame { width: u16, height: u16 },
 }
 
+impl StdinCommand {
+    /// Validated constructor for the `ui <width>x<height>` command.
+    pub fn application_frame(width: u16, height: u16) -> Result<Self, String> {
+        validate_dimensions(width, height)?;
+        Ok(Self::ApplicationFrame { width, height })
+    }
+}
+
 #[derive(Debug, PartialEq)]
-pub(crate) enum LiveCommand {
+pub enum LiveCommand {
     Start,
     Stop,
     Status,
@@ -184,7 +205,7 @@ pub(crate) enum LiveCommand {
     Fake(FakeChange),
 }
 
-pub(crate) fn parse_stdin_command(line: &str) -> Result<StdinCommand, String> {
+pub fn parse_stdin_command(line: &str) -> Result<StdinCommand, String> {
     if let Some(path) = parse_jpeg_path(line)? {
         return Ok(StdinCommand::Jpeg(path));
     }
@@ -295,6 +316,13 @@ fn parse_jpeg_path(line: &str) -> Result<Option<PathBuf>, String> {
     Ok(Some(PathBuf::from(path)))
 }
 
+fn validate_dimensions(width: u16, height: u16) -> Result<(), String> {
+    if width == 0 || height == 0 {
+        return Err("frame dimensions must be nonzero".to_string());
+    }
+    Ok(())
+}
+
 fn parse_dimensions(dimensions: &str) -> Result<(u16, u16), String> {
     let (width, height) = dimensions
         .split_once('x')
@@ -305,9 +333,7 @@ fn parse_dimensions(dimensions: &str) -> Result<(u16, u16), String> {
     let height = height
         .parse::<u16>()
         .map_err(|_| format!("invalid frame height '{height}'"))?;
-    if width == 0 || height == 0 {
-        return Err("frame dimensions must be nonzero".to_string());
-    }
+    validate_dimensions(width, height)?;
     Ok((width, height))
 }
 

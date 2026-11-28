@@ -8,5 +8,6 @@ pub mod mono_renderer;
 pub mod now_playing;
 pub mod now_playing_provider;
 pub mod now_playing_renderer;
+pub mod operator;
 pub mod operator_log;
 pub mod text_renderer;

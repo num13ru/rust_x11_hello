@@ -38,7 +38,6 @@ use paperspoon::{
     application_ui::ApplicationUi, now_playing::load_now_playing_frame, operator_log,
 };
 
-mod diagnostic;
 mod discovery;
 mod image_frame;
 mod inbound;
@@ -46,13 +45,13 @@ mod latency;
 mod live_now_playing;
 mod server;
 
-use diagnostic::{DiagnosticFrame, LiveCommand, StdinCommand, parse_stdin_command};
 use image_frame::decode_jpeg_path_fit_contain;
 use inbound::{
     SessionMessage, read_negotiated_hello, read_session_message, read_v3_session_message,
 };
 use live_now_playing::{LiveNowPlaying, ProviderKind};
 use operator_log::flush_stdout;
+use paperspoon::operator::{DiagnosticFrame, LiveCommand, StdinCommand, parse_stdin_command};
 use server::{ConnectionToken, CurrentConnection, FrameForward, FrameTarget, FrameTargetError};
 
 /// Default TCP port. Must match `rust_x11_hello`'s `COMPANION_PORT`.
