@@ -1104,76 +1104,90 @@ Add production measurements separately so standalone benchmark results and integ
 
 ## 27. Implementation milestones
 
+The validation report records the codec, compatibility, and physical-device
+checks. PPFB v2 remains the default. The opt-in PPFB v3 mode uses Zstandard
+level 1 with per-frame Raw fallback. Dense Gray8 exceeded the 10 ms decode
+P95 target, so the initial rollout is opt-in.
+[PPFB v3 validation results](benchmarks/ppfb-v3-validation.md)
+
 ### M0 — Additional evidence
 
-- [ ] Extend the artwork corpus.
-- [ ] Extend the motion corpus.
-- [ ] Evaluate Zstandard levels 1, 3, and 6.
-- [ ] Repeat representative PW6 measurements.
-- [ ] Confirm the initial production codec decision.
+- [x] Extend the artwork corpus.
+- [x] Extend the motion corpus.
+- [x] Evaluate Zstandard levels 1, 3, and 6.
+- [x] Repeat representative PW6 measurements.
+- [x] Confirm the initial production codec decision.
 
 ### M1 — Shared codec
 
-- [ ] Extract or reuse the benchmark's Zstandard implementation.
-- [ ] Implement independent framebuffer encoding.
-- [ ] Implement bounded framebuffer decoding.
-- [ ] Implement reusable codec contexts.
-- [ ] Implement Raw fallback selection.
-- [ ] Add correctness and malformed-input tests.
-- [ ] Verify ARMv7 compilation.
+- [x] Extract or reuse the benchmark's Zstandard implementation.
+- [x] Implement independent framebuffer encoding.
+- [x] Implement bounded framebuffer decoding.
+- [x] Implement reusable codec contexts.
+- [x] Implement Raw fallback selection.
+- [x] Add correctness and malformed-input tests.
+- [x] Verify ARMv7 compilation.
 
 ### M2 — Protocol evolution
 
-- [ ] Audit PPFB v2 compatibility.
-- [ ] Define the compression-capable wire format.
-- [ ] Implement explicit version negotiation.
-- [ ] Implement encoding capability negotiation.
-- [ ] Implement encoded framebuffer messages.
-- [ ] Add golden wire fixtures.
-- [ ] Add compatibility tests.
-- [ ] Document protocol behavior.
+- [x] Audit PPFB v2 compatibility.
+- [x] Define the compression-capable wire format.
+- [x] Implement explicit version negotiation.
+- [x] Implement encoding capability negotiation.
+- [x] Implement encoded framebuffer messages.
+- [x] Add golden wire fixtures.
+- [x] Add compatibility tests.
+- [x] Document protocol behavior.
 
 ### M3 — PaperSpoon and PaperView
 
-- [ ] Integrate host-side compression.
-- [ ] Preserve frame coalescing.
-- [ ] Preserve input responsiveness.
-- [ ] Integrate the shared PaperView decoder.
-- [ ] Add compression diagnostics.
-- [ ] Verify interactive Now Playing.
-- [ ] Verify Application Grid.
-- [ ] Compare exported framebuffer pixels.
+- [x] Integrate host-side compression.
+- [x] Preserve frame coalescing.
+- [x] Preserve input responsiveness.
+- [x] Integrate the shared PaperView decoder.
+- [x] Add compression diagnostics.
+- [x] Verify interactive Now Playing.
+- [x] Verify Application Grid.
+- [x] Compare exported framebuffer pixels.
 
 ### M4 — PaperPad integration
 
-- [ ] Integrate the shared decoder.
-- [ ] Preserve existing framebuffer ownership.
-- [ ] Preserve mixed-waveform planning.
-- [ ] Verify static ARMv7 compilation.
-- [ ] Deploy to PW6.
-- [ ] Verify Raw and Zstandard sessions.
-- [ ] Verify reconnect and failure paths.
+- [x] Integrate the shared decoder.
+- [x] Preserve existing framebuffer ownership.
+- [x] Preserve mixed-waveform planning.
+- [x] Verify static ARMv7 compilation.
+- [x] Deploy to PW6.
+- [x] Verify Raw and Zstandard sessions.
+- [x] Verify reconnect and failure paths.
 
 ### M5 — Production measurements
 
-- [ ] Measure host encoding latency.
-- [ ] Measure PW6 reconstruction latency.
-- [ ] Measure receiver processing latency.
-- [ ] Measure actual network traffic.
-- [ ] Measure peak memory consumption.
-- [ ] Measure production binary size.
+- [x] Measure host encoding latency.
+- [x] Measure PW6 reconstruction latency.
+- [x] Measure receiver processing latency.
+- [x] Measure actual network traffic.
+- [x] Measure peak memory consumption.
+- [x] Measure production binary size.
 - [ ] Measure end-to-end responsiveness.
-- [ ] Perform extended playback tests.
+  The paired videos confirm a visible seekbar response in both modes.
+  The fingertip obscures the contact point, so exact touch-to-panel timing
+  remains open. The device logs provide release-to-presentation timings.
+  [Filmed Kindle seeks](benchmarks/ppfb-v3-validation.md#filmed-kindle-seeks)
+- [x] Perform extended playback tests.
+  Matched nine-minute runs covered device RSS, CPU time, and Wi-Fi traffic.
+  Longer playback and controlled battery and thermal measurements remain open.
 
 ### M6 — Default activation and documentation
 
-- [ ] Review compatibility results.
-- [ ] Review physical device measurements.
-- [ ] Enable automatic compression by default if justified.
-- [ ] Preserve explicit Raw configuration.
-- [ ] Complete protocol documentation.
-- [ ] Record production evidence.
-- [ ] Document unresolved limitations.
+- [x] Review compatibility results.
+- [x] Review physical device measurements.
+- [x] Decide whether to enable automatic compression by default.
+  Keep PPFB v2 as the default for this rollout. Revisit automatic compression
+  after dense Gray8 meets the decode target and responsiveness is verified.
+- [x] Preserve explicit Raw configuration.
+- [x] Complete protocol documentation.
+- [x] Record production evidence.
+- [x] Document unresolved limitations.
 
 Do not proceed to inter-frame encoding within this milestone.
 

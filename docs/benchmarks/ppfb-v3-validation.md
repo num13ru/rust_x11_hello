@@ -217,22 +217,24 @@ Each of four PPFB v3 sessions sent the same application grid, repository
 JPEG rendered as Gray8, and Gray8 diagnostic gradient at 1272×1624. Each
 workload contributed 30 measured frames after two warm-up cycles. The
 receiver counted complete PPFB messages and verified that the decompressed
-pixels matched the raw session. Each cell shows bytes per frame and the
-sender's encode P95. Encode timing starts after JPEG acquisition and includes
+pixels matched the raw session. Each cell shows PPFB bytes per frame and nearest-rank encode P50, P95,
+and P99 in milliseconds. With 30 frames per workload, P99 is the maximum
+in this sample. Encode timing starts after JPEG acquisition and includes
 diagnostic generation for the gradient. These are application bytes sent
 over TCP loopback. Wi-Fi interface traffic and device latency are measured
 separately.
 
-| Workload | Raw bytes / encode P95 (ms) | Zstandard 1 | Zstandard 3 | Zstandard 6 |
+| Workload | Raw | Zstandard 1 | Zstandard 3 | Zstandard 6 |
 |---|---:|---:|---:|---:|
-| Application Grid | 258,244 / 0.007 | 963 / 0.029 | 1,100 / 0.034 | 1,093 / 0.092 |
-| JPEG diagnostic | 2,065,756 / 0.034 | 741,297 / 1.667 | 681,840 / 4.474 | 641,061 / 10.036 |
-| Gray8 gradient | 2,065,756 / 1.037 | 1,197 / 1.181 | 592 / 2.904 | 529 / 1.722 |
+| Application Grid | 258,244 bytes<br>0.004 / 0.007 / 0.007 ms | 963 bytes<br>0.024 / 0.029 / 0.030 ms | 1,100 bytes<br>0.026 / 0.034 / 0.035 ms | 1,093 bytes<br>0.076 / 0.092 / 0.093 ms |
+| JPEG diagnostic | 2,065,756 bytes<br>0.029 / 0.034 / 0.118 ms | 741,297 bytes<br>1.635 / 1.667 / 1.670 ms | 681,840 bytes<br>4.261 / 4.474 / 4.906 ms | 641,061 bytes<br>9.280 / 10.036 / 10.113 ms |
+| Gray8 gradient | 2,065,756 bytes<br>1.025 / 1.037 / 1.039 ms | 1,197 bytes<br>1.139 / 1.181 / 1.197 ms | 592 bytes<br>2.791 / 2.904 / 3.001 ms | 529 bytes<br>1.402 / 1.722 / 1.770 ms |
 
 Live fake Now Playing accepted three loopback pointer seeks, including a
 backward seek. Automated tests verified Raw fallback between two Zstandard
 frames on one PaperSpoon connection and PaperPad renegotiation after a
 truncated compressed frame.
+PaperSpoon CPU and RSS measurements for these four host modes remain open.
 
 The paired Kindle measurement actions record process CPU and memory alongside
 network interface counters.
@@ -319,9 +321,10 @@ Five physical seek releases reached the fake provider and succeeded, including
 backward seeks. On the device's monotonic clock, the first subsequent
 `frame_present_return` was 46–220 ms after input receipt. The frame IDs were
 correlated by event order. This timing covers software presentation return.
-A subsequent run compared Raw and Zstandard seeks. Camera-observed panel
-completion remains open.
-[Paired seek and track-change sessions](#paired-seek-and-track-change-sessions)
+Subsequent sessions compared Raw and Zstandard seeks and filmed the visible
+response. The exact touch-to-panel delay remains open.
+[Paired seek and track-change sessions](#paired-seek-and-track-change-sessions) ·
+[Filmed Kindle seeks](#filmed-kindle-seeks)
 
 Both runs logged DU and GC16 submissions and stopped with status 0 after
 releasing evdev and restoring the 2,157,312-byte framebuffer snapshot. PPFB v2
@@ -478,3 +481,27 @@ sent TERM at about 15 minutes. PaperPad released its evdev grab, restored the
 framebuffer snapshot, and exited with status 0. This run covers nine minutes
 of active playback. Longer runs and controlled battery and thermal
 measurements remain open.
+
+### Filmed Kindle seeks
+
+On 2026-11-28, the Paperwhite 6 ran the paired Raw and Zstandard KUAL
+measurement actions over Wi-Fi with the same DU policy and paused Fake Now
+Playing track. The operator tapped alternating positions on the seekbar.
+Both videos were recorded at 59.94 fps and show the seekbar moving to the
+new position. The fingertip covers the contact point in the front-on shots,
+so the clips establish a visible response without fixing the frame of
+contact or release. Exact touch-to-panel latency remains open.
+
+The Kindle logs joined each successful seek release to the first subsequent
+live frame that returned from software presentation. Frame association uses
+event order and device monotonic timestamps. P95 uses the nearest rank.
+
+| Mode | Successful seeks | Median release to presentation return (ms) | P95 release to presentation return (ms) |
+|---|---:|---:|---:|
+| Raw | 29 | 151.5 | 367.1 |
+| Zstandard level 1 | 24 | 53.6 | 63.2 |
+
+Both sessions ended through local Exit with status 0 and restored the
+framebuffer snapshot. PPFB v2 remains the default. The opt-in v3 rollout
+uses Zstandard level 1 with Raw fallback. Dense Gray8 still exceeds the
+10 ms decode P95 target. [Paperwhite 6 decoder comparison](#identical-payload-decoder-comparison-on-paperwhite-6)
