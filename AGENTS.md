@@ -11,6 +11,28 @@ Keep every PaperPad KUAL launcher in the single group named **PaperPad**.
 The canonical extension is `/extensions/rust_x11_hello`. Publish launchers
 through its menu and run `make check-menu` after editing it.
 
+## Source Code Editing
+
+- Use the native `apply_patch` tool for manual source code and documentation changes.
+- Do not generate Python, Perl, Ruby, AWK, or shell scripts to perform ordinary source code edits.
+- Do not use string replacement, regular expressions, or substring slicing to implement structural code changes.
+- If a patch fails, inspect the current file contents and construct a corrected patch.
+- Do not silently fall back to scripted file modifications.
+- Use language-aware refactoring tools when available and appropriate.
+- Scripted modifications are acceptable for genuinely mechanical bulk transformations, generated files, and dedicated migration tooling. Explain why scripting is necessary before proceeding.
+- Python remains permitted for testing, benchmarking, data processing, and diagnostics.
+- Verify the resulting changes with `git diff --check` and inspect the complete diff.
+- Run relevant formatting, compilation, linting, and test checks.
+- Explicitly report any verification that could not be performed.
+
+## Code quality
+
+-  Run [`deslop-please`](https://github.com/deterministic-machines/deslop-please) to check for sloppy code structure.
+-  Errors flagged by `deslop-please` must be fixed from first principles, don't do mechanical moves to hide them.
+  - `module-cycle` & `tangle`: what is the indented layer of abstraction? Which module should be at which layer?
+  - `field-leak` & `shallow-module`: Why we have these fields/functions at all? What are the patterns of use? Can they be hidden behind a narrow interface? Don't fix each leak one at a time, fix them holistically.
+  - Draw a diagram to help user understand the before and proposed after structure.
+
 ## Architecture
 
 PaperSpoon owns application layout, rendering, hit testing, and action dispatch.
