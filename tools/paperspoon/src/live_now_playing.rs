@@ -428,7 +428,7 @@ impl LiveNowPlaying {
     }
 
     fn target(&self) -> Option<FrameTarget> {
-        self.frames.current.frame_target(PixelFormat::Gray8).ok()
+        self.frames.frame_target(PixelFormat::Gray8).ok()
     }
 
     // Called only after the server installs, resizes, or clears its current connection.

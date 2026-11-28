@@ -342,6 +342,10 @@ impl FrameSender {
         self.state.lock().expect("frame sender lock").live_active = active;
     }
 
+    fn frame_target(&self, pixel_format: PixelFormat) -> Result<FrameTarget, FrameTargetError> {
+        self.current.frame_target(pixel_format)
+    }
+
     #[cfg(test)]
     fn send_with(
         &self,
@@ -749,6 +753,172 @@ fn replace_hello_frame(
     Ok(sent)
 }
 
+struct Operator {
+    frame_sender: FrameSender,
+    live: Arc<LiveNowPlaying>,
+    application_ui: ApplicationUi,
+    application_viewport_tx: mpsc::Sender<Option<(u16, u16)>>,
+    log_path: String,
+}
+
+impl Operator {
+    fn dispatch(&self, command: StdinCommand) {
+        let Self {
+            frame_sender,
+            live,
+            application_ui,
+            application_viewport_tx,
+            log_path,
+        } = self;
+        if matches!(
+            command,
+            StdinCommand::Frame(_)
+                | StdinCommand::Jpeg(_)
+                | StdinCommand::NowPlaying
+                | StdinCommand::ApplicationFrame { .. }
+        ) {
+            live.stop();
+        }
+        match command {
+            StdinCommand::LiveNowPlaying(command) => {
+                let result = match command {
+                    LiveCommand::Start => live.start().map(|()| {
+                        if live.connection_changed() {
+                            let _ = application_viewport_tx.send(None);
+                        }
+                        println!("{}", live.status());
+                    }),
+                    LiveCommand::Stop => {
+                        if live.stop()
+                            && let Ok(target) = frame_sender.frame_target(PixelFormat::Mono1)
+                        {
+                            let viewport = target.viewport();
+                            match frame_sender.send_application(application_ui, viewport) {
+                                Ok(ApplicationSend::Sent(_) | ApplicationSend::Unchanged) => {
+                                    let _ = application_viewport_tx.send(Some(viewport));
+                                }
+                                Ok(ApplicationSend::NoConnection) => {}
+                                Err(error) => {
+                                    eprintln!("applying grid after Now Playing stop: {error}")
+                                }
+                            }
+                        }
+                        println!("{}", live.status());
+                        Ok(())
+                    }
+                    LiveCommand::Status => {
+                        println!("{}", live.status());
+                        Ok(())
+                    }
+                    LiveCommand::Refresh => live.refresh(),
+                    LiveCommand::Fake(change) => live.fake(change),
+                };
+                if let Err(error) = result {
+                    eprintln!("Now Playing command: {error}");
+                }
+                flush_stdout("after live Now Playing command");
+            }
+            StdinCommand::Frame(frame) => match frame_sender.send_diagnostic(frame) {
+                Ok(Some(sent)) => {
+                    if application_viewport_tx.send(None).is_err() {
+                        eprintln!("application viewport tracker stopped");
+                    }
+                    let (width, height) = frame.dimensions();
+                    let record = format!(
+                        "sent diagnostic frame id={} pattern={} width={width} height={height} bytes={} encode_us={} socket_write_us={} source=stdin",
+                        sent.frame_id,
+                        frame.pattern_name(),
+                        sent.encoded_len,
+                        sent.encode_elapsed.as_micros(),
+                        sent.socket_write_elapsed.as_micros()
+                    );
+                    println!("{record}");
+                    flush_stdout("after sent frame");
+                    append_host_log_record(log_path, &record);
+                }
+                Ok(None) => eprintln!("frame not sent: no PaperPad connected"),
+                Err(error) => eprintln!("frame command error: {error}"),
+            },
+            StdinCommand::Jpeg(path) => match frame_sender.send_jpeg(&path) {
+                Ok(Some(jpeg)) => {
+                    if application_viewport_tx.send(None).is_err() {
+                        eprintln!("application viewport tracker stopped");
+                    }
+                    let sent = jpeg.sent;
+                    let record = format!(
+                        "sent JPEG frame id={} path={} width={} height={} bytes={} encode_us={} socket_write_us={} source=stdin",
+                        sent.frame_id,
+                        path.display(),
+                        jpeg.viewport.0,
+                        jpeg.viewport.1,
+                        sent.encoded_len,
+                        sent.encode_elapsed.as_micros(),
+                        sent.socket_write_elapsed.as_micros()
+                    );
+                    println!("{record}");
+                    flush_stdout("after sent JPEG frame");
+                    append_host_log_record(log_path, &record);
+                }
+                Ok(None) => eprintln!("JPEG frame not sent: no PaperPad connected"),
+                Err(error) => eprintln!("JPEG frame command error: {error}"),
+            },
+            StdinCommand::NowPlaying => match frame_sender.send_now_playing() {
+                Ok(Some(now_playing)) => {
+                    if application_viewport_tx.send(None).is_err() {
+                        eprintln!("application viewport tracker stopped");
+                    }
+                    let sent = now_playing.sent;
+                    let record = format!(
+                        "sent Now Playing frame id={} width={} height={} bytes={} encode_us={} socket_write_us={} source=stdin",
+                        sent.frame_id,
+                        now_playing.viewport.0,
+                        now_playing.viewport.1,
+                        sent.encoded_len,
+                        sent.encode_elapsed.as_micros(),
+                        sent.socket_write_elapsed.as_micros()
+                    );
+                    println!("{record}");
+                    flush_stdout("after Now Playing frame");
+                    append_host_log_record(log_path, &record);
+                }
+                Ok(None) => eprintln!("Now Playing frame not sent: no PaperPad connected"),
+                Err(error) => eprintln!("Now Playing frame error: {error}"),
+            },
+            StdinCommand::ApplicationFrame { width, height } => {
+                match frame_sender.send_application(application_ui, (width, height)) {
+                    Ok(ApplicationSend::Sent(sent)) => {
+                        if application_viewport_tx.send(Some((width, height))).is_err() {
+                            eprintln!("application viewport tracker stopped");
+                        }
+                        let record = format!(
+                            "sent application frame id={} width={width} height={height} bytes={} encode_us={} socket_write_us={} source=stdin",
+                            sent.frame_id,
+                            sent.encoded_len,
+                            sent.encode_elapsed.as_micros(),
+                            sent.socket_write_elapsed.as_micros()
+                        );
+                        println!("{record}");
+                        flush_stdout("after sent application frame");
+                        append_host_log_record(log_path, &record);
+                    }
+                    Ok(ApplicationSend::Unchanged) => {
+                        let record = format!(
+                            "application frame skipped unchanged width={width} height={height} source=stdin"
+                        );
+                        println!("{record}");
+                        flush_stdout("after skipped application frame");
+                        append_host_log_record(log_path, &record);
+                    }
+                    Ok(ApplicationSend::NoConnection) => {
+                        eprintln!("application frame not sent: no PaperPad connected");
+                    }
+                    Err(error) => eprintln!("ui command error: {error}"),
+                }
+            }
+        }
+    }
+}
+
 fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().collect();
     if args.get(1).map(String::as_str) == Some(paperspoon::now_playing::HELPER_ARGUMENT) {
@@ -833,177 +1003,35 @@ fn main() -> io::Result<()> {
     println!("type 'nowplaying <start|stop|status|refresh>' for live Now Playing");
     let (application_viewport_tx, application_viewport_rx) = mpsc::channel();
 
-    let _stdin_worker = {
-        let frame_sender = frame_sender.clone();
-        let live = Arc::clone(&live);
-        let log_path = opts.log_path.clone();
-        std::thread::Builder::new()
-            .name("paperspoon-stdin".to_string())
-            .spawn(move || {
-                let stdin = io::stdin();
-                let application_ui = ApplicationUi::default();
-                for line in stdin.lock().lines() {
-                    let line = match line {
-                        Ok(line) => line,
-                        Err(error) => {
-                            eprintln!("stdin read error: {error}");
-                            break;
-                        }
-                    };
-                    let line = line.trim();
-                    if line.is_empty() {
-                        continue;
-                }
-                let command = parse_stdin_command(line);
-                if matches!(command, Ok(StdinCommand::Frame(_) | StdinCommand::Jpeg(_) | StdinCommand::NowPlaying | StdinCommand::ApplicationFrame { .. })) {
-                    live.stop();
-                }
-                match command {
-                    Ok(StdinCommand::LiveNowPlaying(command)) => {
-                        let result = match command {
-                            LiveCommand::Start => live.start().map(|()| {
-                                if live.connection_changed() {
-                                    let _ = application_viewport_tx.send(None);
-                                }
-                                println!("{}", live.status());
-                            }),
-                            LiveCommand::Stop => {
-                                if live.stop() && let Ok(target) = frame_sender.current.frame_target(PixelFormat::Mono1) {
-                                    let viewport = target.viewport();
-                                    match frame_sender.send_application(&application_ui, viewport) {
-                                        Ok(ApplicationSend::Sent(_) | ApplicationSend::Unchanged) => {
-                                            let _ = application_viewport_tx.send(Some(viewport));
-                                        }
-                                        Ok(ApplicationSend::NoConnection) => {}
-                                        Err(error) => eprintln!("applying grid after Now Playing stop: {error}"),
-                                    }
-                                }
-                                println!("{}", live.status());
-                                Ok(())
-                            }
-                            LiveCommand::Status => {
-                                println!("{}", live.status());
-                                Ok(())
-                            }
-                            LiveCommand::Refresh => live.refresh(),
-                            LiveCommand::Fake(change) => live.fake(change),
-                        };
-                        if let Err(error) = result {
-                            eprintln!("Now Playing command: {error}");
-                        }
-                        flush_stdout("after live Now Playing command");
+    let operator = Operator {
+        frame_sender: frame_sender.clone(),
+        live: Arc::clone(&live),
+        application_ui: ApplicationUi::default(),
+        application_viewport_tx,
+        log_path: opts.log_path.clone(),
+    };
+    let _stdin_worker = std::thread::Builder::new()
+        .name("paperspoon-stdin".to_string())
+        .spawn(move || {
+            let stdin = io::stdin();
+            for line in stdin.lock().lines() {
+                let line = match line {
+                    Ok(line) => line,
+                    Err(error) => {
+                        eprintln!("stdin read error: {error}");
+                        break;
                     }
-                    Ok(StdinCommand::Frame(frame)) => {
-                        match frame_sender.send_diagnostic(frame) {
-                            Ok(Some(sent)) => {
-                                if application_viewport_tx.send(None).is_err() {
-                                    eprintln!("application viewport tracker stopped");
-                                }
-                                let (width, height) = frame.dimensions();
-                                let record = format!(
-                                    "sent diagnostic frame id={} pattern={} width={width} height={height} bytes={} encode_us={} socket_write_us={} source=stdin",
-                                    sent.frame_id,
-                                    frame.pattern_name(),
-                                    sent.encoded_len,
-                                    sent.encode_elapsed.as_micros(),
-                                    sent.socket_write_elapsed.as_micros()
-                                );
-                                println!("{record}");
-                                flush_stdout("after sent frame");
-                                append_host_log_record(&log_path, &record);
-                            }
-                            Ok(None) => {
-                                eprintln!("frame not sent: no PaperPad connected");
-                            }
-                            Err(error) => eprintln!("frame command error: {error}"),
-                        }
-                    }
-                    Ok(StdinCommand::Jpeg(path)) => match frame_sender.send_jpeg(&path) {
-                        Ok(Some(jpeg)) => {
-                            if application_viewport_tx.send(None).is_err() {
-                                eprintln!("application viewport tracker stopped");
-                            }
-                            let sent = jpeg.sent;
-                            let record = format!(
-                                "sent JPEG frame id={} path={} width={} height={} bytes={} encode_us={} socket_write_us={} source=stdin",
-                                sent.frame_id,
-                                path.display(),
-                                jpeg.viewport.0,
-                                jpeg.viewport.1,
-                                sent.encoded_len,
-                                sent.encode_elapsed.as_micros(),
-                                sent.socket_write_elapsed.as_micros()
-                            );
-                            println!("{record}");
-                            flush_stdout("after sent JPEG frame");
-                            append_host_log_record(&log_path, &record);
-                        }
-                        Ok(None) => eprintln!("JPEG frame not sent: no PaperPad connected"),
-                        Err(error) => eprintln!("JPEG frame command error: {error}"),
-                    },
-                    Ok(StdinCommand::NowPlaying) => {
-                        match frame_sender.send_now_playing() {
-                            Ok(Some(now_playing)) => {
-                                if application_viewport_tx.send(None).is_err() {
-                                    eprintln!("application viewport tracker stopped");
-                                }
-                                let sent = now_playing.sent;
-                                let record = format!(
-                                    "sent Now Playing frame id={} width={} height={} bytes={} encode_us={} socket_write_us={} source=stdin",
-                                    sent.frame_id,
-                                    now_playing.viewport.0,
-                                    now_playing.viewport.1,
-                                    sent.encoded_len,
-                                    sent.encode_elapsed.as_micros(),
-                                    sent.socket_write_elapsed.as_micros()
-                                );
-                                println!("{record}");
-                                flush_stdout("after Now Playing frame");
-                                append_host_log_record(&log_path, &record);
-                            }
-                            Ok(None) => {
-                                eprintln!("Now Playing frame not sent: no PaperPad connected");
-                            }
-                            Err(error) => eprintln!("Now Playing frame error: {error}"),
-                        }
-                    }
-                    Ok(StdinCommand::ApplicationFrame { width, height }) => {
-                        match frame_sender.send_application(&application_ui, (width, height)) {
-                            Ok(ApplicationSend::Sent(sent)) => {
-                                if application_viewport_tx.send(Some((width, height))).is_err() {
-                                    eprintln!("application viewport tracker stopped");
-                                }
-                                let record = format!(
-                                    "sent application frame id={} width={width} height={height} bytes={} encode_us={} socket_write_us={} source=stdin",
-                                    sent.frame_id,
-                                    sent.encoded_len,
-                                    sent.encode_elapsed.as_micros(),
-                                    sent.socket_write_elapsed.as_micros()
-                                );
-                                println!("{record}");
-                                flush_stdout("after sent application frame");
-                                append_host_log_record(&log_path, &record);
-                            }
-                            Ok(ApplicationSend::Unchanged) => {
-                                let record = format!(
-                                    "application frame skipped unchanged width={width} height={height} source=stdin"
-                                );
-                                println!("{record}");
-                                flush_stdout("after skipped application frame");
-                                append_host_log_record(&log_path, &record);
-                            }
-                            Ok(ApplicationSend::NoConnection) => {
-                                eprintln!("application frame not sent: no PaperPad connected");
-                            }
-                            Err(error) => eprintln!("ui command error: {error}"),
-                        }
-                    }
+                };
+                let line = line.trim();
+                if !line.is_empty() {
+                    match parse_stdin_command(line) {
+                        Ok(command) => operator.dispatch(command),
                         Err(error) => eprintln!("stdin command error: {error}"),
                     }
                 }
-                live.stop();
-            })?
-    };
+            }
+            operator.live.stop();
+        })?;
 
     for conn in listener.incoming() {
         let mut stream = match conn {
@@ -1408,6 +1436,64 @@ mod tests {
             .install_for_hello(&client, pixel_formats, viewport)
             .expect("install Hello connection");
         (token, peer)
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn operator_restores_application_and_reports_only_successful_frame_changes() {
+        let directory = tempfile::tempdir().unwrap();
+        let log_path = directory.path().join("paperspoon.log");
+        let log_path_string = log_path.to_str().unwrap().to_owned();
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let current = CurrentConnection::default();
+        let (_token, _peer) =
+            install_hello_connection(&listener, &current, V2PixelFormats::MONO1, (128, 128));
+        let frame_sender = FrameSender::new(current);
+        let live = Arc::new(LiveNowPlaying::new(
+            frame_sender.clone(),
+            Some(ProviderKind::Fake),
+            Duration::from_secs(1),
+            log_path_string.clone(),
+        ));
+        let (application_viewport_tx, viewport_rx) = mpsc::channel();
+        let operator = Operator {
+            frame_sender,
+            live,
+            application_ui: ApplicationUi::default(),
+            application_viewport_tx,
+            log_path: log_path_string,
+        };
+        let dispatch = |line| operator.dispatch(parse_stdin_command(line).unwrap());
+
+        dispatch("nowplaying start");
+        assert!(operator.live.status().starts_with("Now Playing active"));
+        assert_eq!(viewport_rx.try_recv(), Err(mpsc::TryRecvError::Empty));
+
+        dispatch("nowplaying stop");
+        assert_eq!(operator.live.status(), "Now Playing stopped");
+        assert_eq!(viewport_rx.try_recv(), Ok(Some((128, 128))));
+
+        dispatch("ui 128x128");
+        dispatch("frame gray 17 128x128");
+        assert_eq!(viewport_rx.try_recv(), Err(mpsc::TryRecvError::Empty));
+
+        dispatch("nowplaying start");
+        dispatch("frame white 129x128");
+        assert_eq!(operator.live.status(), "Now Playing stopped");
+        assert_eq!(viewport_rx.try_recv(), Ok(None));
+        assert_eq!(viewport_rx.try_recv(), Err(mpsc::TryRecvError::Empty));
+
+        let log = std::fs::read_to_string(log_path).unwrap();
+        assert!(
+            log.contains("application frame skipped unchanged width=128 height=128 source=stdin")
+        );
+        let mut sent = log
+            .lines()
+            .filter(|line| line.contains("sent diagnostic frame"));
+        let record = sent.next().expect("diagnostic log record");
+        assert!(record.contains("id=2 pattern=white width=129 height=128"));
+        assert!(record.ends_with("source=stdin"));
+        assert!(sent.next().is_none());
     }
 
     fn read_sent_frame(peer: &mut TcpStream, sent: SentFrame) -> (u64, (u16, u16), Vec<u8>) {
