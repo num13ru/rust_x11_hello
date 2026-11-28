@@ -913,7 +913,7 @@ Verify:
 - [x] Framebuffer restoration remains correct.
 - [x] Extended operation does not produce increasing memory consumption.
   Sampled RSS showed no sustained growth during the matched nine-minute runs.
-  [Playback stability results](benchmarks/ppfb-v3-validation.md#matched-nine-minute-playback-stability)
+  [Playback stability results](../benchmarks/ppfb-v3-validation.md#matched-nine-minute-playback-stability)
 
 Use raw transport as the behavioral baseline.
 
@@ -968,7 +968,7 @@ transport tests replace a connection during frame encoding, close a peer after
 it reads only part of the payload, and deliver fragmented input to PaperPad.
 When the display loop pauses during a burst of 1,024 frames, the inbound
 mailbox retains the latest complete frame only.
-[PPFB v3 validation results](benchmarks/ppfb-v3-validation.md)
+[PPFB v3 validation results](../benchmarks/ppfb-v3-validation.md)
 
 ### Protocol negotiation
 
@@ -1108,7 +1108,7 @@ PPFB v3 is the production default for compatible peers. It uses independent
 full-frame Zstandard level 1 with per-frame Raw fallback. Automatic negotiation
 retries PPFB v2 Raw on a fresh connection when a legacy host closes the v3
 probe. The release accepts the recorded measurement limitations.
-[Production conclusion](benchmarks/ppfb-v3-validation.md#production-conclusion)
+[Production conclusion](../benchmarks/ppfb-v3-validation.md#production-conclusion)
 
 ### M0 — Additional evidence
 
@@ -1172,7 +1172,7 @@ probe. The release accepts the recorded measurement limitations.
   The paired videos confirm a visible seekbar response in both modes. The
   device logs provide release-to-software-presentation timing. Exact
   touch-to-panel timing is unmeasured and deferred for this release.
-  [Filmed Kindle seeks](benchmarks/ppfb-v3-validation.md#filmed-kindle-seeks)
+  [Filmed Kindle seeks](../benchmarks/ppfb-v3-validation.md#filmed-kindle-seeks)
 - [x] Perform extended playback tests.
   Matched nine-minute runs covered device RSS, CPU time, and Wi-Fi traffic.
   Longer playback and controlled battery and thermal measurements remain open.

@@ -3,59 +3,22 @@
 This specification covers independent frame transport. PPFB version 2
 retains its existing framing and raw framebuffer payload.
 
-## Running PaperPad and PaperView
+## Production settings
 
-Start PaperSpoon with the fake provider and URL actions disabled for a local
-check. The default encoding level is 1.
+**PaperPad → Run Paperpad DU** uses automatic negotiation. PaperView defaults
+to the same mode. PaperSpoon offers Zstandard level 1 by default, with per-frame
+Raw fallback when compression does not reduce the payload.
 
-```sh
-cargo run --release -p paperspoon -- 5581 /tmp/paperspoon-v3.log \
-    --now-playing-fake --no-forward-url
-```
+- Use `PAPERPAD_TRANSPORT=v2`, PaperView's `--transport v2`, or **Run
+  Paperpad DU with PPFB v2** in KUAL for legacy Raw transport.
+- Use `v3-raw` on either client to require PPFB v3 with Raw frames.
+- Use `v3-auto` to require v3 with either encoding, or `v3-zstd` to require
+  v3 with Zstandard capability.
+- PaperSpoon accepts `--compression=raw` for Raw only or `--compression=zstd`
+  to require a v3 peer that offers Zstandard.
 
-For PaperView, open a second terminal and run:
-
-```sh
-cargo run -p paperview -- --transport-diagnostics --interactive
-```
-
-For PaperPad, deploy the verified ARMv7 build, unplug USB, open KUAL, and tap
-**PaperPad → Run Paperpad DU (5m)**. The connection indicator should
-fill and the application grid should appear. Enter `nowplaying start` in
-PaperSpoon, try play/pause and seeking, then tap **Exit** on the Kindle. The
-launcher records transport events and the final cleanup status locally.
-
-PaperSpoon defaults to `--compression=auto`. It serves v2 clients with Raw
-and negotiates Zstandard with capable v3 clients. Use `--compression=raw`
-to serve Raw only, or `--compression=zstd` to require v3 clients that offer
-Zstandard. Each v3 session can fall back to Raw per frame. The host's
-`--compression-level=1|3|6` override remains available.
-
-PaperView's `--transport` and PaperPad's `PAPERPAD_TRANSPORT` default to
-`auto`. Use `v2` to force legacy Raw, `v3-raw` to force Raw under v3,
-`v3-auto` to require v3 with either codec, or `v3-zstd` to require v3 and
-Zstandard capability. In KUAL, **Run Paperpad DU with PPFB v2 (5m)** forces
-legacy Raw transport.
-
-The [validation report](benchmarks/ppfb-v3-validation.md) tracks desktop and
-device evidence separately.
-
-### Matched Kindle measurements
-
-Start PaperSpoon with the fake provider and `--compression=auto` as above.
-In KUAL’s **PaperPad** group, use **Measure PPFB v3 Raw (15m)** for one pass
-and **Measure PPFB v3 Zstandard (15m)** for the other. Both use the DU display policy and the
-same watchdog. Start fresh fake Now Playing for each pass by entering
-`nowplaying stop` and then `nowplaying start` in PaperSpoon. Use the same
-playback duration, controls, and network conditions on both runs. Tap
-**Exit** at the end of each pass and retrieve the logs before the next one.
-
-The measurement actions set `PAPERPAD_MEASURE_TRANSPORT=1`. PaperPad logs
-process CPU time, current and peak resident memory, and network interface
-counters at the beginning and end of the run and on active runtime wakeups
-at least 30 seconds apart. The interface counters include other traffic.
-Compare their deltas alongside `wire_bytes` from the PPFB receive records.
-Use device monotonic timestamps for receiver and presentation timings.
+See the [validation report](benchmarks/ppfb-v3-validation.md#production-conclusion)
+for measured benefits and limitations.
 
 ## Connection setup
 
