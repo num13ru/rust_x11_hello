@@ -385,6 +385,46 @@ clock. Frame association uses event order.
 
 Both sessions logged DU and GC16 submissions after track changes and exited
 with status 0, releasing evdev and restoring the framebuffer snapshot. The
-operator tapped Next at different intervals in the two passes. A scripted
-rapid-track benchmark and a waveform comparison with identical before-and-after
-pixels remain open.
+operator tapped Next at different intervals in the two passes. A subsequent
+scripted comparison fixed the track-change cadence and waveform stimuli.
+[Matched waveform and motion sessions](#matched-waveform-and-motion-sessions)
+
+### Matched waveform and motion sessions
+
+On 2026-11-28, the Paperwhite 6 ran both PPFB v3 measurement actions over
+Wi-Fi with the same verified ARMv7 binary and DU display policy. A host script
+sent identical commands and fixtures in both runs. Before the device runs,
+loopback decoding confirmed byte-identical pixels for all 34 fixed stimuli.
+PaperSpoon and PaperPad recorded matching PPFB byte counts for all 34 frames
+in each physical session.
+
+The waveform phase first set the viewport to white. Across the next six
+transitions through gray bars, checkerboard, gradient, and white, every
+frame reached software presentation. The Kindle logged the same ordered DU
+and GC16 selections and the same update rectangles in both modes. For example,
+the white-to-gray-bars transition requested GC16 for `(80,0 1113×1624)`
+followed by DU for `(0,0 80×1624)`. The logs record waveform requests and
+software presentation returns. Camera-observed panel timing remains open.
+
+| Workload | Received frames per mode | Raw PPFB bytes | Zstandard-enabled PPFB bytes | Frames using Zstandard |
+|---|---:|---:|---:|---:|
+| Waveform sequence, including initial white | 7 | 7,230,244 | 57,196 | 7 |
+| Mono1 diagnostic animation | 12 | 3,098,928 | 12,786 | 12 |
+| Gray8 moving patch on a gradient | 12 | 24,789,072 | 415,594 | 12 |
+| Seeded high-entropy grayscale JPEG fixtures | 3 | 6,197,268 | 6,197,268 | 0 |
+
+The host offered one animation command every 100 ms. The table counts
+received frames and application bytes. PaperPad returned from software
+presentation for 11 of 12 Raw Mono1 animation frames and all 12 frames in
+each of the other animation cases. All three high-entropy stimuli selected
+Raw fallback in the Zstandard-enabled session.
+
+The fake Now Playing provider also received four scripted Next commands at
+two-second intervals per run. Both runs logged the same five artwork outcomes
+and received 12 live widget frames. Whole-session `wlan0` RX/TX totals were
+69,667,462/714,635 bytes over 146.37 s for Raw and 7,168,508/123,333 bytes over
+55.90 s for Zstandard. Those interface counters include discovery, background
+traffic, and unequal idle periods. The application-byte table uses identical
+stimuli. Two earlier Raw launches ended without a PaperSpoon connection and
+were excluded. Both connected runs stopped with status 0, released evdev, and
+restored the framebuffer snapshot.

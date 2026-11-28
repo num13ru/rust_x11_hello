@@ -903,7 +903,7 @@ Verify:
 - [x] Binary metadata remains readable.
 - [x] Seekbar updates retain their existing waveform behavior.
 - [x] Timer updates remain stable.
-- [ ] Mixed-waveform selection remains unchanged for equivalent framebuffers.
+- [x] Mixed-waveform selection remains unchanged for equivalent framebuffers.
 - [x] Playback controls remain responsive.
 - [x] Repeated seeking works.
 - [x] Track changes work.
