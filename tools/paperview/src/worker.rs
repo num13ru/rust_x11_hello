@@ -5,14 +5,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use paper_protocol::{V2EncodeError, V2Pointer, V2PointerPhase};
+use paper_protocol::{V2EncodeError, V2PixelFormat, V2PixelFormats, V2Pointer, V2PointerPhase, v3};
 
 use crate::connection::{
-    DEFAULT_CONNECT_TIMEOUT, DEFAULT_WRITE_TIMEOUT, connect_and_send_hello, validate_inputs,
+    DEFAULT_CONNECT_TIMEOUT, DEFAULT_WRITE_TIMEOUT, connect_session, validate_inputs,
 };
-use crate::receiver::{FrameReadError, ReadPhase, ReceivedFrame, read_next_frame};
+use crate::receiver::{
+    FrameReadError, ReadPhase, ReceivedFrame, read_next_frame, read_next_v3_frame,
+};
 
 pub const DEFAULT_READ_TIMEOUT: Duration = Duration::from_millis(250);
 pub const DEFAULT_RECONNECT_DELAY: Duration = Duration::from_millis(500);
@@ -28,6 +30,8 @@ pub struct WorkerConfig {
     pub write_timeout: Duration,
     pub read_timeout: Duration,
     pub reconnect_delay: Duration,
+    pub transport: v3::ClientMode,
+    pub transport_diagnostics: bool,
 }
 
 impl WorkerConfig {
@@ -41,6 +45,8 @@ impl WorkerConfig {
             write_timeout: DEFAULT_WRITE_TIMEOUT,
             read_timeout: DEFAULT_READ_TIMEOUT,
             reconnect_delay: DEFAULT_RECONNECT_DELAY,
+            transport: v3::ClientMode::default(),
+            transport_diagnostics: false,
         }
     }
 
@@ -363,13 +369,14 @@ fn run_worker(
         if stop.is_requested() || !publisher.publish_status(ConnectionStatus::Connecting) {
             break;
         }
-        let mut stream = match connect_and_send_hello(
+        let (mut stream, encodings) = match connect_session(
             &config.host,
             config.port,
             config.viewport_width,
             config.viewport_height,
             config.connect_timeout,
             config.write_timeout,
+            config.transport,
         ) {
             Ok(stream) => stream,
             Err(error) => {
@@ -390,6 +397,17 @@ fn run_worker(
             }
             continue;
         }
+        if config.transport_diagnostics {
+            eprintln!(
+                "PaperView PPFB{} encodings={encodings:?}",
+                if encodings.is_some() {
+                    " v3"
+                } else {
+                    " v2 Raw"
+                }
+            );
+        }
+        let mut diagnostics = ReceiveDiagnostics::new();
         let epoch = next_epoch;
         next_epoch = next_epoch.checked_add(1).unwrap_or(1);
         active_epoch.store(epoch, Ordering::Release);
@@ -397,12 +415,20 @@ fn run_worker(
             break;
         }
 
+        let mut decoder = v3::FrameDecoder::default();
+        let viewport = v3::Viewport {
+            width: config.viewport_width,
+            height: config.viewport_height,
+            formats: V2PixelFormats::MONO1.with(V2PixelFormat::Gray8),
+        };
         let mut reader = StopAwareReader {
             stream: &mut stream,
             stop: &stop,
         };
         loop {
-            if let Err(error) = send_pending_pointers(reader.stream, &pointer_receiver, epoch) {
+            if let Err(error) =
+                send_pending_pointers(reader.stream, &pointer_receiver, epoch, encodings.is_some())
+            {
                 if !publisher.publish_status(ConnectionStatus::Error(format!(
                     "could not send PPFB pointer: {error}"
                 ))) {
@@ -410,8 +436,17 @@ fn run_worker(
                 }
                 break;
             }
-            match read_next_frame(&mut reader, config.viewport_width, config.viewport_height) {
+            let frame = match encodings {
+                Some(encodings) => {
+                    read_next_v3_frame(&mut reader, &mut decoder, viewport, encodings)
+                }
+                None => read_next_frame(&mut reader, config.viewport_width, config.viewport_height),
+            };
+            match frame {
                 Ok(Some(frame)) => {
+                    if config.transport_diagnostics {
+                        diagnostics.record(&frame);
+                    }
                     if !publisher.publish_frame(frame) {
                         break 'worker;
                     }
@@ -457,14 +492,57 @@ fn run_worker(
     let _ = publisher.publish_status(ConnectionStatus::Stopped);
 }
 
+struct ReceiveDiagnostics {
+    started: Instant,
+    frames: u64,
+    wire_bytes: u64,
+}
+
+impl ReceiveDiagnostics {
+    fn new() -> Self {
+        Self {
+            started: Instant::now(),
+            frames: 0,
+            wire_bytes: 0,
+        }
+    }
+
+    fn record(&mut self, frame: &ReceivedFrame) {
+        self.frames += 1;
+        self.wire_bytes += frame.wire_bytes as u64;
+        let elapsed = self.started.elapsed().as_secs_f64();
+        if elapsed < 5.0 {
+            return;
+        }
+        let raw = frame.frame().pixels().len();
+        eprintln!(
+            "PaperView frame={} encoding={:?} raw_bytes={raw} wire_bytes={} wire_pct={:.2} decode_us={} receive_Bps={:.0} receive_fps={:.2}",
+            frame.frame_id(),
+            frame.encoding,
+            frame.wire_bytes,
+            100.0 * frame.wire_bytes as f64 / raw as f64,
+            frame.decode_elapsed.as_micros(),
+            self.wire_bytes as f64 / elapsed,
+            self.frames as f64 / elapsed,
+        );
+        *self = Self::new();
+    }
+}
+
 fn send_pending_pointers(
     stream: &mut TcpStream,
     pointer_receiver: &Receiver<PointerCommand>,
     epoch: u64,
+    version3: bool,
 ) -> io::Result<()> {
     loop {
         match pointer_receiver.try_recv() {
-            Ok(command) if command.epoch == epoch => stream.write_all(&command.encoded)?,
+            Ok(mut command) if command.epoch == epoch => {
+                if version3 {
+                    v3::encode_control(&mut command.encoded)?;
+                }
+                stream.write_all(&command.encoded)?;
+            }
             Ok(_) => {}
             Err(TryRecvError::Empty | TryRecvError::Disconnected) => return Ok(()),
         }
@@ -509,6 +587,54 @@ mod tests {
         read_next_frame(&mut io::Cursor::new(encoded), 2, 2)
             .expect("read test frame")
             .expect("test frame present")
+    }
+
+    #[test]
+    fn worker_negotiates_v3_again_after_a_malformed_frame() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (release, wait) = mpsc::channel();
+        let peer = std::thread::spawn(move || {
+            let mut encoder = paper_protocol::compression::ZstdEncoder::new(1).unwrap();
+            for id in 1..=2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(3)))
+                    .unwrap();
+                let mut bytes = [0; v3::HEADER_LEN];
+                stream.read_exact(&mut bytes).unwrap();
+                assert_eq!(v3::Header::decode(bytes).unwrap().kind, v3::Kind::Hello);
+                let mut hello = [0; 8];
+                stream.read_exact(&mut hello).unwrap();
+                let hello = v3::Hello::decode(&hello).unwrap();
+                assert_eq!(hello.encodings, v3::Encodings::RAW_ZSTD);
+                stream.write_all(&v3::encode_ack(hello.encodings)).unwrap();
+                let frame = Gray8Frame::new(32, 32, vec![id as u8; 1024]).unwrap();
+                let mut message = Vec::new();
+                assert!(
+                    v3::compressed_frame(id, &frame, &mut encoder, &mut Vec::new(), &mut message)
+                        .unwrap()
+                );
+                stream.write_all(&message).unwrap();
+                wait.recv_timeout(Duration::from_secs(3)).unwrap();
+                if id == 1 {
+                    message[v3::HEADER_LEN + v3::RAW_PREFIX_LEN] = 1;
+                    stream.write_all(&message).unwrap();
+                }
+            }
+        });
+        let mut config = test_config(port, 32, 32);
+        config.transport = v3::ClientMode::Zstd;
+        let (notify, wake) = mpsc::sync_channel(1);
+        let worker = start_worker(config, channel_notifier(notify)).unwrap();
+        for id in 1..=2 {
+            let frame = wait_for_frame(&worker, &wake, id);
+            assert_eq!(frame.encoding, v3::Encoding::Zstd);
+            assert_eq!(frame.frame().pixels(), &[id as u8; 1024]);
+            release.send(()).unwrap();
+        }
+        worker.shutdown();
+        peer.join().unwrap();
     }
 
     fn channel_notifier(sender: SyncSender<()>) -> impl Fn() -> bool + Send {
@@ -599,6 +725,8 @@ mod tests {
             write_timeout: Duration::from_secs(1),
             read_timeout: Duration::from_millis(25),
             reconnect_delay: Duration::from_millis(10),
+            transport: v3::ClientMode::Legacy,
+            transport_diagnostics: false,
         }
     }
 
@@ -691,7 +819,7 @@ mod tests {
             })
             .expect("queue current pointer");
 
-        send_pending_pointers(&mut writer, &pointer_receiver, 2).expect("drain pointers");
+        send_pending_pointers(&mut writer, &pointer_receiver, 2, false).expect("drain pointers");
         assert_eq!(
             read_pointer(&mut reader),
             V2Pointer::new(V2PointerPhase::Up, 1, 1)

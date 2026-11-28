@@ -6,32 +6,15 @@ LOG="$EXT_DIR/rust_x11_hello.log"
 LATENCY_LOG="$EXT_DIR/paperpad.latency.jsonl"
 PID_FILE="$EXT_DIR/rust_x11_hello.pid"
 STATUS_FILE="$EXT_DIR/rust_x11_hello.status"
-WATCHDOG_MARKER="$EXT_DIR/rust_x11_hello.watchdog"
 LOCK_DIR="$EXT_DIR/rust_x11_hello.lock"
 LOCK_OWNER_FILE="$LOCK_DIR/launcher.pid"
-WATCHDOG_SECONDS="${PAPERPAD_WATCHDOG_SECONDS:-90}"
-WATCHDOG_TERM_GRACE_SECONDS="${PAPERPAD_WATCHDOG_TERM_GRACE_SECONDS:-15}"
 # The normal KUAL action leaves this unset for UDP discovery. An explicit host
 # remains available as a manual diagnostic override.
 COMPANION_HOST="${PAPERPAD_COMPANION:-}"
-MODE_ARG="${1:-}"
-NEEDS_DISCOVERY=1
-case "$MODE_ARG" in
-    --benchmark-mxcfb) NEEDS_DISCOVERY=0 ;;
-esac
-
 CHILD_PID=""
-WATCHDOG_PID=""
 LOCK_HELD=0
 
 mkdir -p "$EXT_DIR"
-
-case "$WATCHDOG_SECONDS" in
-    ''|0|*[!0-9]*) WATCHDOG_SECONDS=90 ;;
-esac
-case "$WATCHDOG_TERM_GRACE_SECONDS" in
-    ''|0|*[!0-9]*) WATCHDOG_TERM_GRACE_SECONDS=15 ;;
-esac
 
 read_pid_file() {
     sed -n '1p' "$PID_FILE" 2>/dev/null | tr -d ' \t\r\n'
@@ -172,8 +155,6 @@ trap 'forward_signal TERM' TERM
     echo "PWD: $(pwd)"
     echo "UID/GID: $(id 2>/dev/null || echo 'id unavailable')"
     echo "BIN: $BIN"
-    echo "Mode: ${MODE_ARG:-paperpad}"
-    echo "Watchdog: ${WATCHDOG_SECONDS}s plus ${WATCHDOG_TERM_GRACE_SECONDS}s TERM grace"
 } >> "$LOG" 2>&1
 
 if [ ! -f "$BIN" ]; then
@@ -234,29 +215,16 @@ if [ -f "$PID_FILE" ]; then
     fi
 fi
 
-rm -f "$WATCHDOG_MARKER"
 
-# Discovery permission is needed only by normal PaperPad. Local MXCFB modes
-# deliberately perform no network activity.
+# Allow discovery replies before starting the client.
 remove_discovery_rule
-if [ "$NEEDS_DISCOVERY" = "1" ]; then
-    install_discovery_rule
-fi
+install_discovery_rule
 
 if ! chmod +x "$BIN" 2>> "$LOG"; then
     echo "WARNING: chmod +x failed; attempting launch with existing mode" >> "$LOG"
 fi
-if [ "$NEEDS_DISCOVERY" = "0" ]; then
-    echo "PaperSpoon host: (local mode; transport disabled)" >> "$LOG"
-    "$BIN" "$@" >> "$LOG" 2>&1 &
-elif [ -n "$COMPANION_HOST" ]; then
-    echo "PaperSpoon host: $COMPANION_HOST" >> "$LOG"
-    PAPERPAD_COMPANION="$COMPANION_HOST" PAPERPAD_LATENCY_LOG="$LATENCY_LOG" \
-        "$BIN" "$@" >> "$LOG" 2>&1 &
-else
-    echo "PaperSpoon host: (unset, discovery)" >> "$LOG"
-    PAPERPAD_LATENCY_LOG="$LATENCY_LOG" "$BIN" "$@" >> "$LOG" 2>&1 &
-fi
+echo "PaperSpoon host: ${COMPANION_HOST:-(unset, discovery)}" >> "$LOG"
+PAPERPAD_LATENCY_LOG="$LATENCY_LOG" "$BIN" "$@" >> "$LOG" 2>&1 &
 CHILD_PID=$!
 
 if ! printf '%s\n' "$CHILD_PID" > "$PID_FILE"; then
@@ -272,26 +240,7 @@ if ! printf '%s\n' "$CHILD_PID" > "$PID_FILE"; then
 fi
 
 echo "Child PID: $CHILD_PID" >> "$LOG"
-write_status "RUNNING pid=$CHILD_PID watchdog=${WATCHDOG_SECONDS}s"
-
-(
-    sleep "$WATCHDOG_SECONDS"
-
-    RECORDED_PID="$(read_pid_file)"
-    if [ "$RECORDED_PID" = "$CHILD_PID" ] && pid_is_expected "$CHILD_PID"; then
-        printf '%s\n' "$CHILD_PID" > "$WATCHDOG_MARKER"
-        echo "Watchdog deadline reached; sending TERM to child PID $CHILD_PID" >> "$LOG"
-        kill -TERM "$CHILD_PID" 2>/dev/null || true
-        sleep "$WATCHDOG_TERM_GRACE_SECONDS"
-
-        RECORDED_PID="$(read_pid_file)"
-        if [ "$RECORDED_PID" = "$CHILD_PID" ] && pid_is_expected "$CHILD_PID"; then
-            echo "Watchdog TERM grace expired; sending KILL to verified child PID $CHILD_PID" >> "$LOG"
-            kill -KILL "$CHILD_PID" 2>/dev/null || true
-        fi
-    fi
-) &
-WATCHDOG_PID=$!
+write_status "RUNNING pid=$CHILD_PID"
 
 while :; do
     wait "$CHILD_PID" 2>> "$LOG"
@@ -302,11 +251,6 @@ while :; do
     fi
 done
 
-if [ -n "$WATCHDOG_PID" ]; then
-    kill -TERM "$WATCHDOG_PID" 2>/dev/null || true
-    wait "$WATCHDOG_PID" 2>/dev/null || true
-fi
-
 RECORDED_PID="$(read_pid_file)"
 if [ "$RECORDED_PID" = "$CHILD_PID" ]; then
     rm -f "$PID_FILE"
@@ -314,25 +258,15 @@ else
     echo "WARNING: PID file changed before cleanup; leaving it untouched" >> "$LOG"
 fi
 
-if [ "$(sed -n '1p' "$WATCHDOG_MARKER" 2>/dev/null)" = "$CHILD_PID" ]; then
-    END_REASON="watchdog"
-else
-    END_REASON="process_exit"
-fi
-rm -f "$WATCHDOG_MARKER"
-
 {
     echo
     echo "Rust binary exit status: $CHILD_STATUS"
-    echo "End reason: $END_REASON"
     echo "Ended: $(date)"
     echo "========================================"
 } >> "$LOG" 2>&1
 
-write_status "STOPPED status=$CHILD_STATUS reason=$END_REASON"
-if [ "$NEEDS_DISCOVERY" = "1" ]; then
-    remove_discovery_rule
-fi
-show_status "Stopped: $CHILD_STATUS ($END_REASON)"
+write_status "STOPPED status=$CHILD_STATUS reason=process_exit"
+remove_discovery_rule
+show_status "Stopped: $CHILD_STATUS"
 release_lock
 exit 0

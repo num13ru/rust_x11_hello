@@ -151,7 +151,7 @@ impl WritableFramebuffer {
         Ok(())
     }
 
-    /// Fill only an explicitly validated 8-bit benchmark rectangle. All row
+    /// Fill only an explicitly validated 8-bit rectangle. All row
     /// ranges and the reusable source row are allocated before the first
     /// framebuffer store, so validation and allocation failures change no
     /// bytes.
@@ -164,7 +164,7 @@ impl WritableFramebuffer {
         spec.validate_format()?;
         ensure!(
             self.matches_spec(spec),
-            "benchmark region and writable mapping geometry differ"
+            "solid region and writable mapping geometry differ"
         );
         checked_visible_region(
             u32::from(region.x),
@@ -179,20 +179,20 @@ impl WritableFramebuffer {
         let height = usize::from(region.height);
         let first_x = usize::try_from(spec.xoffset)?
             .checked_add(usize::from(region.x))
-            .context("benchmark region horizontal offset overflow")?;
+            .context("solid region horizontal offset overflow")?;
         let first_y = usize::try_from(spec.yoffset)?
             .checked_add(usize::from(region.y))
-            .context("benchmark region vertical offset overflow")?;
+            .context("solid region vertical offset overflow")?;
         let mut offsets = Vec::new();
         offsets
             .try_reserve_exact(height)
-            .context("allocate benchmark region row offsets")?;
+            .context("allocate solid region row offsets")?;
         for row in 0..height {
             let offset = first_y
                 .checked_add(row)
                 .and_then(|y| y.checked_mul(spec.line_length))
                 .and_then(|start| start.checked_add(first_x))
-                .context("benchmark region row offset overflow")?;
+                .context("solid region row offset overflow")?;
             self.check_range(offset, width)?;
             offsets.push(offset);
         }
@@ -200,7 +200,7 @@ impl WritableFramebuffer {
         let mut pixels = Vec::new();
         pixels
             .try_reserve_exact(width)
-            .context("allocate benchmark region row")?;
+            .context("allocate solid region row")?;
         pixels.resize(width, value);
         for offset in offsets {
             self.write_at(offset, &pixels)?;

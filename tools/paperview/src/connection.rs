@@ -1,3 +1,4 @@
+use paper_protocol::v3;
 use std::fmt;
 use std::io::{self, Write};
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};
@@ -33,6 +34,7 @@ pub enum ConnectionError {
         source: io::Error,
     },
     SendHello(io::Error),
+    Negotiate(io::Error),
 }
 
 impl fmt::Display for ConnectionError {
@@ -58,7 +60,14 @@ impl fmt::Display for ConnectionError {
                 )
             }
             Self::SendHello(error) => write!(formatter, "could not send PPFB v2 Hello: {error}"),
+            Self::Negotiate(error) => write!(formatter, "could not negotiate PPFB v3: {error}"),
         }
+    }
+}
+
+impl From<io::Error> for ConnectionError {
+    fn from(error: io::Error) -> Self {
+        Self::Negotiate(error)
     }
 }
 
@@ -70,7 +79,8 @@ impl std::error::Error for ConnectionError {
             Self::Resolve { source, .. }
             | Self::Connect { source, .. }
             | Self::Configure { source, .. }
-            | Self::SendHello(source) => Some(source),
+            | Self::SendHello(source)
+            | Self::Negotiate(source) => Some(source),
         }
     }
 }
@@ -83,6 +93,27 @@ pub fn connect_and_send_hello(
     connect_timeout: Duration,
     write_timeout: Duration,
 ) -> Result<TcpStream, ConnectionError> {
+    connect_session(
+        host,
+        port,
+        viewport_width,
+        viewport_height,
+        connect_timeout,
+        write_timeout,
+        v3::ClientMode::Legacy,
+    )
+    .map(|(stream, _)| stream)
+}
+
+pub(crate) fn connect_session(
+    host: &str,
+    port: u16,
+    viewport_width: u16,
+    viewport_height: u16,
+    connect_timeout: Duration,
+    write_timeout: Duration,
+    mode: v3::ClientMode,
+) -> Result<(TcpStream, Option<v3::Encodings>), ConnectionError> {
     validate_inputs(
         host,
         port,
@@ -93,11 +124,6 @@ pub fn connect_and_send_hello(
     )?;
 
     let formats = V2PixelFormats::MONO1.with(V2PixelFormat::Gray8);
-    let hello = V2Hello::with_pixel_formats(viewport_width, viewport_height, formats);
-    let encoded = hello
-        .encode_message()
-        .map_err(ConnectionError::EncodeHello)?;
-
     let started = Instant::now();
     let addresses = (host, port)
         .to_socket_addrs()
@@ -123,7 +149,7 @@ pub fn connect_and_send_hello(
         };
         match TcpStream::connect_timeout(&address, remaining) {
             Ok(stream) => {
-                connected = Some(stream);
+                connected = Some((address, stream));
                 break;
             }
             Err(error) => last_error = Some(error),
@@ -136,7 +162,7 @@ pub fn connect_and_send_hello(
             port,
         });
     }
-    let mut stream = connected.ok_or_else(|| ConnectionError::Connect {
+    let (address, stream) = connected.ok_or_else(|| ConnectionError::Connect {
         host: host.to_string(),
         port,
         source: last_error.unwrap_or_else(|| {
@@ -146,7 +172,48 @@ pub fn connect_and_send_hello(
             )
         }),
     })?;
+    let mut stream = configure_stream(stream, write_timeout)?;
+    if mode == v3::ClientMode::Legacy {
+        let encoded = V2Hello::with_pixel_formats(viewport_width, viewport_height, formats)
+            .encode_message()
+            .map_err(ConnectionError::EncodeHello)?;
+        if let Err(error) = stream.write_all(&encoded) {
+            let _ = stream.shutdown(Shutdown::Both);
+            return Err(ConnectionError::SendHello(error));
+        }
+        return Ok((stream, None));
+    }
+    stream
+        .set_read_timeout(Some(connect_timeout))
+        .map_err(|source| ConnectionError::Configure {
+            operation: "set HelloAck read timeout",
+            source,
+        })?;
+    mode.negotiate(
+        stream,
+        v3::Viewport {
+            width: viewport_width,
+            height: viewport_height,
+            formats,
+        },
+        || {
+            let stream =
+                TcpStream::connect_timeout(&address, connect_timeout).map_err(|source| {
+                    ConnectionError::Connect {
+                        host: host.to_string(),
+                        port,
+                        source,
+                    }
+                })?;
+            configure_stream(stream, write_timeout)
+        },
+    )
+}
 
+fn configure_stream(
+    stream: TcpStream,
+    write_timeout: Duration,
+) -> Result<TcpStream, ConnectionError> {
     stream
         .set_nodelay(true)
         .map_err(|source| ConnectionError::Configure {
@@ -159,10 +226,6 @@ pub fn connect_and_send_hello(
             operation: "set write timeout",
             source,
         })?;
-    if let Err(error) = stream.write_all(&encoded) {
-        let _ = stream.shutdown(Shutdown::Both);
-        return Err(ConnectionError::SendHello(error));
-    }
     Ok(stream)
 }
 

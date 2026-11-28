@@ -130,29 +130,10 @@ pub(super) fn next_remote_region_request(
             && top >= remote_top
             && left + width <= remote_right
             && top + height <= remote_bottom,
-        "MXCFB benchmark region must remain inside remote viewport"
+        "MXCFB update region must remain inside remote viewport"
     );
 
     request_for_region(update_region, markers.next_marker(), waveform)
-}
-
-/// Benchmark-facing name for the same bounded remote-region policy.
-pub(super) fn next_benchmark_request(
-    screen: ScreenLayout,
-    region: ScreenRect,
-    visible_width: u32,
-    visible_height: u32,
-    markers: &mut UpdateMarkerSequence,
-    waveform: MxcfbWaveform,
-) -> Result<UpdateDataMtk> {
-    next_remote_region_request(
-        screen,
-        region,
-        visible_width,
-        visible_height,
-        markers,
-        waveform,
-    )
 }
 
 /// Preserve the established conservative policy for normal PaperPad frames.
@@ -250,7 +231,7 @@ mod tests {
     }
 
     #[test]
-    fn benchmark_request_is_bounded_by_remote_viewport_before_marker_advance() {
+    fn remote_region_request_is_bounded_by_remote_viewport_before_marker_advance() {
         let screen = ScreenLayout::new(1272, 1696).unwrap();
         let mut markers = UpdateMarkerSequence::for_process();
         let invalid = ScreenRect {
@@ -260,8 +241,15 @@ mod tests {
             height: 72,
         };
         assert!(
-            next_benchmark_request(screen, invalid, 1272, 1696, &mut markers, MxcfbWaveform::A2,)
-                .is_err()
+            next_remote_region_request(
+                screen,
+                invalid,
+                1272,
+                1696,
+                &mut markers,
+                MxcfbWaveform::A2,
+            )
+            .is_err()
         );
 
         let region = ScreenRect {
@@ -271,7 +259,7 @@ mod tests {
             height: 256,
         };
         let request =
-            next_benchmark_request(screen, region, 1272, 1696, &mut markers, MxcfbWaveform::A2)
+            next_remote_region_request(screen, region, 1272, 1696, &mut markers, MxcfbWaveform::A2)
                 .unwrap();
         assert_eq!(request.update_region.left, 508);
         assert_eq!(request.update_region.top, 684);

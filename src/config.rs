@@ -1,22 +1,35 @@
 //! Process configuration read once before transport startup.
 
 use anyhow::{Context, Result, bail};
+use paper_protocol::v3::ClientMode;
 
 const COMPANION_HOST_ENV: &str = "PAPERPAD_COMPANION";
 const COMPANION_PORT_ENV: &str = "PAPERPAD_COMPANION_PORT";
+const TRANSPORT_ENV: &str = "PAPERPAD_TRANSPORT";
 const DEFAULT_COMPANION_PORT: u16 = paper_protocol::DEFAULT_TCP_PORT;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct PaperpadConfig {
     host: Option<String>,
     port: u16,
+    transport: ClientMode,
 }
 
 impl PaperpadConfig {
     pub(crate) fn from_env() -> Result<Self> {
         let host = read_optional_env(COMPANION_HOST_ENV)?;
         let port = read_optional_env(COMPANION_PORT_ENV)?;
-        Self::from_values(host.as_deref(), port.as_deref())
+        let mut config = Self::from_values(host.as_deref(), port.as_deref())?;
+        if let Some(value) = read_optional_env(TRANSPORT_ENV)? {
+            config.transport = value
+                .parse()
+                .with_context(|| format!("invalid {TRANSPORT_ENV}"))?;
+        }
+        Ok(config)
+    }
+
+    pub(crate) fn transport(&self) -> ClientMode {
+        self.transport
     }
 
     pub(crate) fn host(&self) -> Option<&str> {
@@ -49,6 +62,7 @@ impl PaperpadConfig {
         Ok(Self {
             host: host.map(str::to_owned),
             port,
+            transport: ClientMode::default(),
         })
     }
 }
@@ -74,6 +88,7 @@ mod tests {
             PaperpadConfig {
                 host: None,
                 port: DEFAULT_COMPANION_PORT,
+                transport: ClientMode::default(),
             }
         );
     }

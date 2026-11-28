@@ -187,65 +187,6 @@ track identity. Use `nowplaying refresh` if artwork changes for the same
 track. Stopped playback, missing track identity, and stale samples disable
 the controls.
 
-### Refresh and measurement
-
-PaperSpoon polls Music about once per second during playback, every two
-seconds when paused, and at intervals of up to five seconds when stopped,
-unavailable, or failing. It interpolates progress with a monotonic clock.
-Progress refresh defaults to `1000` ms. Select `100`, `250`, `500`, `1000`,
-or `2000` with `--now-playing-progress-ms=VALUE`. Track changes and button
-feedback can publish between progress ticks. Unchanged pixels suppress
-publication, so steady paused playback sends no periodic frames. A
-reconnecting Gray8 client receives the current view at its negotiated size.
-
-The PaperSpoon log records acquisition, command, artwork, render, and
-socket-write durations, along with payload size, changed pixels, and the
-bounding area of changed pixels. The logged state change after a command
-describes a subsequent sample consistent with that command. On the Kindle,
-use **Run Paperpad DU (5m)** for the binary UI and grayscale artwork.
-PaperPad selects DU only when both frames' pixels in the update region
-are black or white. Continuous-tone regions and transitions away from
-grayscale use GC16. A progress tick leaves unchanged artwork outside the
-update region.
-
-Use the same fake track and progress interval when comparing the KUAL
-waveforms. Check timer readability, control latency, artwork fidelity,
-and ghosting after several track changes and backward seeks. Compare
-**A2** with **DU** on binary text and controls. **DU4** also accepts exact
-Gray8 levels `85` and `170` in both frames. Evaluate those intermediate
-levels with a separate text sample to judge whether antialiasing helps.
-The device log reports each submitted rectangle and waveform, plus
-marker wait time on waveform switches.
-
-In the earlier full-viewport black/white benchmark, A2 had a 120 ms
-median kernel-timed update versus 156 ms for DU. That measurement used
-serialized solid frames. The Now Playing comparison also needs observed
-text fidelity and ghosting. [Benchmark results](archive/mxcfb-benchmarks.md)
-
-### Host verification on 2026-11-27
-
-On macOS 26.7.1, PaperView at `1272x1624` showed progress, elapsed and
-remaining time, long-title ellipsis, and delayed artwork. Prev, Play/Pause,
-Next, and tap-to-seek worked with the fake provider. A localhost PPFB test
-covered pause, provider failure and recovery, reconnect, viewport changes,
-a stalled reader, and diagnostic takeover. The Apple Music provider
-acquired playback data and grayscale artwork, and applied a seek while
-Music was paused. The test restored the original position.
-
-Short loopback runs at `1272x1624` used a debug build and the first fake
-track. Each published Gray8 PPFB frame used 2,065,756 bytes.
-
-| Progress interval | Received frames per second |
-| ---: | ---: |
-| 100 ms | 7.43 |
-| 250 ms | 4.17 |
-| 500 ms | 2.10 |
-| 1000 ms | 1.05 |
-| 2000 ms | 0.52 |
-
-Physical Kindle results and operator observations are recorded with the
-[GC16 device evidence](archive/mxcfb-device-evidence.md#live-now-playing-gc16-baseline-2026-11-27).
-
 ## Stop and clean up
 
 Stop PaperView with its close button or `Ctrl-C` in Terminal 2, then stop

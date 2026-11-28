@@ -73,19 +73,6 @@ pub(super) const SEND_UPDATE_MTK: u32 =
 pub(super) const WAIT_FOR_UPDATE_COMPLETE: u32 =
     (3u32 << 30) | ((size_of::<UpdateMarkerData>() as u32) << 16) | ((b'F' as u32) << 8) | 0x2f;
 
-// Bellatrix4/PW6 extension from the pinned FBInk `mtk-kindle.h`. Although the
-// ioctl encoding advertises one `u32`, the driver may write up to 64 markers
-// to the caller-provided array and returns the number of bytes written.
-#[cfg(target_os = "linux")]
-#[allow(dead_code)] // Wait-any remains documented for diagnostics only.
-pub(super) const MAX_PENDING_UPDATES: usize = 64;
-#[allow(dead_code)] // Global marker consumption makes this unsuitable for timing.
-pub(super) const WAIT_FOR_ANY_UPDATE_COMPLETE_MTK: u32 =
-    (3u32 << 30) | ((size_of::<u32>() as u32) << 16) | ((b'F' as u32) << 8) | 0x37;
-#[cfg(target_os = "linux")]
-#[allow(dead_code)]
-pub(super) const WAIT_FOR_ANY_UPDATE_COMPLETE_CHECK: u32 = u32::MAX;
-
 const _: () = {
     assert!(size_of::<UpdateRegion>() == 16);
     assert!(size_of::<AltBufferData>() == 28);
@@ -97,5 +84,4 @@ const _: () = {
     assert!(offset_of!(UpdateDataMtk, ts_epdc) == 92);
     assert!(SEND_UPDATE_MTK == 0x4060_462e);
     assert!(WAIT_FOR_UPDATE_COMPLETE == 0xc008_462f);
-    assert!(WAIT_FOR_ANY_UPDATE_COMPLETE_MTK == 0xc004_4637);
 };

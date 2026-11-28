@@ -32,6 +32,7 @@ use paper_protocol::{
     DISCOVERY_PORT, Gray8Frame, Mono1Frame, PixelFormat, V2PixelFormats, V2PointerPhase,
     encode_v2_frame,
 };
+use paper_protocol::{compression::ZstdEncoder, v3};
 use paperspoon::{
     application_input::ApplicationInput, application_renderer::ApplicationRenderer,
     application_ui::ApplicationUi, now_playing::load_now_playing_frame,
@@ -47,9 +48,11 @@ mod server;
 
 use diagnostic::{DiagnosticFrame, LiveCommand, StdinCommand, parse_stdin_command};
 use image_frame::decode_jpeg_path_fit_contain;
-use inbound::{SessionMessage, read_session_hello, read_session_message};
+use inbound::{
+    SessionMessage, read_negotiated_hello, read_session_message, read_v3_session_message,
+};
 use live_now_playing::{LiveNowPlaying, ProviderKind};
-use server::{CurrentConnection, FrameForward, FrameTarget, FrameTargetError};
+use server::{ConnectionToken, CurrentConnection, FrameForward, FrameTarget, FrameTargetError};
 
 /// Default TCP port. Must match `rust_x11_hello`'s `COMPANION_PORT`.
 const DEFAULT_PORT: u16 = paper_protocol::DEFAULT_TCP_PORT;
@@ -68,6 +71,35 @@ struct Options {
     forward_url: bool,
     live_provider: Option<ProviderKind>,
     progress_interval: Duration,
+    compression: HostCompression,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum HostCompression {
+    Raw,
+    #[default]
+    Auto,
+    Zstd,
+}
+
+impl HostCompression {
+    fn negotiate(
+        self,
+        offered: Option<v3::Encodings>,
+    ) -> Result<Option<v3::Encodings>, &'static str> {
+        let supported = if self == Self::Raw {
+            v3::Encodings::RAW
+        } else {
+            v3::Encodings::RAW_ZSTD
+        };
+        let agreed = offered.map(|offered| offered.intersection(supported));
+        if self == Self::Zstd && !agreed.is_some_and(|agreed| agreed.supports(v3::Encoding::Zstd)) {
+            return Err(
+                "Zstandard is required. Enable PPFB v3 Zstandard on the client or select --compression=auto",
+            );
+        }
+        Ok(agreed)
+    }
 }
 
 fn parse_options(args: &[String]) -> Result<Options, String> {
@@ -77,9 +109,16 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
     let mut forward_url = FORWARD_TO_HAMMERSPOON;
     let mut live_provider = None;
     let mut progress_interval = Duration::from_secs(1);
+    let mut compression = HostCompression::default();
     let positional = args.iter().skip(1);
     for arg in positional {
         match arg.as_str() {
+            "--compression=raw" => compression = HostCompression::Raw,
+            "--compression=auto" => compression = HostCompression::Auto,
+            "--compression=zstd" => compression = HostCompression::Zstd,
+            value if value.starts_with("--compression=") => {
+                return Err("--compression requires raw, auto, or zstd".into());
+            }
             "--no-forward-url" => {
                 forward_url = false;
             }
@@ -131,6 +170,7 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
         forward_url,
         live_provider,
         progress_interval,
+        compression,
     })
 }
 
@@ -208,6 +248,9 @@ struct FrameSenderState {
     authoritative: Option<AuthoritativeFrame>,
     last_application_frame: Option<Mono1Frame>,
     application_renderer: Option<ApplicationRenderer>,
+    encoding_session: Option<ConnectionToken>,
+    encoder: Option<ZstdEncoder>,
+    compression_scratch: Vec<u8>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -288,6 +331,9 @@ impl FrameSender {
                 authoritative: None,
                 last_application_frame: None,
                 application_renderer: None,
+                encoding_session: None,
+                encoder: None,
+                compression_scratch: Vec::new(),
             })),
         }
     }
@@ -317,19 +363,72 @@ impl FrameSender {
         let next_frame_id = frame_id
             .checked_add(1)
             .ok_or_else(|| "frame ID exhausted".to_string())?;
+        let transport = self.current.transport();
         let encode_started = Instant::now();
-        let encoded = encode(frame_id)?;
+        let mut encoded = encode(frame_id)?;
+        let Some((connection, encodings)) = transport else {
+            return Ok(None);
+        };
+        if !state
+            .encoding_session
+            .as_ref()
+            .is_some_and(|current| current.matches(&connection))
+        {
+            state.encoding_session = Some(connection.clone());
+            state.encoder = None;
+            state.compression_scratch.clear();
+            if encodings.is_some_and(|encodings| encodings.supports(v3::Encoding::Zstd)) {
+                match ZstdEncoder::new(1) {
+                    Ok(encoder) => state.encoder = Some(encoder),
+                    Err(error) => eprintln!(
+                        "PPFB v3 Zstandard unavailable for this connection, using Raw: {error}"
+                    ),
+                }
+            }
+        }
+        if encodings.is_some() {
+            encoded[4] = v3::VERSION;
+            if let Some(encoder) = &mut state.encoder {
+                let pixels_start = paper_protocol::V2_HEADER_LEN + v3::RAW_PREFIX_LEN;
+                let raw_len = encoded.len() - pixels_start;
+                match encoder.encode_if_smaller(
+                    &encoded[pixels_start..],
+                    v3::RAW_PREFIX_LEN,
+                    v3::ZSTD_PREFIX_LEN,
+                    &mut state.compression_scratch,
+                ) {
+                    Ok(Some(compressed)) => {
+                        let payload_len = v3::ZSTD_PREFIX_LEN + compressed.len();
+                        encoded[8..12].copy_from_slice(&(payload_len as u32).to_be_bytes());
+                        encoded[paper_protocol::V2_HEADER_LEN + 13] = v3::Encoding::Zstd as u8;
+                        encoded.truncate(pixels_start);
+                        encoded.extend_from_slice(&(raw_len as u32).to_be_bytes());
+                        encoded.extend_from_slice(compressed);
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        eprintln!(
+                            "PPFB v3 Zstandard compression failed, using Raw for this connection: {error}"
+                        );
+                        state.encoder = None;
+                    }
+                }
+            }
+        }
         let encode_elapsed = encode_started.elapsed();
         let encoded_len = encoded.len();
         // write_all measures local socket acceptance, not remote receipt or display.
         let socket_write_started = Instant::now();
-        let forwarded = match target {
-            Some(target) => self
-                .current
-                .forward_frame_to(&encoded, pixel_format, target),
-            None => self.current.forward_frame(&encoded, pixel_format),
-        }
-        .map_err(|error| format!("failed write frame: {error}"))?;
+        let forwarded = self
+            .current
+            .forward_negotiated(
+                &encoded,
+                pixel_format,
+                target,
+                &connection,
+                authoritative.as_ref().map(AuthoritativeFrame::dimensions),
+            )
+            .map_err(|error| format!("failed to write frame: {error}"))?;
         let socket_write_elapsed = socket_write_started.elapsed();
         match forwarded {
             FrameForward::Sent => {}
@@ -935,7 +1034,7 @@ fn main() -> io::Result<()> {
             }
         };
         let mut reader = BufReader::new(&mut stream);
-        let hello = match read_session_hello(&mut reader) {
+        let (hello, offered) = match read_negotiated_hello(&mut reader) {
             Ok(Some(hello)) => hello,
             Ok(None) => continue,
             Err(error) => {
@@ -943,11 +1042,30 @@ fn main() -> io::Result<()> {
                 continue;
             }
         };
+        let encodings = match opts.compression.negotiate(offered) {
+            Ok(encodings) => encodings,
+            Err(error) => {
+                eprintln!("PPFB negotiation with {peer}: {error}");
+                continue;
+            }
+        };
+        if let Some(encodings) = encodings {
+            let mut socket = &**reader.get_ref();
+            if let Err(error) = socket.write_all(&v3::encode_ack(encodings)) {
+                eprintln!("PPFB v3 HelloAck to {peer}: {error}");
+                continue;
+            }
+        }
         let hello_record = format!(
-            "hello protocol={} viewport={}x{}",
-            hello.protocol_version(),
+            "hello protocol={} viewport={}x{} encodings={encodings:?} compression={:?}",
+            if encodings.is_some() {
+                v3::VERSION
+            } else {
+                hello.protocol_version()
+            },
             hello.viewport_width(),
-            hello.viewport_height()
+            hello.viewport_height(),
+            opts.compression,
         );
         println!("received from {peer}: {hello_record}");
         flush_stdout("after received Hello");
@@ -956,10 +1074,11 @@ fn main() -> io::Result<()> {
         }
 
         // A valid Hello makes this the active Kindle connection for frames.
-        let connection_token = match current.install_for_hello(
+        let connection_token = match current.install_negotiated(
             reader.get_ref(),
             hello.pixel_formats(),
             (hello.viewport_width(), hello.viewport_height()),
+            encodings,
         ) {
             Ok(token) => token,
             Err(e) => {
@@ -1015,7 +1134,12 @@ fn main() -> io::Result<()> {
             }
         }
         loop {
-            let message = match read_session_message(&mut reader) {
+            let read = if encodings.is_some() {
+                read_v3_session_message(&mut reader)
+            } else {
+                read_session_message(&mut reader)
+            };
+            let message = match read {
                 Ok(Some(message)) => message,
                 Ok(None) => break,
                 Err(error) => {
@@ -1293,6 +1417,201 @@ mod tests {
             (frame.width(), frame.height()),
             frame.pixels().to_vec(),
         )
+    }
+
+    #[test]
+    fn v3_sender_falls_back_to_raw_without_losing_compression_for_next_frame() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut peer, _) = listener.accept().unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let current = CurrentConnection::default();
+        let viewport = v3::Viewport {
+            width: 64,
+            height: 64,
+            formats: V2PixelFormats::GRAY8,
+        };
+        let encodings = v3::Encodings::RAW_ZSTD;
+        current
+            .install_negotiated(&client, viewport.formats, (64, 64), Some(encodings))
+            .unwrap();
+        let sender = FrameSender::new(current.clone());
+        let target = current.frame_target(PixelFormat::Gray8).unwrap();
+        let wrong_size = diagnostic("frame gray 42 4x2");
+        assert_eq!(
+            sender.send_diagnostic(wrong_size).unwrap_err(),
+            "PaperPad viewport changed while preparing frame"
+        );
+
+        let mut state = 0x5eed_u32;
+        let noise = (0..4096)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                state as u8
+            })
+            .collect();
+        let mut decoder = v3::FrameDecoder::default();
+        for (pixels, encoding) in [
+            (vec![42; 4096], v3::Encoding::Zstd),
+            (noise, v3::Encoding::Raw),
+            (vec![176; 4096], v3::Encoding::Zstd),
+        ] {
+            let frame = Arc::new(Gray8Frame::new(64, 64, pixels).unwrap());
+            let sent = sender
+                .send_now_playing_frame(Arc::clone(&frame), target.clone())
+                .unwrap()
+                .unwrap()
+                .sent;
+            let mut header = [0; v3::HEADER_LEN];
+            peer.read_exact(&mut header).unwrap();
+            let received = decoder
+                .read_frame(
+                    &mut peer,
+                    v3::Header::decode(header).unwrap(),
+                    viewport,
+                    encodings,
+                )
+                .unwrap();
+            assert_eq!(received.id, sent.frame_id);
+            assert_eq!(received.encoded_len, sent.encoded_len);
+            assert_eq!(received.encoding, encoding);
+            assert_eq!(received.frame.pixels(), frame.pixels());
+        }
+    }
+
+    #[test]
+    fn v3_connection_change_during_encoding_discards_the_pending_frame() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let current = CurrentConnection::default();
+        let original = TcpStream::connect(addr).unwrap();
+        let (_original_peer, _) = listener.accept().unwrap();
+        let replacement = TcpStream::connect(addr).unwrap();
+        let (mut peer, _) = listener.accept().unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let dimensions = (64, 64);
+        let formats = V2PixelFormats::GRAY8;
+        let encodings = v3::Encodings::RAW_ZSTD;
+        current
+            .install_negotiated(&original, formats, dimensions, Some(encodings))
+            .unwrap();
+        let sender = FrameSender::new(current.clone());
+        let original_target = current.frame_target(PixelFormat::Gray8).unwrap();
+        let stale = Arc::new(Gray8Frame::new(64, 64, vec![42; 4096]).unwrap());
+        let mut state = sender.state.lock().unwrap();
+        let result = sender.send_locked(
+            &mut state,
+            PixelFormat::Gray8,
+            Some(&original_target),
+            |id| {
+                original.shutdown(Shutdown::Both).unwrap();
+                current
+                    .install_negotiated(&replacement, formats, dimensions, Some(encodings))
+                    .unwrap();
+                encode_v2_frame(id, stale.as_ref()).map_err(|error| error.to_string())
+            },
+            Some(AuthoritativeFrame::NowPlaying(Arc::clone(&stale))),
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            "PaperPad connection changed while preparing frame"
+        );
+        assert!(state.authoritative.is_none());
+        assert_eq!(state.next_frame_id, 1);
+        assert!(!state.compression_scratch.is_empty());
+        drop(state);
+
+        let fresh = Arc::new(Gray8Frame::new(64, 64, vec![176; 4096]).unwrap());
+        let target = current.frame_target(PixelFormat::Gray8).unwrap();
+        let sent = sender
+            .send_now_playing_frame(Arc::clone(&fresh), target)
+            .unwrap()
+            .unwrap();
+        let mut header = [0; v3::HEADER_LEN];
+        peer.read_exact(&mut header).unwrap();
+        let received = v3::FrameDecoder::default()
+            .read_frame(
+                &mut peer,
+                v3::Header::decode(header).unwrap(),
+                v3::Viewport {
+                    width: 64,
+                    height: 64,
+                    formats,
+                },
+                encodings,
+            )
+            .unwrap();
+        assert_eq!(received.id, sent.sent.frame_id);
+        assert_eq!(received.id, 1);
+        assert_eq!(received.encoding, v3::Encoding::Zstd);
+        assert_eq!(received.frame.pixels(), fresh.pixels());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn v3_disconnect_during_a_partial_write_retires_the_connection() {
+        use std::os::fd::AsRawFd;
+
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut peer, _) = listener.accept().unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let buffer_size: libc::c_int = 4096;
+        for (socket, option) in [(&client, libc::SO_SNDBUF), (&peer, libc::SO_RCVBUF)] {
+            // The pointer refers to a socket-option integer for the duration of the call.
+            let status = unsafe {
+                libc::setsockopt(
+                    socket.as_raw_fd(),
+                    libc::SOL_SOCKET,
+                    option,
+                    (&raw const buffer_size).cast(),
+                    size_of_val(&buffer_size) as libc::socklen_t,
+                )
+            };
+            assert_eq!(status, 0, "{}", io::Error::last_os_error());
+        }
+
+        const WIDTH: u16 = 2048;
+        const HEIGHT: u16 = 1024;
+        let pixel_count = usize::from(WIDTH) * usize::from(HEIGHT);
+        let current = CurrentConnection::default();
+        current
+            .install_negotiated(
+                &client,
+                V2PixelFormats::GRAY8,
+                (WIDTH, HEIGHT),
+                Some(v3::Encodings::RAW),
+            )
+            .unwrap();
+        let sender = FrameSender::new(current.clone());
+        let target = current.frame_target(PixelFormat::Gray8).unwrap();
+        let frame = Arc::new(Gray8Frame::new(WIDTH, HEIGHT, vec![42; pixel_count]).unwrap());
+
+        let result = std::thread::scope(|scope| {
+            let sending = scope.spawn(|| sender.send_now_playing_frame(frame, target));
+            let mut header = [0; v3::HEADER_LEN];
+            peer.read_exact(&mut header).unwrap();
+            let header = v3::Header::decode(header).unwrap();
+            assert_eq!(header.kind, v3::Kind::Frame);
+            assert_eq!(header.payload_len, v3::RAW_PREFIX_LEN + pixel_count);
+            let mut prefix_and_pixel = [0; v3::RAW_PREFIX_LEN + 1];
+            peer.read_exact(&mut prefix_and_pixel).unwrap();
+            assert_eq!(prefix_and_pixel[v3::RAW_PREFIX_LEN], 42);
+            assert!(
+                !sending.is_finished(),
+                "payload fit in the test socket buffers"
+            );
+            peer.shutdown(Shutdown::Both).unwrap();
+            sending.join().unwrap()
+        });
+
+        assert!(result.unwrap_err().contains("failed to write frame"));
+        assert!(!current.is_active());
+        let state = sender.state.lock().unwrap();
+        assert_eq!(state.next_frame_id, 1);
+        assert!(state.authoritative.is_none());
     }
 
     fn read_sent_owned_frame(peer: &mut TcpStream, sent: SentFrame) -> (u64, Frame) {
@@ -2184,6 +2503,11 @@ mod tests {
         assert_eq!(opts.port, 5581);
         assert_eq!(opts.log_path, "/tmp/paperspoon.log");
         assert_eq!(opts.latency_log_path, DEFAULT_LATENCY_LOG_FILE);
+        assert_eq!(
+            opts.compression.negotiate(Some(v3::Encodings::RAW_ZSTD)),
+            Ok(Some(v3::Encodings::RAW_ZSTD))
+        );
+        assert_eq!(opts.compression.negotiate(None), Ok(None));
         assert!(opts.forward_url);
     }
 

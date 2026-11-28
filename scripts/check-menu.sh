@@ -21,7 +21,7 @@ jq -e '
     (.items[0] |
         type == "object" and
         (keys == ["items", "name", "priority"]) and
-        (.name | type == "string" and length > 0) and
+        (.name == "PaperPad") and
         (.priority | type == "number") and
         (.items | type == "array" and length > 0) and
         all(

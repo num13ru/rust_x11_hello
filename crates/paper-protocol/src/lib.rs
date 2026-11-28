@@ -1,8 +1,12 @@
-//! Shared, std-only protocol-v2 primitives for PaperPad and PaperSpoon.
+//! Shared framebuffer and protocol primitives for PaperPad, PaperSpoon, and PaperView.
 
+#[cfg(feature = "compression")]
+pub mod compression;
 mod framebuffer;
 mod v2;
 mod v2_payload;
+#[cfg(feature = "compression")]
+pub mod v3;
 
 pub use framebuffer::{
     Frame, FrameError, Gray8Frame, Gray8FrameError, Mono1Frame, Mono1FrameError, Mono1Pixel,

@@ -56,7 +56,12 @@ impl V2PixelFormats {
         self.mask & pixel_format_mask(pixel_format) != 0
     }
 
-    const fn from_mask(mask: u8) -> Option<Self> {
+    #[cfg(feature = "compression")]
+    pub(crate) const fn mask(self) -> u8 {
+        self.mask
+    }
+
+    pub(crate) const fn from_mask(mask: u8) -> Option<Self> {
         if mask != 0 && mask & !SUPPORTED_FORMAT_MASK == 0 {
             Some(Self { mask })
         } else {
@@ -275,28 +280,28 @@ pub enum V2FrameRef<'a> {
 }
 
 impl<'a> V2FrameRef<'a> {
-    fn width(self) -> u16 {
+    pub(crate) fn width(self) -> u16 {
         match self {
             Self::Mono1(frame) => frame.width(),
             Self::Gray8(frame) => frame.width(),
         }
     }
 
-    fn height(self) -> u16 {
+    pub(crate) fn height(self) -> u16 {
         match self {
             Self::Mono1(frame) => frame.height(),
             Self::Gray8(frame) => frame.height(),
         }
     }
 
-    fn pixel_format(self) -> V2PixelFormat {
+    pub(crate) fn pixel_format(self) -> V2PixelFormat {
         match self {
             Self::Mono1(_) => V2PixelFormat::Mono1,
             Self::Gray8(_) => V2PixelFormat::Gray8,
         }
     }
 
-    fn pixels(self) -> &'a [u8] {
+    pub(crate) fn pixels(self) -> &'a [u8] {
         match self {
             Self::Mono1(frame) => frame.pixels(),
             Self::Gray8(frame) => frame.pixels(),
