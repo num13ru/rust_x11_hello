@@ -20,10 +20,10 @@ use std::os::fd::{AsRawFd, RawFd};
 #[cfg(target_os = "linux")]
 use std::os::unix::fs::OpenOptionsExt;
 #[cfg(target_os = "linux")]
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[cfg(target_os = "linux")]
-use super::probe::select_touch_device;
+use super::device::select_touch_device;
 
 pub(crate) const EV_SYN: u16 = 0x00;
 pub(crate) const EV_ABS: u16 = 0x03;
@@ -274,7 +274,6 @@ impl TypeBDecoder {
 pub(crate) struct EvdevReader {
     file: File,
     path: PathBuf,
-    name: String,
     decoder: TypeBDecoder,
     bytes: Vec<u8>,
     grabbed: bool,
@@ -282,15 +281,7 @@ pub(crate) struct EvdevReader {
 
 #[cfg(target_os = "linux")]
 impl EvdevReader {
-    pub(crate) fn open(screen_size: (u16, u16)) -> Result<Self> {
-        Self::open_with_grab(screen_size, false)
-    }
-
     pub(crate) fn open_exclusive(screen_size: (u16, u16)) -> Result<Self> {
-        Self::open_with_grab(screen_size, true)
-    }
-
-    fn open_with_grab(screen_size: (u16, u16), grab: bool) -> Result<Self> {
         let selected = select_touch_device()?;
         let (x, y) = selected.multitouch_axes.with_context(|| {
             format!(
@@ -314,17 +305,16 @@ impl EvdevReader {
                     selected.path.display()
                 )
             })?;
-        if grab {
-            set_exclusive_grab(&file, true).with_context(|| {
-                format!(
-                    "request EVIOCGRAB for selected touchscreen {}",
-                    selected.path.display()
-                )
-            })?;
-        }
+        set_exclusive_grab(&file, true).with_context(|| {
+            format!(
+                "request EVIOCGRAB for selected touchscreen {}",
+                selected.path.display()
+            )
+        })?;
+
         let event_size = std::mem::size_of::<libc::input_event>();
         eprintln!(
-            "input reader: opened path={} name={:?} axes_x={}..{} axes_y={}..{} screen={}x{} eviocgrab={grab}",
+            "input reader: opened path={} name={:?} axes_x={}..{} axes_y={}..{} screen={}x{} eviocgrab=true",
             selected.path.display(),
             selected.name,
             x.minimum,
@@ -337,19 +327,10 @@ impl EvdevReader {
         Ok(Self {
             file,
             path: selected.path,
-            name: selected.name,
             decoder: TypeBDecoder::new(geometry),
             bytes: vec![0; event_size * EVENTS_PER_READ],
-            grabbed: grab,
+            grabbed: true,
         })
-    }
-
-    pub(crate) fn path(&self) -> &Path {
-        &self.path
-    }
-
-    pub(crate) fn name(&self) -> &str {
-        &self.name
     }
 
     /// Borrow the touchscreen descriptor for readiness polling.

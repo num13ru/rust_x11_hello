@@ -56,8 +56,6 @@ trap cleanup_local_temp EXIT
 
 upload_support_files() {
     mtp put "${LOCAL_EXT}/bin/run.sh" "${REMOTE_BIN_DIR}/run.sh" --replace --verify
-    mtp put "${LOCAL_EXT}/bin/probe-fb.sh" "${REMOTE_BIN_DIR}/probe-fb.sh" --replace --verify
-    mtp put "${LOCAL_EXT}/bin/probe-input.sh" "${REMOTE_BIN_DIR}/probe-input.sh" --replace --verify
     mtp put "${LOCAL_EXT}/config.xml" "${REMOTE_EXT}/config.xml" --replace --verify
 }
 
@@ -66,16 +64,13 @@ publish_menu() {
     mtp put "${LOCAL_EXT}/menu.json" "${REMOTE_EXT}/menu.json" --replace --verify || return
 
     # Retire support files only after the new menu no longer references them.
-    if remote_name_exists "${REMOTE_BIN_DIR}" stop.sh; then
-        if ! mtp rm "${REMOTE_BIN_DIR}/stop.sh" --yes; then
-            printf 'WARNING: new menu installed, but retired stop.sh cleanup failed.\n' >&2
+    for retired in stop.sh show.sh probe-fb.sh probe-input.sh; do
+        if remote_name_exists "${REMOTE_BIN_DIR}" "$retired"; then
+            if ! mtp rm "${REMOTE_BIN_DIR}/${retired}" --yes; then
+                printf 'WARNING: new menu installed, but retired %s cleanup failed.\n' "$retired" >&2
+            fi
         fi
-    fi
-    if remote_name_exists "${REMOTE_BIN_DIR}" show.sh; then
-        if ! mtp rm "${REMOTE_BIN_DIR}/show.sh" --yes; then
-            printf 'WARNING: new menu installed, but retired show.sh cleanup failed.\n' >&2
-        fi
-    fi
+    done
 }
 
 if [[ "$#" -ne 1 ]]; then
@@ -94,8 +89,6 @@ esac
 for required_file in \
     "$LOCAL_BIN" \
     "${LOCAL_EXT}/bin/run.sh" \
-    "${LOCAL_EXT}/bin/probe-fb.sh" \
-    "${LOCAL_EXT}/bin/probe-input.sh" \
     "${LOCAL_EXT}/config.xml" \
     "${LOCAL_EXT}/menu.json"
 do

@@ -1,17 +1,10 @@
 //! Paperpad Kindle/KUAL process entry point.
 //!
-//! Entry point only: chooses a diagnostic, benchmark, or normal native MXCFB
-//! lifecycle and tears it down. Logical UI concepts live in [`ui`].
-
 #![cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
 
 #[cfg(target_os = "linux")]
 use anyhow::Context;
 use anyhow::{Result, bail};
-#[cfg(target_os = "linux")]
-use input::benchmark::BenchmarkExitPoll;
-#[cfg(target_os = "linux")]
-use input::evdev::EvdevReader;
 #[cfg(target_os = "linux")]
 use runtime_wait::RuntimeNotifier;
 use std::env;
@@ -54,8 +47,6 @@ fn print_environment() {
     eprintln!("PaperPad Kindle/KUAL runtime");
     eprintln!("target_arch: {}", env::consts::ARCH);
     eprintln!("target_os: {}", env::consts::OS);
-    eprintln!("DISPLAY={:?}", env::var("DISPLAY").ok());
-    eprintln!("XAUTHORITY={:?}", env::var("XAUTHORITY").ok());
 }
 
 #[cfg(target_os = "linux")]
@@ -122,27 +113,8 @@ fn install_signal_handlers() -> Result<()> {
 }
 
 fn run() -> Result<()> {
-    let mut args = env::args_os();
-    let _program = args.next();
-    match (args.next(), args.next()) {
-        (None, None) => {}
-        (Some(arg), None) if arg == "--inspect-framebuffer" => {
-            return mxcfb::inspect_framebuffer();
-        }
-        (Some(arg), None) if arg == "--inspect-input" => {
-            return input::inspect_input();
-        }
-        (Some(arg), None) if arg == "--trace-input" => {
-            return input::trace_input();
-        }
-        (Some(arg), None) if arg == "--benchmark-mxcfb" => {
-            return run_mxcfb_benchmark();
-        }
-        _ => {
-            bail!(
-                "usage: rust_x11_hello [--inspect-framebuffer|--inspect-input|--trace-input|--benchmark-mxcfb]"
-            )
-        }
+    if env::args_os().nth(1).is_some() {
+        bail!("usage: rust_x11_hello");
     }
 
     #[cfg(target_os = "linux")]
@@ -158,54 +130,6 @@ fn run() -> Result<()> {
     #[cfg(not(target_os = "linux"))]
     {
         bail!("normal PaperPad runtime requires Linux and /dev/fb0")
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn run_mxcfb_benchmark() -> Result<()> {
-    let config = mxcfb::BenchmarkConfig::from_env()?;
-    install_signal_handlers()?;
-    let mut benchmark = mxcfb::MxcfbBenchmark::open(config)?;
-    let size = benchmark.dimensions();
-    eprintln!(
-        "mxcfb benchmark native lifecycle width={} height={} eviocgrab=false",
-        size.0, size.1
-    );
-
-    let benchmark_result = (|| -> Result<mxcfb::BenchmarkOutcome> {
-        let mut input_reader = EvdevReader::open(size)?;
-        let mut benchmark_exit = BenchmarkExitPoll::new(size);
-        let run_result = benchmark.run(|| {
-            if SHUTDOWN_REQUESTED.load(Ordering::Acquire) {
-                eprintln!("mxcfb benchmark graceful shutdown requested by signal");
-                Ok(true)
-            } else {
-                benchmark_exit.poll(&mut input_reader)
-            }
-        });
-        benchmark_exit.shutdown(&mut input_reader);
-        drop(input_reader);
-        let restore_result = benchmark.restore_initial_screen();
-        match (run_result, restore_result) {
-            (Err(primary), Err(restore_error)) => {
-                eprintln!(
-                    "framebuffer restoration after benchmark failure also failed: {restore_error:#}"
-                );
-                Err(primary)
-            }
-            (Err(primary), Ok(())) => Err(primary),
-            (Ok(_), Err(restore_error)) => Err(restore_error),
-            (Ok(outcome), Ok(())) => Ok(outcome),
-        }
-    })();
-
-    match benchmark_result {
-        Err(error) => Err(error),
-        Ok(mxcfb::BenchmarkOutcome::Completed) => Ok(()),
-        Ok(mxcfb::BenchmarkOutcome::Stopped { completed }) => {
-            eprintln!("mxcfb benchmark exited early completed={completed}");
-            Ok(())
-        }
     }
 }
 
@@ -236,9 +160,4 @@ mod tests {
 
         SHUTDOWN_REQUESTED.store(false, Ordering::Release);
     }
-}
-
-#[cfg(not(target_os = "linux"))]
-fn run_mxcfb_benchmark() -> Result<()> {
-    bail!("MXCFB benchmark requires Linux and /dev/fb0")
 }

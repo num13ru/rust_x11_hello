@@ -20,8 +20,6 @@ chmod +x "$FAKE_MTP_BIN"
 mkdir -p "${LOCAL_PACKAGE}/bin"
 printf 'new-binary' >"${LOCAL_PACKAGE}/bin/rust_x11_hello"
 printf 'run' >"${LOCAL_PACKAGE}/bin/run.sh"
-printf 'probe' >"${LOCAL_PACKAGE}/bin/probe-fb.sh"
-printf 'input-probe' >"${LOCAL_PACKAGE}/bin/probe-input.sh"
 printf 'config' >"${LOCAL_PACKAGE}/config.xml"
 printf 'menu' >"${LOCAL_PACKAGE}/menu.json"
 
@@ -31,6 +29,8 @@ prepare_remote() {
     printf 'old-binary' >"${fake_root}/extensions/rust_x11_hello/bin/rust_x11_hello"
     printf 'old-menu' >"${fake_root}/extensions/rust_x11_hello/menu.json"
     printf 'retired-stop' >"${fake_root}/extensions/rust_x11_hello/bin/stop.sh"
+    printf 'retired-framebuffer-probe' >"${fake_root}/extensions/rust_x11_hello/bin/probe-fb.sh"
+    printf 'retired-input-probe' >"${fake_root}/extensions/rust_x11_hello/bin/probe-input.sh"
     printf 'retired-show' >"${fake_root}/extensions/rust_x11_hello/bin/show.sh"
 }
 
@@ -76,10 +76,6 @@ run_update "$SUCCESS_ROOT" "$SUCCESS_LOG" >"$SUCCESS_OUTPUT"
 
 cmp "${LOCAL_PACKAGE}/bin/rust_x11_hello" \
     "${SUCCESS_ROOT}/extensions/rust_x11_hello/bin/rust_x11_hello"
-cmp "${LOCAL_PACKAGE}/bin/probe-fb.sh" \
-    "${SUCCESS_ROOT}/extensions/rust_x11_hello/bin/probe-fb.sh"
-cmp "${LOCAL_PACKAGE}/bin/probe-input.sh" \
-    "${SUCCESS_ROOT}/extensions/rust_x11_hello/bin/probe-input.sh"
 cmp "${LOCAL_PACKAGE}/menu.json" \
     "${SUCCESS_ROOT}/extensions/rust_x11_hello/menu.json"
 activation_line="$(awk '$1 == "put" && $3 == "/extensions/rust_x11_hello/bin/rust_x11_hello" { print NR; exit }' "$SUCCESS_LOG")"
@@ -90,6 +86,8 @@ printf 'old-binary' | cmp - \
 test ! -e "${SUCCESS_ROOT}/extensions/rust_x11_hello/bin/rust_x11_hello.new"
 test ! -e "${SUCCESS_ROOT}/extensions/rust_x11_hello/bin/stop.sh"
 test ! -e "${SUCCESS_ROOT}/extensions/rust_x11_hello/bin/show.sh"
+test ! -e "${SUCCESS_ROOT}/extensions/rust_x11_hello/bin/probe-fb.sh"
+test ! -e "${SUCCESS_ROOT}/extensions/rust_x11_hello/bin/probe-input.sh"
 grep -Fq 'rm /extensions/rust_x11_hello/bin/rust_x11_hello.new --yes' "$SUCCESS_LOG"
 grep -Fq 'rm /extensions/rust_x11_hello/bin/stop.sh --yes' "$SUCCESS_LOG"
 grep -Fq 'rm /extensions/rust_x11_hello/bin/show.sh --yes' "$SUCCESS_LOG"
@@ -114,6 +112,8 @@ printf 'old-binary' | cmp - \
     "${FAILURE_ROOT}/extensions/rust_x11_hello/bin/rust_x11_hello.previous"
 printf 'old-menu' | cmp - \
     "${FAILURE_ROOT}/extensions/rust_x11_hello/menu.json"
+test -f "${FAILURE_ROOT}/extensions/rust_x11_hello/bin/probe-fb.sh"
+test -f "${FAILURE_ROOT}/extensions/rust_x11_hello/bin/probe-input.sh"
 if grep -Fq ' /extensions/rust_x11_hello/menu.json --replace --verify' "$FAILURE_LOG"; then
     printf 'ERROR: menu published before binary activation succeeded\n' >&2
     exit 1

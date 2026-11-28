@@ -1,4 +1,4 @@
-//! Direct-framebuffer diagnostics and the native MXCFB display backend.
+//! Direct-framebuffer MXCFB display backend.
 
 #[cfg(target_os = "linux")]
 mod abi;
@@ -7,9 +7,7 @@ mod abi;
 mod backend;
 #[cfg(target_os = "linux")]
 pub(crate) use backend::MxcfbDisplayBackend;
-// Update submission is used by the display backend, never by the probe.
-#[cfg(any(target_os = "linux", test))]
-mod benchmark;
+// Update submission for the display backend.
 #[cfg(target_os = "linux")]
 mod controller;
 #[cfg(any(target_os = "linux", test))]
@@ -21,19 +19,15 @@ mod layout;
 // Bounded framebuffer writes serve remote frames and the local Exit strip.
 #[cfg(target_os = "linux")]
 mod mapped;
-#[cfg(any(target_os = "linux", test))]
-mod memory;
 // Pure interpretation of kernel-reported framebuffer metadata.
 #[cfg(target_os = "linux")]
 mod metadata;
-// Backend opening is distinct from the read-only metadata probe.
+// Open and validate the framebuffer.
 #[cfg(target_os = "linux")]
 mod opened;
 // Remote and local presentation are selected through the MXCFB backend.
 #[cfg(target_os = "linux")]
 mod present;
-#[cfg(target_os = "linux")]
-mod probe;
 #[cfg(any(target_os = "linux", test))]
 mod region;
 // Local Exit pixels are prepared without touching /dev/fb0.
@@ -53,13 +47,3 @@ mod update_abi;
 mod pixels;
 #[cfg(any(target_os = "linux", test))]
 mod waveform_policy;
-
-#[cfg(target_os = "linux")]
-pub(crate) use benchmark::{BenchmarkConfig, BenchmarkOutcome, MxcfbBenchmark};
-#[cfg(target_os = "linux")]
-pub(crate) use probe::inspect_framebuffer;
-
-#[cfg(not(target_os = "linux"))]
-pub(crate) fn inspect_framebuffer() -> anyhow::Result<()> {
-    anyhow::bail!("MXCFB framebuffer inspection requires Linux and /dev/fb0")
-}

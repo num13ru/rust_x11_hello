@@ -51,8 +51,6 @@ check: check-menu check-toolchain
 	cargo clippy --workspace --all-targets -- -D warnings
 	cargo test --workspace
 	sh -n kindle-extension/rust_x11_hello/bin/run.sh
-	sh -n kindle-extension/rust_x11_hello/bin/probe-fb.sh
-	sh -n kindle-extension/rust_x11_hello/bin/probe-input.sh
 	bash -n scripts/build-kindle-armv7hf.sh
 	bash -n scripts/check-static.sh
 	bash -n scripts/deploy-kindle-mtp.sh

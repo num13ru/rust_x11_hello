@@ -11,12 +11,6 @@ LOCK_OWNER_FILE="$LOCK_DIR/launcher.pid"
 # The normal KUAL action leaves this unset for UDP discovery. An explicit host
 # remains available as a manual diagnostic override.
 COMPANION_HOST="${PAPERPAD_COMPANION:-}"
-MODE_ARG="${1:-}"
-NEEDS_DISCOVERY=1
-case "$MODE_ARG" in
-    --benchmark-mxcfb) NEEDS_DISCOVERY=0 ;;
-esac
-
 CHILD_PID=""
 LOCK_HELD=0
 
@@ -161,7 +155,6 @@ trap 'forward_signal TERM' TERM
     echo "PWD: $(pwd)"
     echo "UID/GID: $(id 2>/dev/null || echo 'id unavailable')"
     echo "BIN: $BIN"
-    echo "Mode: ${MODE_ARG:-paperpad}"
 } >> "$LOG" 2>&1
 
 if [ ! -f "$BIN" ]; then
@@ -223,27 +216,15 @@ if [ -f "$PID_FILE" ]; then
 fi
 
 
-# Discovery permission is needed only by normal PaperPad. Local MXCFB modes
-# deliberately perform no network activity.
+# Allow discovery replies before starting the client.
 remove_discovery_rule
-if [ "$NEEDS_DISCOVERY" = "1" ]; then
-    install_discovery_rule
-fi
+install_discovery_rule
 
 if ! chmod +x "$BIN" 2>> "$LOG"; then
     echo "WARNING: chmod +x failed; attempting launch with existing mode" >> "$LOG"
 fi
-if [ "$NEEDS_DISCOVERY" = "0" ]; then
-    echo "PaperSpoon host: (local mode; transport disabled)" >> "$LOG"
-    "$BIN" "$@" >> "$LOG" 2>&1 &
-elif [ -n "$COMPANION_HOST" ]; then
-    echo "PaperSpoon host: $COMPANION_HOST" >> "$LOG"
-    PAPERPAD_COMPANION="$COMPANION_HOST" PAPERPAD_LATENCY_LOG="$LATENCY_LOG" \
-        "$BIN" "$@" >> "$LOG" 2>&1 &
-else
-    echo "PaperSpoon host: (unset, discovery)" >> "$LOG"
-    PAPERPAD_LATENCY_LOG="$LATENCY_LOG" "$BIN" "$@" >> "$LOG" 2>&1 &
-fi
+echo "PaperSpoon host: ${COMPANION_HOST:-(unset, discovery)}" >> "$LOG"
+PAPERPAD_LATENCY_LOG="$LATENCY_LOG" "$BIN" "$@" >> "$LOG" 2>&1 &
 CHILD_PID=$!
 
 if ! printf '%s\n' "$CHILD_PID" > "$PID_FILE"; then
@@ -285,9 +266,7 @@ fi
 } >> "$LOG" 2>&1
 
 write_status "STOPPED status=$CHILD_STATUS reason=process_exit"
-if [ "$NEEDS_DISCOVERY" = "1" ]; then
-    remove_discovery_rule
-fi
+remove_discovery_rule
 show_status "Stopped: $CHILD_STATUS"
 release_lock
 exit 0
