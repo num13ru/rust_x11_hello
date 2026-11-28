@@ -2,19 +2,28 @@
 
 ## Current workflow
 
-Use `nix develop` for the default native build, or `nix develop .#mbx` to opt
-into Mr Boxington v1.31.0. Both shells supply Rust 1.97.1 with the same ARMv7
-musl libraries and LLVM tools. The MBX shell adds the pinned upstream package
-and puts its `libexec/mbx/cargo` wrapper first on the shell's `PATH`. The
-project's `.cargo/config.toml` continues to select `rust-lld` and static CRT
-linking. Run `command -v cargo rustc`, `cargo -V`, and `mbx doctor` inside the
-MBX shell to check tool discovery. Use `nix develop` if you need plain Cargo.
-
-Run the standard native workflow with the pinned toolchain.
+Use the default Nix shell for the standard native workflow with plain Cargo.
 
 ```sh
 nix develop -c make check build verify
 ```
+
+### Optional Mr Boxington cache
+
+Use the MBX shell to run the same checks and build with the shared compiler
+cache.
+
+```sh
+nix develop .#mbx -c make check build verify
+```
+
+Both shells use the same pinned Rust toolchain, ARMv7 musl target, and LLVM
+tools. The MBX shell adds the pinned Mr Boxington package and puts its Cargo
+wrapper first on `PATH`. The Kindle build still uses `rust-lld` and static CRT
+linking. Use `nix develop .#mbx -c mbx doctor` to check setup and find the active
+cache, or `nix develop .#mbx -c mbx stats` to see cache reuse.
+
+### Container builds
 
 Use Docker or Apple Container when a container build is needed.
 

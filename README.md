@@ -15,6 +15,13 @@ Run the standard checks and build with the pinned Nix toolchain.
 nix develop -c make check build verify
 ```
 
+To use the optional Mr Boxington (MBX) compiler cache, run the same workflow
+in the MBX shell.
+
+```sh
+nix develop .#mbx -c make check build verify
+```
+
 The verified static ARMv7 binary is written to
 `kindle-extension/rust_x11_hello/bin/rust_x11_hello`.
 See the [Kindle build guide](docs/containerless-kindle-build.md) for alternate
