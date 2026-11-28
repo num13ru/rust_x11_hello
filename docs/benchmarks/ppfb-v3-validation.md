@@ -341,5 +341,23 @@ returns for the 1,737-byte checkerboard before restart and the 27,044-byte
 Gray8 bars after reconnect. The operator confirmed the bars were visible.
 Local Exit returned status 0, released evdev, and restored the framebuffer
 snapshot. The replacement PaperSpoon process started in its default application
-state. Physical replay of the retained application frame after a socket drop
-with the host process still running remains open.
+state. A separate test covered replay from a running process.
+[Retained frame replay after a TCP disconnect](#retained-frame-replay-after-a-tcp-disconnect)
+
+### Retained frame replay after a TCP disconnect
+
+On 2026-11-28, the Paperwhite 6 ran **Run Paperpad DU with PPFB v3 (5m)** on the
+same verified PaperPad build. A temporary TCP relay let the host close one
+Wi-Fi connection and refuse new connections for five seconds. The test copy of
+PaperSpoon advertised the relay port through normal discovery. Its frame sender
+and process stayed running throughout.
+
+PaperSpoon and PaperPad negotiated PPFB v3 and Zstandard on both connections.
+PaperSpoon sent a 27,044-byte Gray8 bars frame before the disconnect. On the
+second Hello, it replayed the retained frame with a fresh ID and a byte-identical
+compressed payload. The Kindle recorded both frame receptions and software
+presentation returns, with the connection indicator going from connected to
+disconnected and back. The display backend recognized the replay as unchanged
+and updated its cache. The operator confirmed the bars were visible after
+reconnect. Local Exit returned status 0, released evdev, and restored the
+framebuffer snapshot.
