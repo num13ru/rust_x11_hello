@@ -266,7 +266,7 @@ fi
 } >> "$LOG" 2>&1
 
 write_status "STOPPED status=$CHILD_STATUS reason=process_exit"
+# The Kindle firmware may already be drawing its sleep cover or home screen.
 remove_discovery_rule
-show_status "Stopped: $CHILD_STATUS"
 release_lock
 exit 0

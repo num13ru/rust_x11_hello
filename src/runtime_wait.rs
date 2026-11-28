@@ -3,7 +3,7 @@
 #![cfg_attr(not(test), allow(dead_code))]
 
 use std::io;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -43,6 +43,7 @@ pub(crate) struct RuntimeReady {
     pub(crate) input: InputReadiness,
     pub(crate) notified: bool,
     pub(crate) deadline_elapsed: bool,
+    pub(crate) power: Option<InputReadiness>,
 }
 
 /// Single-consumer readiness wait over evdev and a coalescing eventfd.
@@ -87,12 +88,26 @@ impl RuntimeWait {
     /// `None` waits indefinitely. Interruptions retry after recomputing the
     /// remaining timeout; an interrupted wait is not itself a shutdown event.
     pub(crate) fn wait(&self, deadline: Option<Instant>) -> io::Result<RuntimeReady> {
-        self.wait_with_poll(deadline, system_poll)
+        self.wait_with_poll(deadline, None, system_poll)
     }
 
-    fn wait_with_poll<P>(&self, deadline: Option<Instant>, mut poll: P) -> io::Result<RuntimeReady>
+    /// Give Kindle power readiness priority over input, frames and deadlines.
+    pub(crate) fn wait_for_session(
+        &self,
+        power: BorrowedFd<'_>,
+        deadline: Option<Instant>,
+    ) -> io::Result<RuntimeReady> {
+        self.wait_with_poll(deadline, Some(power), system_poll)
+    }
+
+    fn wait_with_poll<P>(
+        &self,
+        deadline: Option<Instant>,
+        power: Option<BorrowedFd<'_>>,
+        mut poll: P,
+    ) -> io::Result<RuntimeReady>
     where
-        P: FnMut(&mut [libc::pollfd; 2], libc::c_int) -> io::Result<libc::c_int>,
+        P: FnMut(&mut [libc::pollfd; 3], libc::c_int) -> io::Result<libc::c_int>,
     {
         loop {
             let mut descriptors = [
@@ -103,6 +118,11 @@ impl RuntimeWait {
                 },
                 libc::pollfd {
                     fd: self.notification_fd.as_raw_fd(),
+                    events: libc::POLLIN,
+                    revents: 0,
+                },
+                libc::pollfd {
+                    fd: power.map_or(-1, |fd| fd.as_raw_fd()),
                     events: libc::POLLIN,
                     revents: 0,
                 },
@@ -128,6 +148,14 @@ impl RuntimeWait {
                 continue;
             }
 
+            let power = InputReadiness::from_revents(descriptors[2].revents);
+            if power.any() {
+                return Ok(RuntimeReady {
+                    power: Some(power),
+                    ..RuntimeReady::default()
+                });
+            }
+
             let input = InputReadiness::from_revents(descriptors[0].revents);
             let notification_revents = descriptors[1].revents;
             check_notification_errors(notification_revents)?;
@@ -142,6 +170,7 @@ impl RuntimeWait {
                     input,
                     notified,
                     deadline_elapsed,
+                    power: None,
                 });
             }
         }
@@ -227,7 +256,7 @@ fn validate_fd(fd: RawFd) -> io::Result<()> {
 }
 
 fn system_poll(
-    descriptors: &mut [libc::pollfd; 2],
+    descriptors: &mut [libc::pollfd; 3],
     timeout: libc::c_int,
 ) -> io::Result<libc::c_int> {
     // SAFETY: both pollfd entries remain live and writable for this call.
@@ -322,7 +351,7 @@ fn consume_notification(fd: RawFd) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::fd::AsRawFd;
+    use std::os::fd::{AsFd, AsRawFd};
     use std::sync::mpsc::{self, RecvTimeoutError};
     use std::thread;
 
@@ -449,6 +478,43 @@ mod tests {
     }
 
     #[test]
+    fn power_readiness_takes_priority_over_other_work() {
+        let (input, input_writer) = pipe_pair();
+        let (power, power_writer) = pipe_pair();
+        let (waiter, notifier) = RuntimeWait::new(input.as_raw_fd()).expect("create waiter");
+        write_byte(input_writer.as_raw_fd());
+        write_byte(power_writer.as_raw_fd());
+        notifier.notify().expect("notify waiter");
+
+        let ready = waiter
+            .wait_for_session(power.as_fd(), Some(Instant::now()))
+            .expect("check simultaneous readiness");
+        assert_eq!(
+            ready,
+            RuntimeReady {
+                power: Some(InputReadiness {
+                    readable: true,
+                    ..InputReadiness::default()
+                }),
+                ..RuntimeReady::default()
+            }
+        );
+    }
+
+    #[test]
+    fn a_lost_power_listener_wakes_the_session() {
+        let (input, _input_writer) = pipe_pair();
+        let (power, power_writer) = pipe_pair();
+        let (waiter, _notifier) = RuntimeWait::new(input.as_raw_fd()).expect("create waiter");
+        drop(power_writer);
+
+        let ready = waiter
+            .wait_for_session(power.as_fd(), Some(Instant::now()))
+            .expect("check power listener hangup");
+        assert!(ready.power.expect("power readiness").hung_up);
+    }
+
+    #[test]
     fn input_remains_ready_until_source_is_drained() {
         let (input, input_writer) = pipe_pair();
         let (waiter, _notifier) = RuntimeWait::new(input.as_raw_fd()).expect("create waiter");
@@ -475,6 +541,7 @@ mod tests {
         let ready = waiter
             .wait_with_poll(
                 Some(Instant::now() + Duration::from_secs(1)),
+                None,
                 |descriptors, _timeout| {
                     descriptors[0].revents = libc::POLLIN | libc::POLLERR | libc::POLLHUP;
                     Ok(1)
@@ -496,6 +563,7 @@ mod tests {
         let error = waiter
             .wait_with_poll(
                 Some(Instant::now() + Duration::from_secs(1)),
+                None,
                 |descriptors, _timeout| {
                     descriptors[1].revents = libc::POLLERR;
                     Ok(1)
@@ -554,6 +622,7 @@ mod tests {
         let ready = waiter
             .wait_with_poll(
                 Some(Instant::now() + Duration::from_secs(1)),
+                None,
                 |descriptors, timeout| {
                     calls += 1;
                     if calls == 1 {

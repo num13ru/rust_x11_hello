@@ -44,17 +44,19 @@ impl MxcfbDisplayBackend {
     pub(crate) fn open() -> Result<Self> {
         let remote_waveform = waveform_from_env()?;
         let opened = OpenedFramebuffer::open().context("initialize MXCFB display backend")?;
-        let mut backend = Self::from_opened(
+        Self::from_opened(
             opened,
             controller::submit_update,
             controller::wait_for_update_complete,
             remote_waveform,
-        )?;
-        backend
-            .clear_remote_viewport()
+        )
+    }
+
+    pub(crate) fn start(&mut self) -> Result<()> {
+        self.clear_remote_viewport()
             .context("clear MXCFB remote viewport during startup")?;
-        backend.startup_refresh_at = Some(Instant::now() + STARTUP_REASSERT_DELAY);
-        Ok(backend)
+        self.startup_refresh_at = Some(Instant::now() + STARTUP_REASSERT_DELAY);
+        Ok(())
     }
 
     fn from_opened(
@@ -424,6 +426,8 @@ impl MxcfbDisplayBackend {
         Ok(())
     }
 
+    /// Restore the launch screen on ordinary exit. During a Kindle power
+    /// transition, dropping the backend leaves the display to the firmware.
     pub(crate) fn shutdown(&mut self) -> Result<()> {
         self.restore_initial_screen()
     }
@@ -443,14 +447,6 @@ fn parse_waveform(value: Option<&str>) -> Result<MxcfbWaveform> {
         Some(name) => MxcfbWaveform::from_name(name).with_context(|| {
             format!("invalid {WAVEFORM_ENV}={name:?}; expected gc16, du, a2, or du4")
         }),
-    }
-}
-
-impl Drop for MxcfbDisplayBackend {
-    fn drop(&mut self) {
-        if let Err(error) = self.restore_initial_screen() {
-            eprintln!("mxcfb cleanup failed during drop: {error:#}");
-        }
     }
 }
 
@@ -707,6 +703,14 @@ mod tests {
         assert!(!backend.screen_modified);
         assert!(backend.initial_screen.is_none());
         backend.shutdown().unwrap();
+    }
+
+    #[test]
+    fn handoff_does_not_submit_a_restoration_refresh() {
+        let mut backend = fake_backend(accept_update);
+        backend.draw_system_ui(false).unwrap();
+        backend.submit_update = |_, _, _, _| panic!("handoff submitted a framebuffer update");
+        drop(backend);
     }
 
     #[test]

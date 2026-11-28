@@ -20,6 +20,8 @@ mod config;
 mod discovery;
 mod display;
 mod input;
+#[cfg(target_os = "linux")]
+mod kindle_power;
 mod latency;
 mod mxcfb;
 #[cfg(target_os = "linux")]
