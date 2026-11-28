@@ -911,7 +911,9 @@ Verify:
 - [x] Reconnection restores the latest framebuffer.
 - [x] Local Exit remains responsive.
 - [x] Framebuffer restoration remains correct.
-- [ ] Extended operation does not produce increasing memory consumption.
+- [x] Extended operation does not produce increasing memory consumption.
+  Sampled RSS showed no sustained growth during the matched nine-minute runs.
+  [Playback stability results](benchmarks/ppfb-v3-validation.md#matched-nine-minute-playback-stability)
 
 Use raw transport as the behavioral baseline.
 

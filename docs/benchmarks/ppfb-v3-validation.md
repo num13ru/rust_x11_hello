@@ -428,3 +428,53 @@ traffic, and unequal idle periods. The application-byte table uses identical
 stimuli. Two earlier Raw launches ended without a PaperSpoon connection and
 were excluded. Both connected runs stopped with status 0, released evdev, and
 restored the framebuffer snapshot.
+
+### Extended playback interrupted by Kindle sleep
+
+On 2026-11-28, PaperSpoon started a 12-minute Fake Now Playing test in PPFB v3
+Raw mode. It sent 667 widget frames on one TCP connection and issued all
+seven scheduled track changes. The last successful host socket write was
+11 min 7 s into the playback window. The next write reached PaperSpoon's
+frame-write deadline, and the host closed the connection.
+
+The operator reported that the Kindle fell asleep and that the seekbar moved
+after a manual wake. The post-wake photo shows the Now Playing artwork, metadata,
+and seekbar over parts of the Kindle sleep image. The mixed screen is consistent
+with a partial repaint after wake. A USB readback still showed PaperPad as
+`RUNNING`. The operator later reported that the sleep image had cleared.
+After the restart and USB reconnect, the status still read `RUNNING` and the
+saved logs ended during playback. Neither a watchdog event nor a launcher exit
+was recorded. The logs match all 667 Raw widget frame IDs and byte counts to
+PaperSpoon, with a software presentation return for each. Across 22 progress
+samples, current RSS ranged from 6,828 to 8,920 KiB. The first and last six
+samples had medians of 6,910 and 6,886 KiB. The last sample at 667.75 s was
+6,836 KiB, with a peak of 15,040 KiB.
+
+### Matched nine-minute playback stability
+
+The stability comparison uses the first nine uninterrupted minutes of the
+Raw run and a nine-minute Zstandard level-1 run with the same Fake Now Playing
+track schedule and DU policy. PaperSpoon and PaperPad agreed on the byte
+count for every live frame in both windows. The device counter window uses
+the progress samples nearest 60 and 510 seconds after launch. The `wlan0`
+counters include background traffic.
+
+| Measurement | Raw | Zstandard level 1 |
+|---|---:|---:|
+| Live frames received and presented | 539 / 539 | 540 / 540 |
+| Live PPFB bytes | 1,113,442,484 | 7,616,055 |
+| Device counter window (s since launch) | 60.521–515.732 | 61.095–514.243 |
+| Current RSS range (KiB) | 6,828–8,920 | 7,004–9,016 |
+| Median RSS, first five → last five samples (KiB) | 6,936 → 6,896 | 7,124 → 7,160 |
+| Peak RSS at final matched sample (KiB) | 15,040 | 14,992 |
+| `wlan0` RX bytes | 982,873,883 | 6,715,215 |
+| `wlan0` TX bytes | 8,357,261 | 397,816 |
+| PaperPad user + system CPU time (s) | 23.26 | 18.27 |
+
+Each mode contributed 16 memory samples to the comparison. RSS fluctuated
+within the ranges shown, with no sustained increase observed over this
+workload. After the host stopped playback, the Zstandard launcher watchdog
+sent TERM at about 15 minutes. PaperPad released its evdev grab, restored the
+framebuffer snapshot, and exited with status 0. This run covers nine minutes
+of active playback. Longer runs and controlled battery and thermal
+measurements remain open.
