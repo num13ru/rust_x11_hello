@@ -72,7 +72,6 @@ struct Options {
     live_provider: Option<ProviderKind>,
     progress_interval: Duration,
     compression: HostCompression,
-    compression_level: i32,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -111,7 +110,6 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
     let mut live_provider = None;
     let mut progress_interval = Duration::from_secs(1);
     let mut compression = HostCompression::default();
-    let mut compression_level = 1;
     let positional = args.iter().skip(1);
     for arg in positional {
         match arg.as_str() {
@@ -120,13 +118,6 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
             "--compression=zstd" => compression = HostCompression::Zstd,
             value if value.starts_with("--compression=") => {
                 return Err("--compression requires raw, auto, or zstd".into());
-            }
-            value if value.starts_with("--compression-level=") => {
-                compression_level = value["--compression-level=".len()..]
-                    .parse()
-                    .ok()
-                    .filter(|level| matches!(level, 1 | 3 | 6))
-                    .ok_or("--compression-level requires 1, 3, or 6")?;
             }
             "--no-forward-url" => {
                 forward_url = false;
@@ -180,7 +171,6 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
         live_provider,
         progress_interval,
         compression,
-        compression_level,
     })
 }
 
@@ -260,7 +250,6 @@ struct FrameSenderState {
     application_renderer: Option<ApplicationRenderer>,
     encoding_session: Option<ConnectionToken>,
     encoder: Option<ZstdEncoder>,
-    compression_level: i32,
     compression_scratch: Vec<u8>,
 }
 
@@ -333,12 +322,7 @@ struct HelloFrame {
 }
 
 impl FrameSender {
-    #[cfg(test)]
     fn new(current: CurrentConnection) -> Self {
-        Self::with_compression_level(current, 1)
-    }
-
-    fn with_compression_level(current: CurrentConnection, compression_level: i32) -> Self {
         Self {
             current,
             state: Arc::new(Mutex::new(FrameSenderState {
@@ -349,7 +333,6 @@ impl FrameSender {
                 application_renderer: None,
                 encoding_session: None,
                 encoder: None,
-                compression_level,
                 compression_scratch: Vec::new(),
             })),
         }
@@ -395,7 +378,7 @@ impl FrameSender {
             state.encoder = None;
             state.compression_scratch.clear();
             if encodings.is_some_and(|encodings| encodings.supports(v3::Encoding::Zstd)) {
-                match ZstdEncoder::new(state.compression_level) {
+                match ZstdEncoder::new(1) {
                     Ok(encoder) => state.encoder = Some(encoder),
                     Err(error) => eprintln!(
                         "PPFB v3 Zstandard unavailable for this connection, using Raw: {error}"
@@ -824,7 +807,7 @@ fn main() -> io::Result<()> {
     io::stdout().flush()?;
 
     let current = CurrentConnection::default();
-    let frame_sender = FrameSender::with_compression_level(current.clone(), opts.compression_level);
+    let frame_sender = FrameSender::new(current.clone());
     let live = Arc::new(LiveNowPlaying::new(
         frame_sender.clone(),
         opts.live_provider,
@@ -2525,7 +2508,6 @@ mod tests {
             Ok(Some(v3::Encodings::RAW_ZSTD))
         );
         assert_eq!(opts.compression.negotiate(None), Ok(None));
-        assert_eq!(opts.compression_level, 1);
         assert!(opts.forward_url);
     }
 
