@@ -14,7 +14,7 @@ use paperspoon::now_playing_provider::{
 use paperspoon::now_playing_renderer::{LiveControl, LiveLayout, LiveNowPlayingRenderer};
 
 use crate::server::FrameTarget;
-use crate::{FrameSender, append_host_log_record};
+use crate::{FrameSender, append_host_log_record, operator_log};
 
 const MEDIA_QUEUE_CAPACITY: usize = 8;
 const ARTWORK_CACHE_CAPACITY: usize = 8;
@@ -329,7 +329,7 @@ struct Shared {
 
 impl Shared {
     fn log(&self, message: &str) {
-        println!("{message}");
+        operator_log::info!("{message}");
         append_host_log_record(&self.log_path, message);
     }
 }
@@ -414,7 +414,7 @@ impl LiveNowPlaying {
         drop(work);
         for worker in workers {
             if worker.join().is_err() {
-                eprintln!("Now Playing worker stopped unexpectedly");
+                operator_log::error!("Now Playing worker stopped unexpectedly");
             }
         }
         self.frames.set_live_active(false);
@@ -469,7 +469,7 @@ impl LiveNowPlaying {
         if let Some(command) = command
             && let Err(error) = session.work.try_send(command)
         {
-            eprintln!("Now Playing input: {error}");
+            operator_log::error!("Now Playing input: {error}");
         }
         true
     }
@@ -585,7 +585,7 @@ fn media_loop(
             if error.is_some() { "error" } else { "ok" },
         ));
         if error_changed && let Some(error) = error {
-            eprintln!("Now Playing acquisition: {error}");
+            operator_log::error!("Now Playing acquisition: {error}");
         }
         if let Some(started) = observed {
             observe_command = None;
@@ -638,14 +638,14 @@ fn media_loop(
                     }
                     Ok(()) => {}
                     Err(error) => {
-                        eprintln!("Now Playing command failed: {error}");
+                        operator_log::error!("Now Playing command failed: {error}");
                         observe_command = None;
                     }
                 };
             }
             Ok(MediaWork::Fake(change)) => {
                 if let Err(error) = provider.simulate(change, Instant::now()) {
-                    eprintln!("Now Playing simulation: {error}");
+                    operator_log::error!("Now Playing simulation: {error}");
                 }
             }
             Ok(MediaWork::Refresh) => {
@@ -706,7 +706,7 @@ fn artwork_loop(shared: &Shared, mut provider: Box<dyn MediaProvider>) {
         let artwork = match result {
             Ok(artwork) => artwork,
             Err(error) => {
-                eprintln!("Now Playing artwork: {error}");
+                operator_log::error!("Now Playing artwork: {error}");
                 continue;
             }
         };
@@ -723,7 +723,7 @@ fn render_loop(shared: &Shared, frames: &FrameSender, interval: Duration) {
     let mut renderer = match LiveNowPlayingRenderer::new() {
         Ok(renderer) => renderer,
         Err(error) => {
-            eprintln!("Now Playing renderer: {error}");
+            operator_log::error!("Now Playing renderer: {error}");
             return;
         }
     };
@@ -780,7 +780,7 @@ fn render_loop(shared: &Shared, frames: &FrameSender, interval: Duration) {
         let frame = match result {
             Ok(frame) => frame,
             Err(error) => {
-                eprintln!("Now Playing frame: {error}");
+                operator_log::error!("Now Playing frame: {error}");
                 continue;
             }
         };
@@ -817,7 +817,7 @@ fn render_loop(shared: &Shared, frames: &FrameSender, interval: Duration) {
                 unchanged = 0;
             }
             Ok(None) => {}
-            Err(error) => eprintln!("Now Playing frame: {error}"),
+            Err(error) => operator_log::error!("Now Playing frame: {error}"),
         }
     }
 }

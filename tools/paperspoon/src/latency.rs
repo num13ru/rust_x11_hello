@@ -7,6 +7,8 @@ use std::sync::OnceLock;
 use std::sync::mpsc::{self, Sender};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use crate::operator_log;
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Stamp {
     pub(crate) wall_us: u64,
@@ -25,7 +27,7 @@ fn start_logger(path: &str) -> Option<Sender<String>> {
     let file = match File::create(path) {
         Ok(file) => file,
         Err(error) => {
-            eprintln!("latency log disabled: failed to create {path}: {error}");
+            operator_log::error!("latency log disabled: failed to create {path}: {error}");
             return None;
         }
     };
@@ -40,17 +42,17 @@ fn start_logger(path: &str) -> Option<Sender<String>> {
                     .and_then(|()| writer.flush())
                     .is_err()
                 {
-                    eprintln!("latency log write failed: {path_owned}");
+                    operator_log::error!("latency log write failed: {path_owned}");
                     break;
                 }
             }
         }) {
         Ok(_) => {
-            eprintln!("latency log path={path}");
+            operator_log::error!("latency log path={path}");
             Some(tx)
         }
         Err(error) => {
-            eprintln!("latency log disabled: failed to start writer: {error}");
+            operator_log::error!("latency log disabled: failed to start writer: {error}");
             None
         }
     }

@@ -8,6 +8,8 @@ use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 
 use paper_protocol::{DISCOVERY_PORT, format_here, parse_discover};
 
+use crate::operator_log;
+
 /// Bind the well-known discovery address before PaperSpoon reports ready.
 pub fn bind_discovery_socket() -> std::io::Result<UdpSocket> {
     bind_discovery_socket_at(SocketAddr::from((Ipv4Addr::UNSPECIFIED, DISCOVERY_PORT)))
@@ -36,13 +38,13 @@ fn respond_once(socket: &UdpSocket, tcp_port: u16) -> std::io::Result<()> {
     let mut buffer = [0u8; 256];
     let (count, source) = socket.recv_from(&mut buffer)?;
     let Some(nonce) = parse_discover(&buffer[..count]) else {
-        eprintln!("discovery request invalid from={source}");
+        operator_log::error!("discovery request invalid from={source}");
         return Ok(());
     };
-    eprintln!("discovery request from={source} nonce={nonce}");
+    operator_log::error!("discovery request from={source} nonce={nonce}");
     let response = format_here(&nonce, tcp_port);
     socket.send_to(response.as_bytes(), source)?;
-    eprintln!("discovery response sent to={source} tcp_port={tcp_port}");
+    operator_log::error!("discovery response sent to={source} tcp_port={tcp_port}");
     Ok(())
 }
 

@@ -35,7 +35,7 @@ use paper_protocol::{
 use paper_protocol::{compression::ZstdEncoder, v3};
 use paperspoon::{
     application_input::ApplicationInput, application_renderer::ApplicationRenderer,
-    application_ui::ApplicationUi, now_playing::load_now_playing_frame,
+    application_ui::ApplicationUi, now_playing::load_now_playing_frame, operator_log,
 };
 
 mod diagnostic;
@@ -52,6 +52,7 @@ use inbound::{
     SessionMessage, read_negotiated_hello, read_session_message, read_v3_session_message,
 };
 use live_now_playing::{LiveNowPlaying, ProviderKind};
+use operator_log::flush_stdout;
 use server::{ConnectionToken, CurrentConnection, FrameForward, FrameTarget, FrameTargetError};
 
 /// Default TCP port. Must match `rust_x11_hello`'s `COMPANION_PORT`.
@@ -198,12 +199,6 @@ fn forward_url(action_id: &str, trace: Option<paper_protocol::V2PointerTrace>) -
     Ok(())
 }
 
-fn flush_stdout(context: &str) {
-    if let Err(error) = io::stdout().flush() {
-        eprintln!("stdout flush error {context}: {error}");
-    }
-}
-
 fn write_log_record(file: &mut impl Write, origin: &str, record: &str) -> io::Result<()> {
     let timestamp_us = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -225,7 +220,7 @@ fn append_host_log_record(path: &str, record: &str) {
         .open(path)
         .and_then(|mut file| write_log_record(&mut file, "host", record));
     if let Err(error) = result {
-        eprintln!("frame log error: {error}");
+        operator_log::error!("frame log error: {error}");
     }
 }
 
@@ -384,7 +379,7 @@ impl FrameSender {
             if encodings.is_some_and(|encodings| encodings.supports(v3::Encoding::Zstd)) {
                 match ZstdEncoder::new(1) {
                     Ok(encoder) => state.encoder = Some(encoder),
-                    Err(error) => eprintln!(
+                    Err(error) => operator_log::error!(
                         "PPFB v3 Zstandard unavailable for this connection, using Raw: {error}"
                     ),
                 }
@@ -411,7 +406,7 @@ impl FrameSender {
                     }
                     Ok(None) => {}
                     Err(error) => {
-                        eprintln!(
+                        operator_log::error!(
                             "PPFB v3 Zstandard compression failed, using Raw for this connection: {error}"
                         );
                         state.encoder = None;
@@ -786,7 +781,7 @@ impl Operator {
                         if live.connection_changed() {
                             let _ = application_viewport_tx.send(None);
                         }
-                        println!("{}", live.status());
+                        operator_log::info!("{}", live.status());
                     }),
                     LiveCommand::Stop => {
                         if live.stop()
@@ -799,29 +794,31 @@ impl Operator {
                                 }
                                 Ok(ApplicationSend::NoConnection) => {}
                                 Err(error) => {
-                                    eprintln!("applying grid after Now Playing stop: {error}")
+                                    operator_log::error!(
+                                        "applying grid after Now Playing stop: {error}"
+                                    )
                                 }
                             }
                         }
-                        println!("{}", live.status());
+                        operator_log::info!("{}", live.status());
                         Ok(())
                     }
                     LiveCommand::Status => {
-                        println!("{}", live.status());
+                        operator_log::info!("{}", live.status());
                         Ok(())
                     }
                     LiveCommand::Refresh => live.refresh(),
                     LiveCommand::Fake(change) => live.fake(change),
                 };
                 if let Err(error) = result {
-                    eprintln!("Now Playing command: {error}");
+                    operator_log::error!("Now Playing command: {error}");
                 }
                 flush_stdout("after live Now Playing command");
             }
             StdinCommand::Frame(frame) => match frame_sender.send_diagnostic(frame) {
                 Ok(Some(sent)) => {
                     if application_viewport_tx.send(None).is_err() {
-                        eprintln!("application viewport tracker stopped");
+                        operator_log::error!("application viewport tracker stopped");
                     }
                     let (width, height) = frame.dimensions();
                     let record = format!(
@@ -832,17 +829,17 @@ impl Operator {
                         sent.encode_elapsed.as_micros(),
                         sent.socket_write_elapsed.as_micros()
                     );
-                    println!("{record}");
+                    operator_log::info!("{record}");
                     flush_stdout("after sent frame");
                     append_host_log_record(log_path, &record);
                 }
-                Ok(None) => eprintln!("frame not sent: no PaperPad connected"),
-                Err(error) => eprintln!("frame command error: {error}"),
+                Ok(None) => operator_log::error!("frame not sent: no PaperPad connected"),
+                Err(error) => operator_log::error!("frame command error: {error}"),
             },
             StdinCommand::Jpeg(path) => match frame_sender.send_jpeg(&path) {
                 Ok(Some(jpeg)) => {
                     if application_viewport_tx.send(None).is_err() {
-                        eprintln!("application viewport tracker stopped");
+                        operator_log::error!("application viewport tracker stopped");
                     }
                     let sent = jpeg.sent;
                     let record = format!(
@@ -855,17 +852,17 @@ impl Operator {
                         sent.encode_elapsed.as_micros(),
                         sent.socket_write_elapsed.as_micros()
                     );
-                    println!("{record}");
+                    operator_log::info!("{record}");
                     flush_stdout("after sent JPEG frame");
                     append_host_log_record(log_path, &record);
                 }
-                Ok(None) => eprintln!("JPEG frame not sent: no PaperPad connected"),
-                Err(error) => eprintln!("JPEG frame command error: {error}"),
+                Ok(None) => operator_log::error!("JPEG frame not sent: no PaperPad connected"),
+                Err(error) => operator_log::error!("JPEG frame command error: {error}"),
             },
             StdinCommand::NowPlaying => match frame_sender.send_now_playing() {
                 Ok(Some(now_playing)) => {
                     if application_viewport_tx.send(None).is_err() {
-                        eprintln!("application viewport tracker stopped");
+                        operator_log::error!("application viewport tracker stopped");
                     }
                     let sent = now_playing.sent;
                     let record = format!(
@@ -877,18 +874,20 @@ impl Operator {
                         sent.encode_elapsed.as_micros(),
                         sent.socket_write_elapsed.as_micros()
                     );
-                    println!("{record}");
+                    operator_log::info!("{record}");
                     flush_stdout("after Now Playing frame");
                     append_host_log_record(log_path, &record);
                 }
-                Ok(None) => eprintln!("Now Playing frame not sent: no PaperPad connected"),
-                Err(error) => eprintln!("Now Playing frame error: {error}"),
+                Ok(None) => {
+                    operator_log::error!("Now Playing frame not sent: no PaperPad connected")
+                }
+                Err(error) => operator_log::error!("Now Playing frame error: {error}"),
             },
             StdinCommand::ApplicationFrame { width, height } => {
                 match frame_sender.send_application(application_ui, (width, height)) {
                     Ok(ApplicationSend::Sent(sent)) => {
                         if application_viewport_tx.send(Some((width, height))).is_err() {
-                            eprintln!("application viewport tracker stopped");
+                            operator_log::error!("application viewport tracker stopped");
                         }
                         let record = format!(
                             "sent application frame id={} width={width} height={height} bytes={} encode_us={} socket_write_us={} source=stdin",
@@ -897,7 +896,7 @@ impl Operator {
                             sent.encode_elapsed.as_micros(),
                             sent.socket_write_elapsed.as_micros()
                         );
-                        println!("{record}");
+                        operator_log::info!("{record}");
                         flush_stdout("after sent application frame");
                         append_host_log_record(log_path, &record);
                     }
@@ -905,14 +904,14 @@ impl Operator {
                         let record = format!(
                             "application frame skipped unchanged width={width} height={height} source=stdin"
                         );
-                        println!("{record}");
+                        operator_log::info!("{record}");
                         flush_stdout("after skipped application frame");
                         append_host_log_record(log_path, &record);
                     }
                     Ok(ApplicationSend::NoConnection) => {
-                        eprintln!("application frame not sent: no PaperPad connected");
+                        operator_log::error!("application frame not sent: no PaperPad connected");
                     }
-                    Err(error) => eprintln!("ui command error: {error}"),
+                    Err(error) => operator_log::error!("ui command error: {error}"),
                 }
             }
         }
@@ -955,26 +954,29 @@ fn main() -> io::Result<()> {
         .name("paperspoon-discovery".to_string())
         .spawn(move || {
             if let Err(error) = discovery::run_discovery_listener(discovery_socket, tcp_port) {
-                eprintln!("discovery listener error: {error}");
+                operator_log::error!("discovery listener error: {error}");
             }
         })?;
 
-    println!(
+    operator_log::info!(
         "listening on 0.0.0.0:{}, logging to {}",
-        tcp_port, opts.log_path
+        tcp_port,
+        opts.log_path
     );
-    println!("discovery listening address=0.0.0.0:{DISCOVERY_PORT}");
+    operator_log::info!("discovery listening address=0.0.0.0:{DISCOVERY_PORT}");
 
-    println!(
+    operator_log::info!(
         "type 'frame <white|black|horizontal|checkerboard|border|corners|gray-gradient|gray-bars> <width>x<height>', 'frame gray <0..255> <width>x<height>', 'frame jpeg <path>', or 'frame nowplaying' to send a framebuffer"
     );
-    println!("type 'ui <width>x<height>' to send the host-rendered application UI");
+    operator_log::info!("type 'ui <width>x<height>' to send the host-rendered application UI");
     if opts.forward_url {
-        println!("forwarding actions to Hammerspoon via open -g hammerspoon://paperpad/...");
+        operator_log::info!(
+            "forwarding actions to Hammerspoon via open -g hammerspoon://paperpad/..."
+        );
     } else {
-        println!("action forwarding to Hammerspoon disabled");
+        operator_log::info!("action forwarding to Hammerspoon disabled");
     }
-    io::stdout().flush()?;
+    operator_log::flush()?;
 
     let current = CurrentConnection::default();
     let frame_sender = FrameSender::new(current.clone());
@@ -1000,7 +1002,7 @@ fn main() -> io::Result<()> {
                 }
             })?;
     }
-    println!("type 'nowplaying <start|stop|status|refresh>' for live Now Playing");
+    operator_log::info!("type 'nowplaying <start|stop|status|refresh>' for live Now Playing");
     let (application_viewport_tx, application_viewport_rx) = mpsc::channel();
 
     let operator = Operator {
@@ -1018,7 +1020,7 @@ fn main() -> io::Result<()> {
                 let line = match line {
                     Ok(line) => line,
                     Err(error) => {
-                        eprintln!("stdin read error: {error}");
+                        operator_log::error!("stdin read error: {error}");
                         break;
                     }
                 };
@@ -1026,7 +1028,7 @@ fn main() -> io::Result<()> {
                 if !line.is_empty() {
                     match parse_stdin_command(line) {
                         Ok(command) => operator.dispatch(command),
-                        Err(error) => eprintln!("stdin command error: {error}"),
+                        Err(error) => operator_log::error!("stdin command error: {error}"),
                     }
                 }
             }
@@ -1037,14 +1039,14 @@ fn main() -> io::Result<()> {
         let mut stream = match conn {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("accept error: {e}");
+                operator_log::error!("accept error: {e}");
                 continue;
             }
         };
         let peer = stream
             .peer_addr()
             .unwrap_or_else(|_| SocketAddr::from(([0, 0, 0, 0], 0)));
-        println!("connected: {peer}");
+        operator_log::info!("connected: {peer}");
         flush_stdout("after connected banner");
 
         // A new connection has not received any application frame yet.
@@ -1057,7 +1059,7 @@ fn main() -> io::Result<()> {
         {
             Ok(f) => f,
             Err(e) => {
-                eprintln!("log open error for {peer}: {e}");
+                operator_log::error!("log open error for {peer}: {e}");
                 continue;
             }
         };
@@ -1066,21 +1068,21 @@ fn main() -> io::Result<()> {
             Ok(Some(hello)) => hello,
             Ok(None) => continue,
             Err(error) => {
-                eprintln!("TCP read error from {peer}: {error}");
+                operator_log::error!("TCP read error from {peer}: {error}");
                 continue;
             }
         };
         let encodings = match opts.compression.negotiate(offered) {
             Ok(encodings) => encodings,
             Err(error) => {
-                eprintln!("PPFB negotiation with {peer}: {error}");
+                operator_log::error!("PPFB negotiation with {peer}: {error}");
                 continue;
             }
         };
         if let Some(encodings) = encodings {
             let mut socket = &**reader.get_ref();
             if let Err(error) = socket.write_all(&v3::encode_ack(encodings)) {
-                eprintln!("PPFB v3 HelloAck to {peer}: {error}");
+                operator_log::error!("PPFB v3 HelloAck to {peer}: {error}");
                 continue;
             }
         }
@@ -1095,10 +1097,10 @@ fn main() -> io::Result<()> {
             hello.viewport_height(),
             opts.compression,
         );
-        println!("received from {peer}: {hello_record}");
+        operator_log::info!("received from {peer}: {hello_record}");
         flush_stdout("after received Hello");
         if let Err(error) = write_log_record(&mut file, &peer.to_string(), &hello_record) {
-            eprintln!("log write error: {error}");
+            operator_log::error!("log write error: {error}");
         }
 
         // A valid Hello makes this the active Kindle connection for frames.
@@ -1110,7 +1112,7 @@ fn main() -> io::Result<()> {
         ) {
             Ok(token) => token,
             Err(e) => {
-                eprintln!("clone error for {peer}: {e}");
+                operator_log::error!("clone error for {peer}: {e}");
                 continue;
             }
         };
@@ -1147,17 +1149,17 @@ fn main() -> io::Result<()> {
                         sent.socket_write_elapsed.as_micros(),
                         hello_frame.retained
                     );
-                    println!("{record}");
+                    operator_log::info!("{record}");
                     flush_stdout("after automatic hello frame");
                     if let Err(error) = write_log_record(&mut file, &peer.to_string(), &record) {
-                        eprintln!("frame log error: {error}");
+                        operator_log::error!("frame log error: {error}");
                     }
                 }
                 Ok(None) => {
-                    eprintln!("automatic hello frame not sent: no PaperPad connected");
+                    operator_log::error!("automatic hello frame not sent: no PaperPad connected");
                 }
                 Err(error) => {
-                    eprintln!("automatic hello frame error: {error}");
+                    operator_log::error!("automatic hello frame error: {error}");
                 }
             }
         }
@@ -1171,7 +1173,7 @@ fn main() -> io::Result<()> {
                 Ok(Some(message)) => message,
                 Ok(None) => break,
                 Err(error) => {
-                    eprintln!("TCP read error from {peer}: {error}");
+                    operator_log::error!("TCP read error from {peer}: {error}");
                     break;
                 }
             };
@@ -1189,10 +1191,10 @@ fn main() -> io::Result<()> {
                         viewport.width(),
                         viewport.height()
                     );
-                    println!("received from {peer}: {record}");
+                    operator_log::info!("received from {peer}: {record}");
                     flush_stdout("after received viewport change");
                     if let Err(error) = write_log_record(&mut file, &peer.to_string(), &record) {
-                        eprintln!("log write error: {error}");
+                        operator_log::error!("log write error: {error}");
                     }
                     if live.connection_changed() {
                         rendered_application_viewport = None;
@@ -1216,19 +1218,21 @@ fn main() -> io::Result<()> {
                                 sent.encode_elapsed.as_micros(),
                                 sent.socket_write_elapsed.as_micros()
                             );
-                            println!("{record}");
+                            operator_log::info!("{record}");
                             flush_stdout("after viewport replacement frame");
                             if let Err(error) =
                                 write_log_record(&mut file, &peer.to_string(), &record)
                             {
-                                eprintln!("frame log error: {error}");
+                                operator_log::error!("frame log error: {error}");
                             }
                         }
                         Ok(None) => {
-                            eprintln!("viewport replacement frame not sent: no PaperPad connected");
+                            operator_log::error!(
+                                "viewport replacement frame not sent: no PaperPad connected"
+                            );
                         }
                         Err(error) => {
-                            eprintln!("viewport replacement frame error: {error}");
+                            operator_log::error!("viewport replacement frame error: {error}");
                         }
                     }
                     continue;
@@ -1265,7 +1269,7 @@ fn main() -> io::Result<()> {
             );
             if live.pointer(pointer) {
                 if let Err(error) = write_log_record(&mut file, &peer.to_string(), &record) {
-                    eprintln!("log write error: {error}");
+                    operator_log::error!("log write error: {error}");
                 }
                 continue;
             }
@@ -1305,29 +1309,33 @@ fn main() -> io::Result<()> {
                             sent.encode_elapsed.as_micros(),
                             sent.socket_write_elapsed.as_micros()
                         );
-                        println!("{feedback_record}");
+                        operator_log::info!("{feedback_record}");
                         flush_stdout("after pointer feedback frame");
                         if let Err(error) =
                             write_log_record(&mut file, &peer.to_string(), &feedback_record)
                         {
-                            eprintln!("frame log error: {error}");
+                            operator_log::error!("frame log error: {error}");
                         }
                     }
                     Ok(ApplicationSend::Unchanged) => {
-                        eprintln!("pointer feedback frame unchanged after {visual_state}");
+                        operator_log::error!(
+                            "pointer feedback frame unchanged after {visual_state}"
+                        );
                     }
                     Ok(ApplicationSend::NoConnection) => {
-                        eprintln!("pointer feedback frame not sent: no PaperPad connected");
+                        operator_log::error!(
+                            "pointer feedback frame not sent: no PaperPad connected"
+                        );
                     }
-                    Err(error) => eprintln!("pointer feedback frame error: {error}"),
+                    Err(error) => operator_log::error!("pointer feedback frame error: {error}"),
                 }
             }
-            println!("received from {peer}: {record}");
+            operator_log::info!("received from {peer}: {record}");
             flush_stdout("after received line");
 
             // Never let a log write or flush failure tear down the connection.
             if let Err(error) = write_log_record(&mut file, &peer.to_string(), &record) {
-                eprintln!("log write error: {error}");
+                operator_log::error!("log write error: {error}");
             }
 
             if let Some(activation) = input_result.activation {
@@ -1378,7 +1386,7 @@ fn main() -> io::Result<()> {
                                         .saturating_sub(invoke_started.mono_us)
                                 ),
                             );
-                            eprintln!("forward error to Hammerspoon: {error}");
+                            operator_log::error!("forward error to Hammerspoon: {error}");
                             "failed"
                         }
                     }
@@ -1389,17 +1397,17 @@ fn main() -> io::Result<()> {
                     "host action {correlation} button={} semantic={} dispatch={dispatch}",
                     activation.button_id, activation.action_id
                 );
-                println!("resolved for {peer}: {host_record}");
+                operator_log::info!("resolved for {peer}: {host_record}");
                 flush_stdout("after host action");
                 if let Err(error) = write_log_record(&mut file, &peer.to_string(), &host_record) {
-                    eprintln!("log write error: {error}");
+                    operator_log::error!("log write error: {error}");
                 }
             }
         }
         current.clear_if_current(&connection_token);
         live.connection_changed();
 
-        println!("disconnected: {peer}");
+        operator_log::info!("disconnected: {peer}");
         flush_stdout("after disconnected banner");
     }
     Ok(())
