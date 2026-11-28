@@ -55,8 +55,7 @@ pub fn load_now_playing_frame(width: u16, height: u16) -> Result<Gray8Frame, Str
 
     let executable = std::env::current_exe()
         .map_err(|error| format!("failed to locate PaperSpoon executable: {error}"))?;
-    let timings = std::env::var_os(HELPER_TIMING_ENV).is_some();
-    let mut diagnostics = if timings && crate::operator_log::is_capturing() {
+    let mut diagnostics = if std::env::var_os(HELPER_TIMING_ENV).is_some() {
         Some(
             tempfile::tempfile()
                 .map_err(|error| format!("capture Now Playing diagnostics: {error}"))?,
@@ -69,8 +68,6 @@ pub fn load_now_playing_frame(width: u16, height: u16) -> Result<Gray8Frame, Str
             file.try_clone()
                 .map_err(|error| format!("clone Now Playing diagnostics: {error}"))?,
         )
-    } else if timings {
-        Stdio::inherit()
     } else {
         Stdio::null()
     };
@@ -161,7 +158,7 @@ pub fn load_now_playing_frame(width: u16, height: u16) -> Result<Gray8Frame, Str
 
 #[cfg(not(target_os = "macos"))]
 pub fn load_now_playing_frame(_width: u16, _height: u16) -> Result<Gray8Frame, String> {
-    Err("frame nowplaying is supported only on macOS".to_string())
+    Err("Now Playing snapshots are supported only on macOS".to_string())
 }
 
 /// Internal helper entry point. The parent intentionally terminates this

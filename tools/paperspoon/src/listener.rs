@@ -14,7 +14,7 @@ use paper_protocol::{V2PointerPhase, v3};
 use paperspoon::application_input::ApplicationInput;
 use paperspoon::application_ui::ApplicationUi;
 use paperspoon::operator_log;
-use paperspoon::operator_log::{flush_stdout, write_log_record};
+use paperspoon::operator_log::write_log_record;
 
 use crate::dispatch::forward_url;
 use crate::frame_sender::{
@@ -36,12 +36,12 @@ pub(crate) fn run_listener(
     frame_sender: FrameSender,
     live: Arc<LiveNowPlaying>,
     application_viewport_rx: mpsc::Receiver<Option<(u16, u16)>>,
-    status: Option<SharedStatus>,
+    status: SharedStatus,
 ) {
     let log_path = &options.log_path;
     let forward_url_actions = options.forward_url;
     let compression = options.compression;
-    while !status.as_ref().is_some_and(SharedStatus::stopping) {
+    while !status.stopping() {
         let conn = listener.accept().map(|(stream, _)| stream);
         let mut stream = match conn {
             Ok(s) => s,
@@ -55,20 +55,14 @@ pub(crate) fn run_listener(
             }
         };
         // Some Unix platforms inherit the listener's nonblocking mode.
-        if status.is_some()
-            && let Err(error) = stream.set_nonblocking(false)
-        {
+        if let Err(error) = stream.set_nonblocking(false) {
             operator_log::error!("cannot set blocking mode on accepted connection: {error}");
             continue;
         }
-        let tracked = match status
-            .as_ref()
-            .map(|status| status.track(&stream))
-            .transpose()
-        {
+        let tracked = match status.track(&stream) {
             Ok(tracked) => tracked,
             Err(error) => {
-                if !status.as_ref().is_some_and(SharedStatus::stopping) {
+                if !status.stopping() {
                     operator_log::error!("cannot track connection for shutdown: {error}");
                 }
                 continue;
@@ -78,7 +72,6 @@ pub(crate) fn run_listener(
             .peer_addr()
             .unwrap_or_else(|_| SocketAddr::from(([0, 0, 0, 0], 0)));
         operator_log::info!("connected: {peer}");
-        flush_stdout("after connected banner");
 
         // A new connection has not received any application frame yet.
         while application_viewport_rx.try_recv().is_ok() {}
@@ -125,7 +118,6 @@ pub(crate) fn run_listener(
             compression,
         );
         operator_log::info!("received from {peer}: {hello_record}");
-        flush_stdout("after received Hello");
         if let Err(error) = write_log_record(&mut file, &peer.to_string(), &hello_record) {
             operator_log::error!("log write error: {error}");
         }
@@ -138,14 +130,12 @@ pub(crate) fn run_listener(
             encodings,
         ) {
             Ok(token) => {
-                if let Some(session) = &tracked {
-                    session.negotiated(
-                        peer,
-                        token.at_viewport((hello.viewport_width(), hello.viewport_height())),
-                        encodings,
-                        hello.pixel_formats(),
-                    );
-                }
+                tracked.negotiated(
+                    peer,
+                    token.at_viewport((hello.viewport_width(), hello.viewport_height())),
+                    encodings,
+                    hello.pixel_formats(),
+                );
                 token
             }
             Err(e) => {
@@ -187,7 +177,6 @@ pub(crate) fn run_listener(
                         hello_frame.retained
                     );
                     operator_log::info!("{record}");
-                    flush_stdout("after automatic hello frame");
                     if let Err(error) = write_log_record(&mut file, &peer.to_string(), &record) {
                         operator_log::error!("frame log error: {error}");
                     }
@@ -222,10 +211,8 @@ pub(crate) fn run_listener(
             let pointer = match message {
                 SessionMessage::ViewportChanged(viewport) => {
                     reported_viewport = (viewport.width(), viewport.height());
-                    if current.update_viewport_if_current(&connection_token, reported_viewport)
-                        && let Some(session) = &tracked
-                    {
-                        session.resized(connection_token.at_viewport(reported_viewport));
+                    if current.update_viewport_if_current(&connection_token, reported_viewport) {
+                        tracked.resized(connection_token.at_viewport(reported_viewport));
                     }
                     let record = format!(
                         "viewport changed width={} height={}",
@@ -233,7 +220,6 @@ pub(crate) fn run_listener(
                         viewport.height()
                     );
                     operator_log::info!("received from {peer}: {record}");
-                    flush_stdout("after received viewport change");
                     if let Err(error) = write_log_record(&mut file, &peer.to_string(), &record) {
                         operator_log::error!("log write error: {error}");
                     }
@@ -260,7 +246,6 @@ pub(crate) fn run_listener(
                                 sent.socket_write_elapsed.as_micros()
                             );
                             operator_log::info!("{record}");
-                            flush_stdout("after viewport replacement frame");
                             if let Err(error) =
                                 write_log_record(&mut file, &peer.to_string(), &record)
                             {
@@ -351,7 +336,6 @@ pub(crate) fn run_listener(
                             sent.socket_write_elapsed.as_micros()
                         );
                         operator_log::info!("{feedback_record}");
-                        flush_stdout("after pointer feedback frame");
                         if let Err(error) =
                             write_log_record(&mut file, &peer.to_string(), &feedback_record)
                         {
@@ -372,7 +356,6 @@ pub(crate) fn run_listener(
                 }
             }
             operator_log::info!("received from {peer}: {record}");
-            flush_stdout("after received line");
 
             // Never let a log write or flush failure tear down the connection.
             if let Err(error) = write_log_record(&mut file, &peer.to_string(), &record) {
@@ -439,7 +422,6 @@ pub(crate) fn run_listener(
                     activation.button_id, activation.action_id
                 );
                 operator_log::info!("resolved for {peer}: {host_record}");
-                flush_stdout("after host action");
                 if let Err(error) = write_log_record(&mut file, &peer.to_string(), &host_record) {
                     operator_log::error!("log write error: {error}");
                 }
@@ -449,6 +431,5 @@ pub(crate) fn run_listener(
         live.connection_changed();
 
         operator_log::info!("disconnected: {peer}");
-        flush_stdout("after disconnected banner");
     }
 }

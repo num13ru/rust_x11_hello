@@ -13,9 +13,9 @@ use paperspoon::now_playing_provider::{
 };
 use paperspoon::now_playing_renderer::{LiveControl, LiveLayout, LiveNowPlayingRenderer};
 
+use crate::frame_sender::FrameSender;
 use crate::server::FrameTarget;
-use crate::{FrameSender, operator_log};
-use paperspoon::operator_log::append_host_log_record;
+use paperspoon::operator_log::{self, append_host_log_record};
 
 const MEDIA_QUEUE_CAPACITY: usize = 8;
 const ARTWORK_CACHE_CAPACITY: usize = 8;

@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 use std::sync::mpsc::{self, Sender};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use crate::operator_log;
+use paperspoon::operator_log;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Stamp {

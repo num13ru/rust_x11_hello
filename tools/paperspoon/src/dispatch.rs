@@ -10,8 +10,8 @@ use paperspoon::operator_log;
 use crate::frame_sender::{ApplicationSend, FrameSender};
 use crate::live_now_playing::LiveNowPlaying;
 use crate::server::FrameTarget;
-use paperspoon::operator::{LiveCommand, StdinCommand};
-use paperspoon::operator_log::{append_host_log_record, flush_stdout};
+use paperspoon::operator::{LiveCommand, OperatorCommand};
+use paperspoon::operator_log::append_host_log_record;
 
 /// Forward one action line to Hammerspoon via `open -g hammerspoon://`.
 /// The action id is passed as a query parameter (`?action=<id>`); Hammerspoon's
@@ -35,16 +35,12 @@ pub(crate) fn forward_url(
     launch.arg("-g").arg(format!(
         "hammerspoon://paperpad?action={action_id}{trace_query}"
     ));
-    if operator_log::is_capturing() {
-        let output = launch.output()?;
-        for line in String::from_utf8_lossy(&output.stdout).lines() {
-            operator_log::info!("{line}");
-        }
-        for line in String::from_utf8_lossy(&output.stderr).lines() {
-            operator_log::error!("{line}");
-        }
-    } else {
-        launch.status()?;
+    let output = launch.output()?;
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        operator_log::info!("{line}");
+    }
+    for line in String::from_utf8_lossy(&output.stderr).lines() {
+        operator_log::error!("{line}");
     }
     Ok(())
 }
@@ -60,25 +56,19 @@ pub(crate) struct Operator {
 impl Operator {
     pub(crate) fn dispatch(
         &self,
-        command: StdinCommand,
-        source: &str,
+        command: OperatorCommand,
         target: Option<&FrameTarget>,
     ) -> Result<String, String> {
-        let live_command = matches!(command, StdinCommand::LiveNowPlaying(_));
-        let result = self.execute(command, source, target);
+        let result = self.execute(command, target);
         if let Err(error) = &result {
             operator_log::error!("{error}");
-        }
-        if live_command {
-            flush_stdout("after live Now Playing command");
         }
         result
     }
 
     fn execute(
         &self,
-        command: StdinCommand,
-        source: &str,
+        command: OperatorCommand,
         expected: Option<&FrameTarget>,
     ) -> Result<String, String> {
         let Self {
@@ -89,16 +79,16 @@ impl Operator {
             log_path,
         } = self;
         let format = match &command {
-            StdinCommand::Frame(frame) => Some(frame.pixel_format()),
-            StdinCommand::Jpeg(_) | StdinCommand::NowPlaying => Some(PixelFormat::Gray8),
-            StdinCommand::ApplicationFrame { .. } => Some(PixelFormat::Mono1),
-            StdinCommand::LiveNowPlaying(_) => None,
+            OperatorCommand::Frame(frame) => Some(frame.pixel_format()),
+            OperatorCommand::Jpeg(_) | OperatorCommand::NowPlaying => Some(PixelFormat::Gray8),
+            OperatorCommand::ApplicationFrame { .. } => Some(PixelFormat::Mono1),
+            OperatorCommand::LiveNowPlaying(_) => None,
         };
         if let Some(format) = format {
-            if let Some(expected) = expected
-                && !frame_sender
-                    .frame_target(format)
-                    .is_ok_and(|target| expected.is_same(&target))
+            let expected = expected.ok_or("No negotiated PaperPad connection")?;
+            if !frame_sender
+                .frame_target(format)
+                .is_ok_and(|target| expected.is_same(&target))
             {
                 return Err(
                     "PaperPad connection or viewport changed before the command could run".into(),
@@ -107,7 +97,7 @@ impl Operator {
             live.stop();
         }
         match command {
-            StdinCommand::LiveNowPlaying(command) => {
+            OperatorCommand::LiveNowPlaying(command) => {
                 let command_error = |error| format!("Now Playing command: {error}");
                 match command {
                     LiveCommand::Start => live
@@ -124,9 +114,10 @@ impl Operator {
                     LiveCommand::Stop => {
                         let mut restore_error = None;
                         if live.stop()
-                            && let Ok(target) = frame_sender.frame_target(PixelFormat::Mono1)
-                            && (source == "stdin"
-                                || expected.is_some_and(|expected| expected.is_same(&target)))
+                            && let Some(target) = expected
+                            && frame_sender
+                                .frame_target(PixelFormat::Mono1)
+                                .is_ok_and(|current| target.is_same(&current))
                         {
                             let viewport = target.viewport();
                             match frame_sender.send_application_to(
@@ -164,14 +155,15 @@ impl Operator {
                         .map_err(command_error),
                 }
             }
-            StdinCommand::Frame(frame) => match frame_sender.send_diagnostic_to(frame, expected) {
+            OperatorCommand::Frame(frame) => match frame_sender.send_diagnostic_to(frame, expected)
+            {
                 Ok(Some(sent)) => {
                     if application_viewport_tx.send(None).is_err() {
                         operator_log::error!("application viewport tracker stopped");
                     }
                     let (width, height) = frame.dimensions();
                     let record = format!(
-                        "sent diagnostic frame id={} pattern={} width={width} height={height} bytes={} encode_us={} socket_write_us={} source={source}",
+                        "sent diagnostic frame id={} pattern={} width={width} height={height} bytes={} encode_us={} socket_write_us={} source=tui",
                         sent.frame_id,
                         frame.pattern_name(),
                         sent.encoded_len,
@@ -179,21 +171,20 @@ impl Operator {
                         sent.socket_write_elapsed.as_micros()
                     );
                     operator_log::info!("{record}");
-                    flush_stdout("after sent frame");
                     append_host_log_record(log_path, &record);
                     Ok(format!("Sent diagnostic frame {}", sent.frame_id))
                 }
                 Ok(None) => Err("frame not sent: no PaperPad connected".into()),
                 Err(error) => Err(format!("frame command error: {error}")),
             },
-            StdinCommand::Jpeg(path) => match frame_sender.send_jpeg_to(&path, expected) {
+            OperatorCommand::Jpeg(path) => match frame_sender.send_jpeg_to(&path, expected) {
                 Ok(Some(jpeg)) => {
                     if application_viewport_tx.send(None).is_err() {
                         operator_log::error!("application viewport tracker stopped");
                     }
                     let sent = jpeg.sent;
                     let record = format!(
-                        "sent JPEG frame id={} path={} width={} height={} bytes={} encode_us={} socket_write_us={} source={source}",
+                        "sent JPEG frame id={} path={} width={} height={} bytes={} encode_us={} socket_write_us={} source=tui",
                         sent.frame_id,
                         path.display(),
                         jpeg.viewport.0,
@@ -203,21 +194,20 @@ impl Operator {
                         sent.socket_write_elapsed.as_micros()
                     );
                     operator_log::info!("{record}");
-                    flush_stdout("after sent JPEG frame");
                     append_host_log_record(log_path, &record);
                     Ok(format!("Sent JPEG frame {}", sent.frame_id))
                 }
                 Ok(None) => Err("JPEG frame not sent: no PaperPad connected".into()),
                 Err(error) => Err(format!("JPEG frame command error: {error}")),
             },
-            StdinCommand::NowPlaying => match frame_sender.send_now_playing(expected) {
+            OperatorCommand::NowPlaying => match frame_sender.send_now_playing(expected) {
                 Ok(Some(now_playing)) => {
                     if application_viewport_tx.send(None).is_err() {
                         operator_log::error!("application viewport tracker stopped");
                     }
                     let sent = now_playing.sent;
                     let record = format!(
-                        "sent Now Playing frame id={} width={} height={} bytes={} encode_us={} socket_write_us={} source={source}",
+                        "sent Now Playing frame id={} width={} height={} bytes={} encode_us={} socket_write_us={} source=tui",
                         sent.frame_id,
                         now_playing.viewport.0,
                         now_playing.viewport.1,
@@ -226,37 +216,34 @@ impl Operator {
                         sent.socket_write_elapsed.as_micros()
                     );
                     operator_log::info!("{record}");
-                    flush_stdout("after Now Playing frame");
                     append_host_log_record(log_path, &record);
                     Ok(format!("Sent Now Playing frame {}", sent.frame_id))
                 }
                 Ok(None) => Err("Now Playing frame not sent: no PaperPad connected".into()),
                 Err(error) => Err(format!("Now Playing frame error: {error}")),
             },
-            StdinCommand::ApplicationFrame { width, height } => {
+            OperatorCommand::ApplicationFrame { width, height } => {
                 match frame_sender.send_application_to(application_ui, (width, height), expected) {
                     Ok(ApplicationSend::Sent(sent)) => {
                         if application_viewport_tx.send(Some((width, height))).is_err() {
                             operator_log::error!("application viewport tracker stopped");
                         }
                         let record = format!(
-                            "sent application frame id={} width={width} height={height} bytes={} encode_us={} socket_write_us={} source={source}",
+                            "sent application frame id={} width={width} height={height} bytes={} encode_us={} socket_write_us={} source=tui",
                             sent.frame_id,
                             sent.encoded_len,
                             sent.encode_elapsed.as_micros(),
                             sent.socket_write_elapsed.as_micros()
                         );
                         operator_log::info!("{record}");
-                        flush_stdout("after sent application frame");
                         append_host_log_record(log_path, &record);
                         Ok(format!("Sent application frame {}", sent.frame_id))
                     }
                     Ok(ApplicationSend::Unchanged) => {
                         let record = format!(
-                            "application frame skipped unchanged width={width} height={height} source={source}"
+                            "application frame skipped unchanged width={width} height={height} source=tui"
                         );
                         operator_log::info!("{record}");
-                        flush_stdout("after skipped application frame");
                         append_host_log_record(log_path, &record);
                         Ok("Application frame unchanged".into())
                     }

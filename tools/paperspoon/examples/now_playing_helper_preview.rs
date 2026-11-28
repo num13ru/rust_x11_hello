@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use paperspoon::now_playing::{HELPER_ARGUMENT, load_now_playing_frame, run_preview_helper};
+use paperspoon::operator_log::{self, LogPosition};
 
 const WIDTH: u16 = 1272;
 const HEIGHT: u16 = 1624;
@@ -30,7 +31,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let started = Instant::now();
-    let frame = load_now_playing_frame(WIDTH, HEIGHT)?;
+    let frame = load_now_playing_frame(WIDTH, HEIGHT);
+    for record in operator_log::history()
+        .window(LogPosition::From(0), usize::MAX)
+        .records
+    {
+        eprintln!("{}", record.message);
+    }
+    let frame = frame?;
     let mut bytes = format!("P5\n{} {}\n255\n", frame.width(), frame.height()).into_bytes();
     bytes.extend_from_slice(frame.pixels());
     fs::write(&output, bytes)?;

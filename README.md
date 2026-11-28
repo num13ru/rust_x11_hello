@@ -39,18 +39,16 @@ when previewing controls without dispatching actions to Hammerspoon. The
 [example Hammerspoon handler](tools/hammerspoon/init.example.lua) shows how to
 wire up the application grid.
 
-With a terminal on both input and output, PaperSpoon opens the fullscreen
-operator console. Use **Tab** and **Shift+Tab** to change groups, **arrows**
+PaperSpoon opens the fullscreen operator console and requires a terminal on
+both stdin and stdout. Use **Tab** and **Shift+Tab** to change groups, **arrows**
 to select a button, and **Enter** to run it. You can also click a visible
 button. **Esc** cancels a parameter editor. **F** toggles log follow and
 **Q** or **Ctrl+C** exits. Focus the log to use **Page Up**, **Page Down**,
 **Home**, **End**, and the left and right arrows. A `SIGKILL` cannot restore
 terminal settings.
 
-Use `--no-tui` to keep the line-oriented console. PaperSpoon also selects
-that mode automatically when input or output is redirected. The on-screen
-log retains up to 5,000 messages. The persistent session log and latency
-JSONL remain available for analysis.
+The on-screen log retains up to 5,000 messages. The persistent session log
+and latency JSONL remain available for analysis.
 
 ### Install or update the Kindle extension
 

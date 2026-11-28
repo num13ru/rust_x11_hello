@@ -1,4 +1,4 @@
-//! Explicit stdin commands for host-generated framebuffers.
+//! Typed operator commands and diagnostic frame generation.
 
 use crate::now_playing_provider::FakeChange;
 use std::path::PathBuf;
@@ -22,21 +22,6 @@ pub enum DiagnosticPattern {
 }
 
 impl DiagnosticPattern {
-    /// Validated name lookup used by both stdin parsing and typed TUI construction.
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "white" => Some(Self::White),
-            "black" => Some(Self::Black),
-            "horizontal" => Some(Self::Horizontal),
-            "checkerboard" => Some(Self::Checkerboard),
-            "border" => Some(Self::Border),
-            "corners" => Some(Self::Corners),
-            "gray-gradient" => Some(Self::GrayGradient),
-            "gray-bars" => Some(Self::GrayBars),
-            _ => None,
-        }
-    }
-
     pub fn name(self) -> &'static str {
         match self {
             Self::White => "white",
@@ -180,7 +165,7 @@ impl DiagnosticFrame {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum StdinCommand {
+pub enum OperatorCommand {
     Frame(DiagnosticFrame),
     Jpeg(PathBuf),
     NowPlaying,
@@ -188,8 +173,8 @@ pub enum StdinCommand {
     ApplicationFrame { width: u16, height: u16 },
 }
 
-impl StdinCommand {
-    /// Validated constructor for the `ui <width>x<height>` command.
+impl OperatorCommand {
+    /// Create an application frame request with nonzero dimensions.
     pub fn application_frame(width: u16, height: u16) -> Result<Self, String> {
         validate_dimensions(width, height)?;
         Ok(Self::ApplicationFrame { width, height })
@@ -203,117 +188,6 @@ pub enum LiveCommand {
     Status,
     Refresh,
     Fake(FakeChange),
-}
-
-pub fn parse_stdin_command(line: &str) -> Result<StdinCommand, String> {
-    if let Some(path) = parse_jpeg_path(line)? {
-        return Ok(StdinCommand::Jpeg(path));
-    }
-    let mut parts = line.split_whitespace();
-    match parts.next() {
-        Some("nowplaying") => return parse_live_command(parts).map(StdinCommand::LiveNowPlaying),
-        Some("ui") => {
-            let dimensions = parts
-                .next()
-                .ok_or_else(|| "usage: ui <width>x<height>".to_string())?;
-            if parts.next().is_some() {
-                return Err("usage: ui <width>x<height>".to_string());
-            }
-            let (width, height) = parse_dimensions(dimensions)?;
-            return Ok(StdinCommand::ApplicationFrame { width, height });
-        }
-        Some("frame") => {}
-        Some(command) => return Err(format!("unknown stdin command {command:?}")),
-        None => return Err("stdin command is empty".to_string()),
-    }
-
-    let pattern_name = parts
-        .next()
-        .ok_or_else(|| "usage: frame <pattern> <width>x<height>".to_string())?;
-    if pattern_name == "nowplaying" {
-        if parts.next().is_some() {
-            return Err("usage: frame nowplaying".to_string());
-        }
-        return Ok(StdinCommand::NowPlaying);
-    }
-    let (pattern, dimensions, usage) = if pattern_name == "gray" {
-        let usage = "usage: frame gray <0..255> <width>x<height>";
-        let value = parts
-            .next()
-            .ok_or_else(|| usage.to_string())?
-            .parse::<u8>()
-            .map_err(|_| "gray value must be an integer from 0 through 255".to_string())?;
-        let dimensions = parts.next().ok_or_else(|| usage.to_string())?;
-        (DiagnosticPattern::Gray(value), dimensions, usage)
-    } else {
-        let usage = "usage: frame <pattern> <width>x<height>";
-        let pattern = DiagnosticPattern::parse(pattern_name).ok_or_else(|| {
-            format!(
-                "unknown frame pattern '{pattern_name}'; expected white, black, horizontal, checkerboard, border, corners, gray-gradient, gray-bars, gray, or jpeg <path>"
-            )
-        })?;
-        let dimensions = parts.next().ok_or_else(|| usage.to_string())?;
-        (pattern, dimensions, usage)
-    };
-    if parts.next().is_some() {
-        return Err(usage.to_string());
-    }
-    let (width, height) = parse_dimensions(dimensions)?;
-
-    Ok(StdinCommand::Frame(DiagnosticFrame {
-        pattern,
-        width,
-        height,
-    }))
-}
-
-fn parse_live_command(parts: std::str::SplitWhitespace<'_>) -> Result<LiveCommand, String> {
-    let parts: Vec<_> = parts.collect();
-    Ok(match parts.as_slice() {
-        ["start"] => LiveCommand::Start,
-        ["stop"] => LiveCommand::Stop,
-        ["status"] => LiveCommand::Status,
-        ["refresh"] => LiveCommand::Refresh,
-        ["fake", "play"] => LiveCommand::Fake(FakeChange::Play),
-        ["fake", "pause"] => LiveCommand::Fake(FakeChange::Pause),
-        ["fake", "next"] => LiveCommand::Fake(FakeChange::Next),
-        ["fake", "fail"] => LiveCommand::Fake(FakeChange::Fail),
-        ["fake", "recover"] => LiveCommand::Fake(FakeChange::Recover),
-        ["fake", "slow"] => LiveCommand::Fake(FakeChange::Slow),
-        ["fake", "normal"] => LiveCommand::Fake(FakeChange::Normal),
-        ["fake", "seek", position] => {
-            let position = position.parse::<f64>().ok()
-                .filter(|position| position.is_finite() && *position >= 0.0)
-                .ok_or("fake seek requires a finite, nonnegative position in seconds")?;
-            LiveCommand::Fake(FakeChange::Seek(position))
-        }
-        _ => return Err("usage: nowplaying <start|stop|status|refresh|fake play|pause|next|seek SECONDS|fail|recover|slow|normal>".into()),
-    })
-}
-
-fn parse_jpeg_path(line: &str) -> Result<Option<PathBuf>, String> {
-    let line = line.trim();
-    let Some(frame_separator) = line.find(char::is_whitespace) else {
-        return Ok(None);
-    };
-    if &line[..frame_separator] != "frame" {
-        return Ok(None);
-    }
-    let frame_arguments = line[frame_separator..].trim_start();
-    if frame_arguments == "jpeg" {
-        return Err("usage: frame jpeg <path>".to_string());
-    }
-    let Some(jpeg_separator) = frame_arguments.find(char::is_whitespace) else {
-        return Ok(None);
-    };
-    if &frame_arguments[..jpeg_separator] != "jpeg" {
-        return Ok(None);
-    }
-    let path = frame_arguments[jpeg_separator..].trim();
-    if path.is_empty() {
-        return Err("usage: frame jpeg <path>".to_string());
-    }
-    Ok(Some(PathBuf::from(path)))
 }
 
 fn validate_dimensions(width: u16, height: u16) -> Result<(), String> {
@@ -380,71 +254,26 @@ mod tests {
         (frame_id, frame)
     }
 
-    fn parsed_diagnostic(command: &str) -> DiagnosticFrame {
-        let StdinCommand::Frame(frame) = parse_stdin_command(command).expect("diagnostic command")
-        else {
-            panic!("diagnostic frame expected");
-        };
-        frame
+    fn diagnostic(pattern: DiagnosticPattern, width: u16, height: u16) -> DiagnosticFrame {
+        DiagnosticFrame::new(pattern, width, height).expect("diagnostic frame")
     }
 
     #[test]
-    fn commands_are_v2_frames_and_syntax_is_strict() {
-        assert!(parse_stdin_command("unknown hello").is_err());
+    fn viewport_editor_and_frame_constructors_validate_dimensions() {
+        assert_eq!(parse_dimensions("1272x1624"), Ok((1272, 1624)));
         assert_eq!(
-            parse_stdin_command("ui 1272x1624"),
-            Ok(StdinCommand::ApplicationFrame {
+            OperatorCommand::application_frame(1272, 1624),
+            Ok(OperatorCommand::ApplicationFrame {
                 width: 1272,
                 height: 1624,
             })
         );
-        assert!(parse_stdin_command("ui").is_err());
-        assert!(parse_stdin_command("ui 1272").is_err());
-        assert!(parse_stdin_command("ui 0x1624").is_err());
-        assert!(parse_stdin_command("ui 1272x1624 extra").is_err());
-        assert!(parse_stdin_command("frame").is_err());
-        assert!(parse_stdin_command("frame unknown 8x8").is_err());
-        assert!(parse_stdin_command("frame white 8").is_err());
-        assert!(parse_stdin_command("frame white 0x8").is_err());
-        assert!(parse_stdin_command("frame white 8x8 extra").is_err());
-        assert_eq!(
-            parse_stdin_command("frame nowplaying"),
-            Ok(StdinCommand::NowPlaying)
-        );
-        assert_eq!(
-            parse_stdin_command(" frame   nowplaying  "),
-            Ok(StdinCommand::NowPlaying)
-        );
-        assert_eq!(
-            parse_stdin_command("frame nowplaying extra"),
-            Err("usage: frame nowplaying".to_string())
-        );
-
-        assert_eq!(
-            parse_stdin_command("frame jpeg ./assets/example-image.jpg"),
-            Ok(StdinCommand::Jpeg(PathBuf::from(
-                "./assets/example-image.jpg"
-            )))
-        );
-        assert_eq!(
-            parse_stdin_command("frame jpeg /Users/user/Downloads/1.jpeg"),
-            Ok(StdinCommand::Jpeg(PathBuf::from(
-                "/Users/user/Downloads/1.jpeg"
-            )))
-        );
-        assert_eq!(
-            parse_stdin_command("frame   jpeg   ./assets/image with spaces.jpg"),
-            Ok(StdinCommand::Jpeg(PathBuf::from(
-                "./assets/image with spaces.jpg"
-            )))
-        );
-        assert!(parse_stdin_command("frame jpeg").is_err());
-
-        let StdinCommand::Frame(frame) =
-            parse_stdin_command("frame border 9x2").expect("frame command")
-        else {
-            panic!("Frame command expected");
-        };
+        for invalid in ["", "1272", "0x1624", "1272x0", "1272x1624 extra", "65536x1"] {
+            assert!(parse_dimensions(invalid).is_err(), "{invalid}");
+        }
+        assert!(OperatorCommand::application_frame(0, 128).is_err());
+        assert!(DiagnosticFrame::new(DiagnosticPattern::Border, 9, 0).is_err());
+        let frame = diagnostic(DiagnosticPattern::Border, 9, 2);
         assert_eq!(frame.pattern_name(), "border");
         assert_eq!(frame.dimensions(), (9, 2));
     }
@@ -485,12 +314,7 @@ mod tests {
 
     #[test]
     fn gray8_commands_render_gradient_bars_and_solid_luminance() {
-        assert!(parse_stdin_command("frame gray 256 4x2").is_err());
-        assert!(parse_stdin_command("frame gray -1 4x2").is_err());
-        assert!(parse_stdin_command("frame gray 64").is_err());
-        assert!(parse_stdin_command("frame gray 64 4x2 extra").is_err());
-
-        let gradient = parsed_diagnostic("frame gray-gradient 5x2");
+        let gradient = diagnostic(DiagnosticPattern::GrayGradient, 5, 2);
         assert_eq!(gradient.pattern_name(), "gray-gradient");
         assert_eq!(gradient.pixel_format(), PixelFormat::Gray8);
         let (frame_id, gradient) = decoded_owned_frame(gradient);
@@ -504,7 +328,7 @@ mod tests {
             &[0, 63, 127, 191, 255, 0, 63, 127, 191, 255]
         );
 
-        let (_, bars) = decoded_owned_frame(parsed_diagnostic("frame gray-bars 16x2"));
+        let (_, bars) = decoded_owned_frame(diagnostic(DiagnosticPattern::GrayBars, 16, 2));
         let Frame::Gray8(bars) = bars else {
             panic!("Gray8 bars expected");
         };
@@ -513,8 +337,7 @@ mod tests {
         assert_eq!(&bars.pixels()[16..], expected);
 
         for value in [0, 64, 128, 192, 255] {
-            let command = format!("frame gray {value} 3x2");
-            let solid = parsed_diagnostic(&command);
+            let solid = diagnostic(DiagnosticPattern::Gray(value), 3, 2);
             assert_eq!(solid.pattern_name(), "gray");
             let (_, solid) = decoded_owned_frame(solid);
             let Frame::Gray8(solid) = solid else {
@@ -523,7 +346,7 @@ mod tests {
             assert_eq!(solid.pixels(), &[value; 6]);
         }
 
-        let (_, one_pixel) = decoded_owned_frame(parsed_diagnostic("frame gray-gradient 1x1"));
+        let (_, one_pixel) = decoded_owned_frame(diagnostic(DiagnosticPattern::GrayGradient, 1, 1));
         let Frame::Gray8(one_pixel) = one_pixel else {
             panic!("one-pixel Gray8 gradient expected");
         };

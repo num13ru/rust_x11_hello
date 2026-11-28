@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 
 use crate::now_playing_provider::FakeChange;
-use crate::operator::{DiagnosticFrame, DiagnosticPattern, LiveCommand, StdinCommand};
+use crate::operator::{DiagnosticFrame, DiagnosticPattern, LiveCommand, OperatorCommand};
 use crate::operator_log::{LogBuffer, LogPosition, LogWindow};
 
 // ---------- Keys ----------
@@ -73,7 +73,7 @@ pub enum Effect {
     /// The operator pressed Q. Main should shut down.
     Quit,
     /// A validated, typed command ready for the shared dispatcher.
-    Command(StdinCommand),
+    Command(OperatorCommand),
     /// A message to log as an operator error.
     Error(String),
     /// A compact status update for the footer line.
@@ -518,7 +518,7 @@ impl TuiApp {
                     }
                 };
                 match DiagnosticFrame::new(pattern, width, height) {
-                    Ok(frame) => Some(Effect::Command(StdinCommand::Frame(frame))),
+                    Ok(frame) => Some(Effect::Command(OperatorCommand::Frame(frame))),
                     Err(error) => Some(Effect::Error(error)),
                 }
             }
@@ -531,7 +531,7 @@ impl TuiApp {
                         ));
                     }
                 };
-                match StdinCommand::application_frame(width, height) {
+                match OperatorCommand::application_frame(width, height) {
                     Ok(command) => Some(Effect::Command(command)),
                     Err(error) => Some(Effect::Error(error)),
                 }
@@ -548,7 +548,7 @@ impl TuiApp {
                     "Enter JPEG path — Enter to send, Esc to cancel".to_string(),
                 ))
             }
-            ButtonKind::NowPlaying => Some(Effect::Command(StdinCommand::NowPlaying)),
+            ButtonKind::NowPlaying => Some(Effect::Command(OperatorCommand::NowPlaying)),
             ButtonKind::Live(command) => {
                 if matches!(command, LiveCommand::Fake(_)) && !self.context.fake_provider_enabled {
                     return Some(Effect::Error(
@@ -556,7 +556,7 @@ impl TuiApp {
                             .to_string(),
                     ));
                 }
-                Some(Effect::Command(StdinCommand::LiveNowPlaying(command)))
+                Some(Effect::Command(OperatorCommand::LiveNowPlaying(command)))
             }
             ButtonKind::SeekEditor => {
                 if !self.context.fake_provider_enabled {
@@ -641,7 +641,7 @@ impl TuiApp {
                     }
                 };
                 match DiagnosticFrame::new(DiagnosticPattern::Gray(gray), width, height) {
-                    Ok(frame) => Some(Effect::Command(StdinCommand::Frame(frame))),
+                    Ok(frame) => Some(Effect::Command(OperatorCommand::Frame(frame))),
                     Err(error) => Some(Effect::Error(error)),
                 }
             }
@@ -654,7 +654,7 @@ impl TuiApp {
                     return Some(Effect::Error("JPEG path cannot be empty".to_string()));
                 }
                 self.editor = None;
-                Some(Effect::Command(StdinCommand::Jpeg(PathBuf::from(value))))
+                Some(Effect::Command(OperatorCommand::Jpeg(PathBuf::from(value))))
             }
             EditorKind::SeekSeconds => {
                 let parsed = value
@@ -672,7 +672,7 @@ impl TuiApp {
                     )));
                 };
                 self.editor = None;
-                Some(Effect::Command(StdinCommand::LiveNowPlaying(
+                Some(Effect::Command(OperatorCommand::LiveNowPlaying(
                     LiveCommand::Fake(FakeChange::Seek(seconds)),
                 )))
             }
@@ -810,7 +810,7 @@ impl TuiApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::operator_log::{LogBuffer, Stream};
+    use crate::operator_log::{Level, LogBuffer};
 
     fn test_context() -> AppContext {
         AppContext {
@@ -874,7 +874,7 @@ mod tests {
         let mut app = app_with_context(test_context());
         focus_group(&mut app, 0);
         let effect = app.handle_key(TuiKey::Enter).unwrap();
-        let Effect::Command(StdinCommand::ApplicationFrame { width, height }) = effect else {
+        let Effect::Command(OperatorCommand::ApplicationFrame { width, height }) = effect else {
             panic!("expected application frame command, got {effect:?}");
         };
         assert_eq!((width, height), (16, 24));
@@ -896,7 +896,7 @@ mod tests {
         let mut app = app_with_context(test_context());
         select_button(&mut app, 1, 0); // White
         let effect = app.handle_key(TuiKey::Enter).unwrap();
-        let Effect::Command(StdinCommand::Frame(frame)) = effect else {
+        let Effect::Command(OperatorCommand::Frame(frame)) = effect else {
             panic!("expected diagnostic frame command, got {effect:?}");
         };
         assert_eq!(frame.pattern_name(), "white");
@@ -914,7 +914,7 @@ mod tests {
         app.handle_key(TuiKey::Char('3'));
         app.handle_key(TuiKey::Char('2'));
         let effect = app.handle_key(TuiKey::Enter).unwrap();
-        let Effect::Command(StdinCommand::Frame(frame)) = effect else {
+        let Effect::Command(OperatorCommand::Frame(frame)) = effect else {
             panic!("expected diagnostic frame command, got {effect:?}");
         };
         assert_eq!(frame.pattern_name(), "gray");
@@ -954,7 +954,7 @@ mod tests {
             app.handle_key(TuiKey::Char(c));
         }
         let effect = app.handle_key(TuiKey::Enter).unwrap();
-        let Effect::Command(StdinCommand::Jpeg(path)) = effect else {
+        let Effect::Command(OperatorCommand::Jpeg(path)) = effect else {
             panic!("expected JPEG command, got {effect:?}");
         };
         assert_eq!(path, PathBuf::from("image with spaces.jpg"));
@@ -969,7 +969,7 @@ mod tests {
             app.handle_key(TuiKey::Char(c));
         }
         let effect = app.handle_key(TuiKey::Enter).unwrap();
-        let Effect::Command(StdinCommand::LiveNowPlaying(LiveCommand::Fake(FakeChange::Seek(
+        let Effect::Command(OperatorCommand::LiveNowPlaying(LiveCommand::Fake(FakeChange::Seek(
             seconds,
         )))) = effect
         else {
@@ -996,7 +996,10 @@ mod tests {
         let mut app = app_with_context(test_context());
         select_button(&mut app, 4, 4); // Snapshot
         let effect = app.handle_key(TuiKey::Enter).unwrap();
-        assert!(matches!(effect, Effect::Command(StdinCommand::NowPlaying)));
+        assert!(matches!(
+            effect,
+            Effect::Command(OperatorCommand::NowPlaying)
+        ));
     }
 
     #[test]
@@ -1010,7 +1013,7 @@ mod tests {
     fn log_focus_page_up_pauses_and_end_resumes() {
         let buffer = LogBuffer::new();
         for index in 0..100 {
-            buffer.push_str(Stream::Stdout, &format!("record {index}"));
+            buffer.push_str(Level::Info, &format!("record {index}"));
         }
         let mut app = app_with_context(test_context());
         app.set_visible_rows(10);
@@ -1045,7 +1048,7 @@ mod tests {
     fn log_follow_and_unseen_count_are_reported() {
         let buffer = LogBuffer::new();
         for index in 0..50 {
-            buffer.push_str(Stream::Stdout, &format!("record {index}"));
+            buffer.push_str(Level::Info, &format!("record {index}"));
         }
         let mut app = app_with_context(test_context());
         app.set_visible_rows(10);
@@ -1057,7 +1060,7 @@ mod tests {
         app.handle_key(TuiKey::Home);
         assert!(!app.follow());
         for index in 50..60 {
-            buffer.push_str(Stream::Stdout, &format!("record {index}"));
+            buffer.push_str(Level::Info, &format!("record {index}"));
         }
         let window = app.log_window(&buffer);
         app.observe_log(&window);
@@ -1068,7 +1071,7 @@ mod tests {
     fn eviction_clamps_anchor_forward() {
         let buffer = LogBuffer::new();
         for index in 0..5005 {
-            buffer.push_str(Stream::Stdout, &format!("record {index}"));
+            buffer.push_str(Level::Info, &format!("record {index}"));
         }
         let mut app = app_with_context(test_context());
         app.set_visible_rows(10);
@@ -1082,7 +1085,7 @@ mod tests {
     #[test]
     fn view_builds_groups_and_selection_markers() {
         let buffer = LogBuffer::new();
-        buffer.push_str(Stream::Stdout, "log record");
+        buffer.push_str(Level::Info, "log record");
         let mut app = app_with_context(test_context());
         app.set_visible_rows(10);
         focus_group(&mut app, 0);

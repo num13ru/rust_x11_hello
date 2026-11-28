@@ -12,61 +12,37 @@ const MAX_RECORDS: usize = 5_000;
 const MAX_MESSAGE_BYTES: usize = 4_096;
 const TRUNCATED: char = '…';
 
-static CAPTURE: OnceLock<LogBuffer> = OnceLock::new();
+static OPERATOR_LOG: OnceLock<LogBuffer> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Stream {
-    Stdout,
-    Stderr,
+pub enum Level {
+    Info,
+    Error,
 }
 
 #[macro_export]
 macro_rules! operator_info {
     ($($arg:tt)*) => {
-        $crate::operator_log::write($crate::operator_log::Stream::Stdout, format_args!($($arg)*))
+        $crate::operator_log::write($crate::operator_log::Level::Info, format_args!($($arg)*))
     };
 }
 
 #[macro_export]
 macro_rules! operator_error {
     ($($arg:tt)*) => {
-        $crate::operator_log::write($crate::operator_log::Stream::Stderr, format_args!($($arg)*))
+        $crate::operator_log::write($crate::operator_log::Level::Error, format_args!($($arg)*))
     };
 }
 
 pub use crate::{operator_error as error, operator_info as info};
 
-/// Capture subsequent operator output for the terminal UI. Call before starting workers.
-pub fn start_capture() -> &'static LogBuffer {
-    CAPTURE.get_or_init(LogBuffer::new)
+/// The log history shared by the terminal UI and its workers.
+pub fn history() -> &'static LogBuffer {
+    OPERATOR_LOG.get_or_init(LogBuffer::new)
 }
 
-pub fn is_capturing() -> bool {
-    CAPTURE.get().is_some()
-}
-
-pub fn write(stream: Stream, message: fmt::Arguments<'_>) {
-    if let Some(log) = CAPTURE.get() {
-        log.push(stream, message);
-        return;
-    }
-    match stream {
-        Stream::Stdout => println!("{message}"),
-        Stream::Stderr => eprintln!("{message}"),
-    }
-}
-
-pub fn flush() -> io::Result<()> {
-    if is_capturing() {
-        return Ok(());
-    }
-    io::stdout().flush()
-}
-
-pub fn flush_stdout(context: &str) {
-    if let Err(cause) = flush() {
-        error!("stdout flush error {context}: {cause}");
-    }
+pub fn write(level: Level, message: fmt::Arguments<'_>) {
+    history().push(level, message);
 }
 
 /// Record a timestamped event to the persistent session log.
@@ -97,7 +73,7 @@ pub fn append_host_log_record(path: &str, record: &str) {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LogRecord {
-    pub stream: Stream,
+    pub level: Level,
     pub message: String,
 }
 
@@ -147,13 +123,13 @@ impl LogBuffer {
     }
 
     /// Pushes one record built from a string. Used by tests and simple callers.
-    pub fn push_str(&self, stream: Stream, message: &str) {
-        self.push(stream, format_args!("{message}"));
+    pub fn push_str(&self, level: Level, message: &str) {
+        self.push(level, format_args!("{message}"));
     }
 
-    fn push(&self, stream: Stream, message: fmt::Arguments<'_>) {
+    fn push(&self, level: Level, message: fmt::Arguments<'_>) {
         let record = LogRecord {
-            stream,
+            level,
             message: BoundedMessage::format(message),
         };
         let mut history = match self.history.try_lock() {
@@ -243,7 +219,7 @@ mod tests {
     fn window_follows_tail_or_stays_anchored_until_evicted() {
         let log = LogBuffer::new();
         for id in 0..MAX_RECORDS + 5 {
-            log.push(Stream::Stdout, format_args!("record {id}"));
+            log.push(Level::Info, format_args!("record {id}"));
         }
 
         let evicted = log.window(LogPosition::From(0), 2);
@@ -261,7 +237,7 @@ mod tests {
             format!("record {}", MAX_RECORDS + 4)
         );
 
-        log.push(Stream::Stderr, format_args!("new message"));
+        log.push(Level::Error, format_args!("new message"));
         let still_anchored = log.window(LogPosition::From(8), 2);
         assert_eq!(still_anchored.start_id, 8);
         assert_eq!(still_anchored.records, anchored.records);
@@ -280,7 +256,7 @@ mod tests {
             let (finished, done) = mpsc::channel();
             let log = &log;
             scope.spawn(move || {
-                log.push(Stream::Stderr, format_args!("while history is busy"));
+                log.push(Level::Error, format_args!("while history is busy"));
                 finished.send(()).unwrap();
             });
             let result = done.recv_timeout(Duration::from_secs(1));
@@ -295,24 +271,22 @@ mod tests {
     }
 
     #[test]
-    fn capture_routes_each_stream_with_bounded_terminal_safe_text() {
-        let log = start_capture();
+    fn logging_routes_each_level_with_bounded_terminal_safe_text() {
+        let log = history();
         info!("path café 🦀\n\r\t\x1b[2J\u{009b}");
         error!("");
         let fits = "a".repeat(MAX_MESSAGE_BYTES);
         info!("{fits}");
         let oversized = "🦀".repeat(MAX_MESSAGE_BYTES);
         info!("{oversized} should be outside the message");
-        flush().unwrap();
-
         let window = log.window(LogPosition::Follow, 4);
         assert_eq!(window.records.len(), 4);
-        assert_eq!(window.records[0].stream, Stream::Stdout);
+        assert_eq!(window.records[0].level, Level::Info);
         assert_eq!(
             window.records[0].message,
             "path café 🦀\\n\\r\\t\\u{1b}[2J\\u{9b}"
         );
-        assert_eq!(window.records[1].stream, Stream::Stderr);
+        assert_eq!(window.records[1].level, Level::Error);
         assert!(window.records[1].message.is_empty());
         assert_eq!(window.records[2].message, fits);
         let truncated = &window.records[3].message;

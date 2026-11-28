@@ -1,6 +1,4 @@
-//! TUI mode wiring: the shared status cell, the terminal lifecycle guard,
-//! the event loop, and `run_tui_mode`. Owns no workers; it connects the
-//! interactive terminal lifecycle to the accept loop and the command worker.
+//! Terminal lifecycle, event loop, and worker wiring for the operator console.
 
 use std::io;
 use std::net::TcpListener;
@@ -8,7 +6,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
-use paperspoon::operator::StdinCommand;
+use paperspoon::operator::OperatorCommand;
 use paperspoon::operator_log;
 use paperspoon::tui::app::{AppContext, Effect as TuiEffect, TuiApp, TuiKey};
 use paperspoon::tui::view;
@@ -36,7 +34,7 @@ use crate::server::{CurrentConnection, FrameTarget, SharedStatus};
 pub(crate) const COMMAND_QUEUE_CAPACITY: usize = 8;
 
 struct QueuedCommand {
-    command: StdinCommand,
+    command: OperatorCommand,
     target: Option<FrameTarget>,
 }
 
@@ -128,7 +126,7 @@ fn run_tui_event_loop(
     header: &str,
 ) -> io::Result<()> {
     let (mut terminal, _guard) = TuiTerminalGuard::enter()?;
-    let buffer: &'static operator_log::LogBuffer = operator_log::start_capture();
+    let buffer = operator_log::history();
 
     let mut last_render = Instant::now() - Duration::from_secs(1);
     let mut last_status_poll = Instant::now() - Duration::from_secs(1);
@@ -190,7 +188,7 @@ fn run_tui_event_loop(
                 let error = match effect {
                     TuiEffect::Quit => return Ok(()),
                     TuiEffect::Command(command)
-                        if !matches!(command, StdinCommand::LiveNowPlaying(_))
+                        if !matches!(command, OperatorCommand::LiveNowPlaying(_))
                             && visible_target.is_none() =>
                     {
                         Some("No negotiated PaperPad connection".into())
@@ -278,14 +276,11 @@ fn run_tui_event_loop(
     }
 }
 
-/// Enter TUI mode: capture logging, spawn workers, run the event loop, then
-/// shut down the live provider.
-pub(crate) fn run_tui_mode(opts: Options) -> io::Result<()> {
+/// Start the console and its workers, and shut them down when the console exits.
+pub(crate) fn run(opts: Options) -> io::Result<()> {
     let status = SharedStatus::default();
     #[cfg(unix)]
     let _signals = StopSignals::register(&status.stop_flag())?;
-    operator_log::start_capture();
-
     latency::init(&opts.latency_log_path);
 
     let listener = TcpListener::bind(("0.0.0.0", opts.port))?;
@@ -343,7 +338,7 @@ pub(crate) fn run_tui_mode(opts: Options) -> io::Result<()> {
                 if command_status.stopping() {
                     break;
                 }
-                let outcome = operator.dispatch(command, "tui", target.as_ref());
+                let outcome = operator.dispatch(command, target.as_ref());
                 if outcome_tx.send(outcome).is_err() {
                     break;
                 }
@@ -373,7 +368,7 @@ pub(crate) fn run_tui_mode(opts: Options) -> io::Result<()> {
                 frame_sender,
                 listener_live,
                 application_viewport_rx,
-                Some(status_for_thread),
+                status_for_thread,
             );
         })?;
 

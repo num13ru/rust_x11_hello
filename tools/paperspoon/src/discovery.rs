@@ -8,7 +8,7 @@ use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 
 use paper_protocol::{DISCOVERY_PORT, format_here, parse_discover};
 
-use crate::operator_log;
+use paperspoon::operator_log;
 
 /// Bind the well-known discovery address before PaperSpoon reports ready.
 pub fn bind_discovery_socket() -> std::io::Result<UdpSocket> {

@@ -1,25 +1,7 @@
-//! TCP PaperSpoon listener for host-rendered PaperPad sessions.
-//!
-//! Listens on `0.0.0.0:<port>` (default 5581). For each accepted connection:
-//!
-//! - protocol-v2 pointer records from the Kindle are logged and resolved by
-//!   the host-owned application UI;
-//! - `frame <pattern> <width>x<height>` generates and sends a binary v2
-//!   diagnostic framebuffer;
-//! - resolved host action IDs are optionally forwarded to Hammerspoon with
-//!   `open -g hammerspoon://paperpad?action=<id>`.
-//!
-//! Only the most recently accepted connection receives operator input.
+//! PaperSpoon's fullscreen operator console and internal Now Playing helper.
 
 use std::env;
-use std::io::{self, BufRead, IsTerminal};
-use std::net::TcpListener;
-use std::sync::{Arc, mpsc};
-
-use paper_protocol::DISCOVERY_PORT;
-
-use paperspoon::operator::parse_stdin_command;
-use paperspoon::operator_log;
+use std::io::{self, IsTerminal};
 
 mod discovery;
 mod dispatch;
@@ -33,13 +15,7 @@ mod options;
 mod server;
 mod terminal;
 
-use dispatch::Operator;
-use frame_sender::FrameSender;
-use listener::run_listener;
-use live_now_playing::LiveNowPlaying;
-use options::{TuiMode, parse_options, resolve_tui_mode};
-use server::CurrentConnection;
-use terminal::run_tui_mode;
+use options::parse_options;
 
 fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().collect();
@@ -69,142 +45,40 @@ fn main() -> io::Result<()> {
 
     let opts =
         parse_options(&args).map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
-    let resolved_tui_mode = resolve_tui_mode(
-        opts.tui_mode,
-        io::stdin().is_terminal(),
-        io::stdout().is_terminal(),
-    )
-    .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
-
-    if resolved_tui_mode != TuiMode::Disabled {
-        return run_tui_mode(opts);
+    if !(io::stdin().is_terminal() && io::stdout().is_terminal()) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "PaperSpoon requires a terminal on both stdin and stdout",
+        ));
     }
-
-    // Legacy console path.
-    latency::init(&opts.latency_log_path);
-
-    let listener = TcpListener::bind(("0.0.0.0", opts.port))?;
-    let tcp_port = listener.local_addr()?.port();
-    let discovery_socket = discovery::bind_discovery_socket()?;
-    let _discovery_worker = std::thread::Builder::new()
-        .name("paperspoon-discovery".to_string())
-        .spawn(move || {
-            if let Err(error) =
-                discovery::run_discovery_listener(discovery_socket, tcp_port, || false)
-            {
-                operator_log::error!("discovery listener error: {error}");
-            }
-        })?;
-
-    operator_log::info!(
-        "listening on 0.0.0.0:{}, logging to {}",
-        tcp_port,
-        opts.log_path
-    );
-    operator_log::info!("discovery listening address=0.0.0.0:{DISCOVERY_PORT}");
-
-    operator_log::info!(
-        "type 'frame <white|black|horizontal|checkerboard|border|corners|gray-gradient|gray-bars> <width>x<height>', 'frame gray <0..255> <width>x<height>', 'frame jpeg <path>', or 'frame nowplaying' to send a framebuffer"
-    );
-    operator_log::info!("type 'ui <width>x<height>' to send the host-rendered application UI");
-    if opts.forward_url {
-        operator_log::info!(
-            "forwarding actions to Hammerspoon via open -g hammerspoon://paperpad/..."
-        );
-    } else {
-        operator_log::info!("action forwarding to Hammerspoon disabled");
-    }
-    operator_log::flush()?;
-
-    let current = CurrentConnection::default();
-    let frame_sender = FrameSender::new(current.clone());
-    let live = Arc::new(LiveNowPlaying::new(
-        frame_sender.clone(),
-        opts.live_provider,
-        opts.progress_interval,
-        opts.log_path.clone(),
-    ));
-    #[cfg(target_os = "macos")]
-    if opts.live_provider.is_some() {
-        let mut signals = signal_hook::iterator::Signals::new([
-            signal_hook::consts::SIGINT,
-            signal_hook::consts::SIGTERM,
-        ])?;
-        let live = Arc::clone(&live);
-        std::thread::Builder::new()
-            .name("paperspoon-shutdown".to_string())
-            .spawn(move || {
-                if let Some(signal) = signals.forever().next() {
-                    live.shutdown();
-                    std::process::exit(128 + signal);
-                }
-            })?;
-    }
-    operator_log::info!("type 'nowplaying <start|stop|status|refresh>' for live Now Playing");
-    let (application_viewport_tx, application_viewport_rx) = mpsc::channel();
-
-    let operator = Operator {
-        frame_sender: frame_sender.clone(),
-        live: Arc::clone(&live),
-        application_ui: paperspoon::application_ui::ApplicationUi::default(),
-        application_viewport_tx,
-        log_path: opts.log_path.clone(),
-    };
-    let _stdin_worker = std::thread::Builder::new()
-        .name("paperspoon-stdin".to_string())
-        .spawn(move || {
-            let stdin = io::stdin();
-            for line in stdin.lock().lines() {
-                let line = match line {
-                    Ok(line) => line,
-                    Err(error) => {
-                        operator_log::error!("stdin read error: {error}");
-                        break;
-                    }
-                };
-                let line = line.trim();
-                if !line.is_empty() {
-                    match parse_stdin_command(line) {
-                        Ok(command) => {
-                            let _ = operator.dispatch(command, "stdin", None);
-                        }
-                        Err(error) => operator_log::error!("stdin command error: {error}"),
-                    }
-                }
-            }
-            operator.live.stop();
-        })?;
-
-    run_listener(
-        listener,
-        &opts,
-        current,
-        frame_sender,
-        live,
-        application_viewport_rx,
-        None,
-    );
-    Ok(())
+    terminal::run(opts)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "macos")]
+    use crate::dispatch::Operator;
     use crate::frame_sender::{
-        ApplicationSend, AuthoritativeFrame, SentFrame, matching_application_viewport,
+        ApplicationSend, AuthoritativeFrame, FrameSender, SentFrame, matching_application_viewport,
         replace_application_frame, replace_hello_frame,
     };
-    use crate::live_now_playing::ProviderKind;
+    #[cfg(target_os = "macos")]
+    use crate::live_now_playing::{LiveNowPlaying, ProviderKind};
     use crate::options::DEFAULT_LATENCY_LOG_FILE;
+    use crate::server::CurrentConnection;
     use paper_protocol::{Frame, V2DecodeResult, V2Payload, decode_v2_message, decode_v2_payload};
     use paper_protocol::{
         Gray8Frame, PixelFormat, V2PixelFormats, V2PointerPhase, encode_v2_frame, v3,
     };
     use paperspoon::application_input::ApplicationInput;
     use paperspoon::application_ui::ApplicationUi;
-    use paperspoon::operator::{DiagnosticFrame, StdinCommand};
+    use paperspoon::operator::{DiagnosticFrame, DiagnosticPattern};
+    #[cfg(target_os = "macos")]
+    use paperspoon::operator::{LiveCommand, OperatorCommand};
     use std::io::Read;
-    use std::net::{Shutdown, TcpStream};
+    use std::net::{Shutdown, TcpListener, TcpStream};
+    use std::sync::{Arc, mpsc};
     use std::time::Duration;
 
     fn install_connection(
@@ -241,8 +115,9 @@ mod tests {
         let log_path_string = log_path.to_str().unwrap().to_owned();
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let current = CurrentConnection::default();
-        let (_token, _peer) =
+        let (token, _peer) =
             install_hello_connection(&listener, &current, V2PixelFormats::MONO1, (128, 128));
+        let target = token.at_viewport((128, 128));
         let frame_sender = FrameSender::new(current);
         let live = Arc::new(LiveNowPlaying::new(
             frame_sender.clone(),
@@ -258,38 +133,38 @@ mod tests {
             application_viewport_tx,
             log_path: log_path_string,
         };
-        let dispatch = |line| {
-            let _ = operator.dispatch(parse_stdin_command(line).unwrap(), "stdin", None);
-        };
+        let dispatch = |command| operator.dispatch(command, Some(&target));
 
-        dispatch("nowplaying start");
+        dispatch(OperatorCommand::LiveNowPlaying(LiveCommand::Start)).unwrap();
         assert!(operator.live.status().starts_with("Now Playing active"));
         assert_eq!(viewport_rx.try_recv(), Err(mpsc::TryRecvError::Empty));
 
-        dispatch("nowplaying stop");
+        dispatch(OperatorCommand::LiveNowPlaying(LiveCommand::Stop)).unwrap();
         assert_eq!(operator.live.status(), "Now Playing stopped");
         assert_eq!(viewport_rx.try_recv(), Ok(Some((128, 128))));
 
-        dispatch("ui 128x128");
-        dispatch("frame gray 17 128x128");
+        dispatch(OperatorCommand::application_frame(128, 128).unwrap()).unwrap();
+        let gray = diagnostic(DiagnosticPattern::Gray(17), 128, 128);
+        assert!(dispatch(OperatorCommand::Frame(gray)).is_err());
         assert_eq!(viewport_rx.try_recv(), Err(mpsc::TryRecvError::Empty));
 
-        dispatch("nowplaying start");
-        dispatch("frame white 129x128");
+        dispatch(OperatorCommand::LiveNowPlaying(LiveCommand::Start)).unwrap();
+        let white = diagnostic(DiagnosticPattern::White, 129, 128);
+        dispatch(OperatorCommand::Frame(white)).unwrap();
         assert_eq!(operator.live.status(), "Now Playing stopped");
         assert_eq!(viewport_rx.try_recv(), Ok(None));
         assert_eq!(viewport_rx.try_recv(), Err(mpsc::TryRecvError::Empty));
 
         let log = std::fs::read_to_string(log_path).unwrap();
         assert!(
-            log.contains("application frame skipped unchanged width=128 height=128 source=stdin")
+            log.contains("application frame skipped unchanged width=128 height=128 source=tui")
         );
         let mut sent = log
             .lines()
             .filter(|line| line.contains("sent diagnostic frame"));
         let record = sent.next().expect("diagnostic log record");
         assert!(record.contains("id=2 pattern=white width=129 height=128"));
-        assert!(record.ends_with("source=stdin"));
+        assert!(record.ends_with("source=tui"));
         assert!(sent.next().is_none());
     }
 
@@ -313,7 +188,7 @@ mod tests {
             install_hello_connection(&listener, &current, V2PixelFormats::MONO1, viewport);
         peer.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
         let sender = FrameSender::new(current);
-        let frame = diagnostic("frame white 128x128");
+        let frame = diagnostic(DiagnosticPattern::White, 128, 128);
 
         assert!(
             sender
@@ -345,7 +220,7 @@ mod tests {
             .unwrap();
         let sender = FrameSender::new(current.clone());
         let target = current.frame_target(PixelFormat::Gray8).unwrap();
-        let wrong_size = diagnostic("frame gray 42 4x2");
+        let wrong_size = diagnostic(DiagnosticPattern::Gray(42), 4, 2);
         assert_eq!(
             sender.send_diagnostic(wrong_size).unwrap_err(),
             "PaperPad viewport changed while preparing frame"
@@ -540,12 +415,8 @@ mod tests {
         )
     }
 
-    fn diagnostic(command: &str) -> DiagnosticFrame {
-        let StdinCommand::Frame(frame) = parse_stdin_command(command).expect("diagnostic command")
-        else {
-            panic!("diagnostic frame expected");
-        };
-        frame
+    fn diagnostic(pattern: DiagnosticPattern, width: u16, height: u16) -> DiagnosticFrame {
+        DiagnosticFrame::new(pattern, width, height).expect("diagnostic frame")
     }
 
     fn jpeg_fixture_path() -> std::path::PathBuf {
@@ -575,7 +446,7 @@ mod tests {
         let current = CurrentConnection::default();
         current.install(&client).expect("install Mono1 connection");
         let frame_sender = FrameSender::new(current.clone());
-        let gray8 = diagnostic("frame gray 128 4x2");
+        let gray8 = diagnostic(DiagnosticPattern::Gray(128), 4, 2);
 
         let error = frame_sender
             .send_diagnostic(gray8)
@@ -682,7 +553,7 @@ mod tests {
         let formats = V2PixelFormats::MONO1.with(PixelFormat::Gray8);
         let (_token, mut peer) = install_hello_connection(&listener, &current, formats, (12, 16));
         let sent = frame_sender
-            .send_diagnostic(diagnostic("frame gray 96 12x16"))
+            .send_diagnostic(diagnostic(DiagnosticPattern::Gray(96), 12, 16))
             .expect("send baseline")
             .expect("active connection");
         read_sent_frame(&mut peer, sent);
@@ -727,7 +598,7 @@ mod tests {
         let formats = V2PixelFormats::MONO1.with(PixelFormat::Gray8);
         let (_token, mut peer) = install_hello_connection(&listener, &current, formats, (12, 16));
         let baseline = frame_sender
-            .send_diagnostic(diagnostic("frame gray 96 12x16"))
+            .send_diagnostic(diagnostic(DiagnosticPattern::Gray(96), 12, 16))
             .expect("send baseline")
             .expect("active connection");
         read_sent_frame(&mut peer, baseline);
@@ -853,7 +724,7 @@ mod tests {
         let frame_sender = FrameSender::new(current.clone());
         let mut ui = ApplicationUi::default();
         let (token, mut first_peer) = install_connection(&listener, &current);
-        let border = diagnostic("frame border 9x9");
+        let border = diagnostic(DiagnosticPattern::Border, 9, 9);
 
         let first_sent = frame_sender
             .send_diagnostic(border)
@@ -867,7 +738,7 @@ mod tests {
         assert!(current.clear_if_current(&token));
         assert_eq!(
             frame_sender
-                .send_diagnostic(diagnostic("frame checkerboard 9x9"))
+                .send_diagnostic(diagnostic(DiagnosticPattern::Checkerboard, 9, 9))
                 .expect("no-connection send"),
             None
         );
@@ -886,7 +757,7 @@ mod tests {
             .expect("shut down broken connection");
         drop(broken_peer);
         frame_sender
-            .send_diagnostic(diagnostic("frame checkerboard 9x9"))
+            .send_diagnostic(diagnostic(DiagnosticPattern::Checkerboard, 9, 9))
             .expect_err("failed write must not replace retained frame");
 
         let (_token, mut second_peer) = install_connection(&listener, &current);
@@ -963,7 +834,7 @@ mod tests {
         let (token, mut first_peer) = install_connection(&listener, &current);
 
         let first_sent = frame_sender
-            .send_diagnostic(diagnostic("frame border 9x9"))
+            .send_diagnostic(diagnostic(DiagnosticPattern::Border, 9, 9))
             .expect("send diagnostic")
             .expect("active connection");
         let _ = read_sent_frame(&mut first_peer, first_sent);
@@ -1241,7 +1112,7 @@ mod tests {
         assert_eq!(read_sent_frame(&mut peer, restored).1, (128, 128));
 
         let diagnostic = frame_sender
-            .send_diagnostic(diagnostic("frame white 128x128"))
+            .send_diagnostic(diagnostic(DiagnosticPattern::White, 128, 128))
             .expect("diagnostic frame")
             .expect("active connection");
         read_sent_frame(&mut peer, diagnostic);
@@ -1447,56 +1318,13 @@ mod tests {
     }
 
     #[test]
-    fn parse_options_accepts_tui_flags() {
-        let opts = parse_options(&["paperspoon".to_string(), "--tui".to_string()]).unwrap();
-        assert_eq!(opts.tui_mode, TuiMode::Force);
-
-        let opts = parse_options(&["paperspoon".to_string(), "--no-tui".to_string()]).unwrap();
-        assert_eq!(opts.tui_mode, TuiMode::Disabled);
-
-        let opts = parse_options(&["paperspoon".to_string()]).unwrap();
-        assert_eq!(opts.tui_mode, TuiMode::Auto);
-    }
-
-    #[test]
-    fn parse_options_rejects_contradictory_tui_flags() {
-        let error = parse_options(&[
-            "paperspoon".to_string(),
-            "--tui".to_string(),
-            "--no-tui".to_string(),
-        ])
-        .unwrap_err();
-        assert!(error.contains("mutually exclusive"));
-
-        let error = parse_options(&[
-            "paperspoon".to_string(),
-            "--no-tui".to_string(),
-            "--tui".to_string(),
-        ])
-        .unwrap_err();
-        assert!(error.contains("mutually exclusive"));
-    }
-
-    #[test]
-    fn resolve_tui_mode_requires_ttys_for_force() {
-        assert!(resolve_tui_mode(TuiMode::Force, false, true).is_err());
-        assert!(resolve_tui_mode(TuiMode::Force, true, false).is_err());
-        assert_eq!(
-            resolve_tui_mode(TuiMode::Force, true, true).unwrap(),
-            TuiMode::Force
-        );
-        assert_eq!(
-            resolve_tui_mode(TuiMode::Auto, true, true).unwrap(),
-            TuiMode::Auto
-        );
-        assert_eq!(
-            resolve_tui_mode(TuiMode::Auto, false, true).unwrap(),
-            TuiMode::Disabled
-        );
-        assert_eq!(
-            resolve_tui_mode(TuiMode::Disabled, true, true).unwrap(),
-            TuiMode::Disabled
-        );
+    fn removed_mode_flags_are_rejected_instead_of_becoming_log_paths() {
+        for flag in ["--tui", "--no-tui"] {
+            assert_eq!(
+                parse_options(&["paperspoon".to_string(), flag.to_string()]).unwrap_err(),
+                format!("unknown option {flag}")
+            );
+        }
     }
 
     #[test]

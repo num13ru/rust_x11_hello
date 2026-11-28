@@ -1,4 +1,4 @@
-//! Command-line options parsing and TTY resolution for PaperSpoon.
+//! Command-line options for PaperSpoon.
 
 use std::time::Duration;
 
@@ -14,44 +14,6 @@ pub(crate) const DEFAULT_LATENCY_LOG_FILE: &str = "paperspoon.latency.jsonl";
 /// Whether to forward actions to Hammerspoon via `open -g hammerspoon://`.
 pub(crate) const FORWARD_TO_HAMMERSPOON: bool = true;
 
-/// Requested console mode from CLI flags.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) enum TuiMode {
-    /// TUI when both stdin and stdout are terminals, otherwise legacy.
-    #[default]
-    Auto,
-    /// Force the TUI; error when stdin/stdout are not terminals.
-    Force,
-    /// Always use the legacy line-oriented console.
-    Disabled,
-}
-
-/// Resolve the requested TUI mode against terminal availability.
-///
-/// `Auto` yields the TUI only when both stdin and stdout are terminals;
-/// `Force` errors in that case. `Disabled` always yields the legacy console.
-pub(crate) fn resolve_tui_mode(
-    requested: TuiMode,
-    stdin_tty: bool,
-    stdout_tty: bool,
-) -> Result<TuiMode, String> {
-    match requested {
-        TuiMode::Disabled => Ok(TuiMode::Disabled),
-        TuiMode::Force => {
-            if stdin_tty && stdout_tty {
-                Ok(TuiMode::Force)
-            } else {
-                Err("--tui requires stdin and stdout to be terminals".into())
-            }
-        }
-        TuiMode::Auto => Ok(if stdin_tty && stdout_tty {
-            TuiMode::Auto
-        } else {
-            TuiMode::Disabled
-        }),
-    }
-}
-
 /// Parsed command line.
 #[derive(Debug)]
 pub(crate) struct Options {
@@ -63,7 +25,6 @@ pub(crate) struct Options {
     pub(crate) live_provider: Option<ProviderKind>,
     pub(crate) progress_interval: Duration,
     pub(crate) compression: HostCompression,
-    pub(crate) tui_mode: TuiMode,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -102,22 +63,9 @@ pub(crate) fn parse_options(args: &[String]) -> Result<Options, String> {
     let mut live_provider = None;
     let mut progress_interval = Duration::from_secs(1);
     let mut compression = HostCompression::default();
-    let mut tui_mode = TuiMode::Auto;
     let positional = args.iter().skip(1);
     for arg in positional {
         match arg.as_str() {
-            "--tui" => {
-                if tui_mode == TuiMode::Disabled {
-                    return Err("--tui and --no-tui are mutually exclusive".into());
-                }
-                tui_mode = TuiMode::Force;
-            }
-            "--no-tui" => {
-                if tui_mode == TuiMode::Force {
-                    return Err("--tui and --no-tui are mutually exclusive".into());
-                }
-                tui_mode = TuiMode::Disabled;
-            }
             "--compression=raw" => compression = HostCompression::Raw,
             "--compression=auto" => compression = HostCompression::Auto,
             "--compression=zstd" => compression = HostCompression::Zstd,
@@ -153,6 +101,7 @@ pub(crate) fn parse_options(args: &[String]) -> Result<Options, String> {
                     latency_log_path = path.to_string();
                 }
             }
+            value if value.starts_with("--") => return Err(format!("unknown option {value}")),
             _ => {
                 // Positional: try port first, then log file.
                 if port == DEFAULT_PORT
@@ -176,6 +125,5 @@ pub(crate) fn parse_options(args: &[String]) -> Result<Options, String> {
         live_provider,
         progress_interval,
         compression,
-        tui_mode,
     })
 }
