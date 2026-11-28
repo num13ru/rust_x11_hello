@@ -143,8 +143,8 @@ MXCFB log showed three GC16 artwork submissions and 40 DU submissions for
 Gray8 UI updates. Local Exit released the evdev grab, restored the original
 framebuffer snapshot, and produced a stopped status with exit code 0. The
 log verifies requested waveforms and the cleanup path. The paired session
-below adds seeking and a short memory check. Physical panel completion,
-reconnection, and battery measurements remain open.
+below adds seeking and a short memory check. Physical panel completion and
+battery measurements remain open.
 
 
 ### Expanded corpus on Paperwhite 6
@@ -322,6 +322,24 @@ correlated by event order. This timing covers software presentation return.
 A Raw seek comparison and camera-observed panel completion remain open.
 
 Both runs logged DU and GC16 submissions and stopped with status 0 after
-releasing evdev and restoring the 2,157,312-byte framebuffer snapshot. Physical
-Wi-Fi reconnection remains unverified. PPFB v2 stays the default, with level 1
-as the initial Zstandard option, while dense Gray8 exceeds its decode target.
+releasing evdev and restoring the 2,157,312-byte framebuffer snapshot. PPFB v2
+stays the default, with level 1 as the initial Zstandard option, while dense
+Gray8 exceeds its decode target.
+
+### Kindle reconnect after a PaperSpoon restart
+
+On 2026-11-28, the Paperwhite 6 ran **Run Paperpad DU with PPFB v3 (5m)** over
+Wi-Fi using the same verified PaperPad build as the matched sessions. PaperSpoon
+required PPFB v3 with Zstandard. It sent a checkerboard, stopped for five
+seconds, and restarted on the same port while PaperPad stayed open. The Kindle
+logged the connection indicator change from connected to disconnected and back.
+PaperSpoon logged a fresh v3 Hello offering Raw and Zstandard on each TCP
+connection.
+
+The Kindle recorded matching Zstandard frame sizes and software presentation
+returns for the 1,737-byte checkerboard before restart and the 27,044-byte
+Gray8 bars after reconnect. The operator confirmed the bars were visible.
+Local Exit returned status 0, released evdev, and restored the framebuffer
+snapshot. The replacement PaperSpoon process started in its default application
+state. Physical replay of the retained application frame after a socket drop
+with the host process still running remains open.
