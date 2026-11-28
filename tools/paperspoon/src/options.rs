@@ -22,7 +22,7 @@ pub(crate) struct Options {
     pub(crate) latency_log_path: String,
     /// None means URL forwarding is disabled.
     pub(crate) forward_url: bool,
-    pub(crate) live_provider: Option<ProviderKind>,
+    pub(crate) live_provider: ProviderKind,
     pub(crate) progress_interval: Duration,
     pub(crate) compression: HostCompression,
 }
@@ -60,7 +60,7 @@ pub(crate) fn parse_options(args: &[String]) -> Result<Options, String> {
     let mut log_path = DEFAULT_LOG_FILE.to_string();
     let mut latency_log_path = DEFAULT_LATENCY_LOG_FILE.to_string();
     let mut forward_url = FORWARD_TO_HAMMERSPOON;
-    let mut live_provider = None;
+    let mut live_provider = ProviderKind::default();
     let mut progress_interval = Duration::from_secs(1);
     let mut compression = HostCompression::default();
     let positional = args.iter().skip(1);
@@ -75,17 +75,7 @@ pub(crate) fn parse_options(args: &[String]) -> Result<Options, String> {
             "--no-forward-url" => {
                 forward_url = false;
             }
-            "--now-playing-fake" | "--now-playing-apple-music" => {
-                let provider = if arg == "--now-playing-fake" {
-                    ProviderKind::Fake
-                } else {
-                    ProviderKind::AppleMusic
-                };
-                if live_provider.is_some_and(|selected| selected != provider) {
-                    return Err("choose one Now Playing provider".into());
-                }
-                live_provider = Some(provider);
-            }
+            "--now-playing-fake" => live_provider = ProviderKind::Fake,
             value if value.starts_with("--now-playing-progress-ms=") => {
                 let interval = value["--now-playing-progress-ms=".len()..]
                     .parse::<u64>()

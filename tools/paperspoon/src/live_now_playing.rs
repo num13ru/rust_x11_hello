@@ -24,9 +24,10 @@ const PAUSED_POLL: Duration = Duration::from_secs(2);
 const MAX_INACTIVE_POLL: Duration = Duration::from_secs(5);
 const COMMAND_OBSERVATION_WINDOW: Duration = Duration::from_secs(5);
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) enum ProviderKind {
     Fake,
+    #[default]
     AppleMusic,
 }
 
@@ -37,13 +38,15 @@ impl ProviderKind {
             #[cfg(target_os = "macos")]
             Self::AppleMusic => Ok(Box::new(paperspoon::now_playing_provider::AppleMusic)),
             #[cfg(not(target_os = "macos"))]
-            Self::AppleMusic => Err("the Apple Music provider requires macOS".into()),
+            Self::AppleMusic => {
+                Err("Apple Music requires macOS. Use --now-playing-fake for testing.".into())
+            }
         }
     }
 }
 
 pub(crate) struct LiveNowPlaying {
-    provider: Option<ProviderKind>,
+    provider: ProviderKind,
     progress_interval: Duration,
     frames: FrameSender,
     log_path: String,
@@ -338,7 +341,7 @@ impl Shared {
 impl LiveNowPlaying {
     pub(crate) fn new(
         frames: FrameSender,
-        provider: Option<ProviderKind>,
+        provider: ProviderKind,
         progress_interval: Duration,
         log_path: String,
     ) -> Self {
@@ -362,11 +365,8 @@ impl LiveNowPlaying {
         if slot.is_some() {
             return Ok(());
         }
-        let kind = self
-            .provider
-            .ok_or("select --now-playing-fake or --now-playing-apple-music at startup")?;
-        let media = kind.create()?;
-        let artwork = kind.create()?;
+        let media = self.provider.create()?;
+        let artwork = self.provider.create()?;
         let shared = Arc::new(Shared {
             cancel: AtomicBool::new(false),
             state: Mutex::new(State::new(self.target())),
@@ -513,7 +513,7 @@ impl LiveNowPlaying {
     }
 
     pub(crate) fn fake(&self, change: FakeChange) -> Result<(), String> {
-        if self.provider != Some(ProviderKind::Fake) {
+        if self.provider != ProviderKind::Fake {
             return Err("fake playback changes require --now-playing-fake".into());
         }
         self.enqueue(MediaWork::Fake(change))

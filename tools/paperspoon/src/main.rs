@@ -64,7 +64,8 @@ mod tests {
         replace_application_frame, replace_hello_frame,
     };
     #[cfg(target_os = "macos")]
-    use crate::live_now_playing::{LiveNowPlaying, ProviderKind};
+    use crate::live_now_playing::LiveNowPlaying;
+    use crate::live_now_playing::ProviderKind;
     use crate::options::DEFAULT_LATENCY_LOG_FILE;
     use crate::server::CurrentConnection;
     use paper_protocol::{Frame, V2DecodeResult, V2Payload, decode_v2_message, decode_v2_payload};
@@ -121,7 +122,7 @@ mod tests {
         let frame_sender = FrameSender::new(current);
         let live = Arc::new(LiveNowPlaying::new(
             frame_sender.clone(),
-            Some(ProviderKind::Fake),
+            ProviderKind::Fake,
             Duration::from_secs(1),
             log_path_string.clone(),
         ));
@@ -1325,6 +1326,33 @@ mod tests {
                 format!("unknown option {flag}")
             );
         }
+    }
+
+    #[test]
+    fn parse_options_selects_apple_music_unless_fake_is_requested() {
+        let default = parse_options(&["paperspoon".to_string()]).unwrap();
+        assert_eq!(default.live_provider, ProviderKind::AppleMusic);
+
+        let fake = parse_options(&[
+            "paperspoon".to_string(),
+            "5582".to_string(),
+            "--now-playing-fake".to_string(),
+            "/tmp/host.log".to_string(),
+            "--now-playing-progress-ms=250".to_string(),
+        ])
+        .unwrap();
+        assert_eq!(fake.live_provider, ProviderKind::Fake);
+        assert_eq!(fake.port, 5582);
+        assert_eq!(fake.log_path, "/tmp/host.log");
+        assert_eq!(fake.progress_interval, Duration::from_millis(250));
+        assert_eq!(
+            parse_options(&[
+                "paperspoon".to_string(),
+                "--now-playing-apple-music".to_string(),
+            ])
+            .unwrap_err(),
+            "unknown option --now-playing-apple-music"
+        );
     }
 
     #[test]

@@ -50,6 +50,10 @@ terminal settings.
 The on-screen log retains up to 5,000 messages. The persistent session log
 and latency JSONL remain available for analysis.
 
+Apple Music is the default **Now Playing** provider and requires macOS.
+Select **Now Playing → Start** to begin live updates. Launch with
+`--now-playing-fake` to use the simulated provider and enable its test controls.
+
 ### Install or update the Kindle extension
 
 Stop PaperPad with its on-screen **Exit** button before connecting the Kindle

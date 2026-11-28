@@ -7,12 +7,12 @@ mode can send viewport-relative PPFB pointer input for application testing.
 
 ## Conditions
 
-- Run PaperSpoon on macOS when using `frame nowplaying`; its media adapter is
-  macOS-specific and needs an active system Now Playing source.
+- Run PaperSpoon on macOS when using **Now Playing → Snapshot**. The media
+  adapter needs an active system Now Playing source.
 - Run both commands from the repository root after
   `cargo check -p paperview -p paperspoon` succeeds.
-- Use the same viewport in PaperView, `ui`, and every diagnostic command that
-  takes dimensions. The examples use the Paperwhite 6 viewport, `1272x1624`.
+- Keep the PaperSpoon viewport set to **Auto** to use PaperView's negotiated
+  dimensions. The examples use the Paperwhite 6 viewport, `1272x1624`.
 - PaperSpoon serves one current PPFB client. Starting PaperView may replace a
   connected PaperPad session.
 - Use `--no-forward-url` so application-UI experiments cannot open Hammerspoon
@@ -33,8 +33,8 @@ cargo run -p paperspoon -- \
   --no-forward-url
 ```
 
-Leave this terminal open. PaperSpoon accepts diagnostic commands on its stdin
-and sends them to the most recently connected client.
+Leave the fullscreen console open. Its diagnostic buttons send frames to the
+connected client.
 
 ## Terminal 2: start PaperView
 
@@ -78,17 +78,15 @@ mode:
 
 ## Exercise the same window
 
-Enter these commands one at a time in Terminal 1:
+Select these actions one at a time in the PaperSpoon console:
 
-```text
-ui 1272x1624
-frame gray-gradient 1272x1624
-frame gray-bars 1272x1624
-frame nowplaying
-```
+- **Application → Show UI**
+- **Gray8 → Gradient**
+- **Gray8 → Bars**
+- **Now Playing → Snapshot**
 
-The existing PaperView window should update after each valid frame; do not
-restart it between commands. `ui` exercises PaperSpoon's application renderer
+The existing PaperView window should update after each valid frame.
+**Show UI** exercises PaperSpoon's application renderer
 and may produce Mono1. The gradient, bars, and successful Now Playing frame use
 Gray8. Frame IDs in the title should advance.
 
@@ -128,8 +126,8 @@ metadata or artwork.
 ## Live Now Playing
 
 Add `--now-playing-fake` to the PaperSpoon command in Terminal 1 and
-`--interactive` to the PaperView command in Terminal 2. Keep PaperSpoon's
-stdin open and enter `nowplaying start`. The live view needs a client that
+`--interactive` to the PaperView command in Terminal 2. Select
+**Now Playing → Start** in PaperSpoon. The live view needs a client that
 advertises Gray8. The standard `1272x1624` viewport fits artwork, track
 details, the three playback buttons, and a row for **Shuffle** and
 **Repeat**. The seek bar spans the content width, with elapsed and
@@ -139,23 +137,23 @@ or show only track details.
 On the Paperwhite 6 viewport, the widget sits 24 pixels above the
 device-local Exit strip, with 96 pixels between the artwork and title.
 
-| PaperSpoon stdin | Effect |
+| PaperSpoon action | Effect |
 | --- | --- |
-| `nowplaying status` | Report playback and Gray8 connection state |
-| `nowplaying refresh` | Request a fresh playback sample and artwork |
-| `nowplaying stop` | Stop live updates and restore the grid for a Mono1-capable client |
-| `nowplaying fake play`, `nowplaying fake pause`, `nowplaying fake next` | Simulate a change in the player |
-| `nowplaying fake seek 45` | Simulate an external seek to 45 seconds |
-| `nowplaying fake fail`, `nowplaying fake recover` | Exercise stale playback and recovery |
-| `nowplaying fake slow`, `nowplaying fake normal` | Toggle an 800 ms command delay |
+| **Now Playing → Status** | Report playback and Gray8 connection state |
+| **Now Playing → Refresh** | Request a fresh playback sample and artwork |
+| **Now Playing → Stop** | Stop live updates and restore the grid for a Mono1-capable client |
+| **Test provider → Play**, **Pause**, or **Next** | Simulate a change in the player |
+| **Test provider → Seek…**, then enter `45` | Simulate an external seek to 45 seconds |
+| **Test provider → Fail** or **Recover** | Exercise stale playback and recovery |
+| **Test provider → Slow** or **Normal** | Toggle an 800 ms command delay |
 
 The fixture includes three tracks, long metadata, a delayed artwork response,
 and a stream with unknown duration. Tap the seek bar to see one seek on
 release. A missing duration disables the seek bar. Try pressing a button and
 releasing over the artwork, then repeat with a disconnect between the two
-events. Enter a valid `ui` or `frame` command to leave live mode and show that
-command's output. If a diagnostic fails, its previous displayed pixels stay
-in place. Start live mode again with `nowplaying start`.
+events. Use **Show UI** or a diagnostic action to leave live mode. If the
+diagnostic fails, the previous displayed pixels stay in place. Select
+**Now Playing → Start** to resume live updates.
 
 Tap **Shuffle** to toggle on or off. **Repeat** cycles through **Off**,
 **All**, and **One**. The buttons display the state reported by the player,
@@ -165,16 +163,17 @@ states while keeping its track sequence deterministic.
 
 ### Apple Music
 
-Restart PaperSpoon with `--now-playing-apple-music` and keep
-`--no-forward-url` to disable Hammerspoon forwarding for grid actions.
-The Apple Music flag authorizes direct playback commands separately.
+Restart PaperSpoon with the Terminal 1 command to select the default Apple
+Music provider on macOS. Keep `--no-forward-url` to disable Hammerspoon
+forwarding for grid actions. Select **Now Playing → Start** for live Music
+sampling and playback controls.
 Tap the cover to bring Music to the front and reveal the current track
 where Music supports it. This also works with the cover placeholder.
 Open Music and allow Automation access for the terminal or application
 that launches PaperSpoon. Start playback in Music before testing the
 controls. PaperSpoon polls and controls Music through AppleScript, so
-switching system audio to another app leaves the widget on Music. The
-system-wide `frame nowplaying` snapshot continues to use MediaRemote.
+switching system audio to another app leaves the widget on Music.
+**Now Playing → Snapshot** uses the system-wide MediaRemote feed.
 
 The pinned MediaRemote Perl adapter exposes a system session stream with
 metadata, source identity, position, rate, and artwork. Its playback commands
@@ -183,7 +182,7 @@ acquisition and commands so that controls act on the source shown in the
 widget. Music reports state and position through AppleScript at a nominal
 1× playback rate. Track identity uses Music's persistent ID when available
 and its track ID otherwise. Artwork is limited to JPEG or PNG and cached by
-track identity. Use `nowplaying refresh` if artwork changes for the same
+track identity. Use **Now Playing → Refresh** if artwork changes for the same
 track. Stopped playback, missing track identity, and stale samples disable
 the controls.
 

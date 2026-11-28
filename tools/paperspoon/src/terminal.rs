@@ -347,11 +347,10 @@ pub(crate) fn run(opts: Options) -> io::Result<()> {
 
     let status_for_thread = status.clone();
     let listener_live = Arc::clone(&live);
-    let fake_provider_enabled = opts.live_provider == Some(ProviderKind::Fake);
+    let fake_provider_enabled = opts.live_provider == ProviderKind::Fake;
     let provider = match opts.live_provider {
-        Some(ProviderKind::Fake) => "Fake",
-        Some(ProviderKind::AppleMusic) => "Apple Music",
-        None => "Off",
+        ProviderKind::Fake => "Fake",
+        ProviderKind::AppleMusic => "Apple Music",
     };
     let header = format!(
         "PaperSpoon TCP :{tcp_port} UDP :{} · {:?} · {provider}",
