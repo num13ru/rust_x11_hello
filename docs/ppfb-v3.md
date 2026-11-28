@@ -40,6 +40,23 @@ error from a v2-only server requires an explicit switch to `v2`.
 The [validation report](benchmarks/ppfb-v3-validation.md) tracks desktop and
 device evidence separately.
 
+### Matched Kindle measurements
+
+Start PaperSpoon with the fake provider and `--compression=auto` as above.
+In KUAL, use **Measure PPFB v3 Raw (15m)** for one pass and **Measure PPFB
+v3 Zstandard (15m)** for the other. Both use the DU display policy and the
+same watchdog. Start fresh fake Now Playing for each pass by entering
+`nowplaying stop` and then `nowplaying start` in PaperSpoon. Use the same
+playback duration, controls, and network conditions on both runs. Tap
+**Exit** at the end of each pass and retrieve the logs before the next one.
+
+The measurement actions set `PAPERPAD_MEASURE_TRANSPORT=1`. PaperPad logs
+process CPU time, current and peak resident memory, and network interface
+counters at the beginning and end of the run and on active runtime wakeups
+at least 30 seconds apart. The interface counters include other traffic.
+Compare their deltas alongside `wire_bytes` from the PPFB receive records.
+Use device monotonic timestamps for receiver and presentation timings.
+
 ## Connection setup
 
 The client chooses v2 legacy mode or opts into v3 and sends Hello first.

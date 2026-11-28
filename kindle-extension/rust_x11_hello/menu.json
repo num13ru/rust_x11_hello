@@ -13,6 +13,14 @@
           "action": "PAPERPAD_TRANSPORT=v3-auto PAPERPAD_WATCHDOG_SECONDS=300 PAPERPAD_MXCFB_WAVEFORM=du sh bin/run.sh"
         },
         {
+          "name": "Measure PPFB v3 Zstandard (15m)",
+          "action": "PAPERPAD_MEASURE_TRANSPORT=1 PAPERPAD_TRANSPORT=v3-zstd PAPERPAD_WATCHDOG_SECONDS=900 PAPERPAD_MXCFB_WAVEFORM=du sh bin/run.sh"
+        },
+        {
+          "name": "Measure PPFB v3 Raw (15m)",
+          "action": "PAPERPAD_MEASURE_TRANSPORT=1 PAPERPAD_TRANSPORT=v3-raw PAPERPAD_WATCHDOG_SECONDS=900 PAPERPAD_MXCFB_WAVEFORM=du sh bin/run.sh"
+        },
+        {
           "name": "Run Paperpad GC16 (5m)",
           "action": "PAPERPAD_WATCHDOG_SECONDS=300 PAPERPAD_MXCFB_WAVEFORM=gc16 sh bin/run.sh"
         },

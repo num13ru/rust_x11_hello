@@ -1430,6 +1430,63 @@ mod tests {
         )
     }
 
+    #[test]
+    fn v3_sender_falls_back_to_raw_without_losing_compression_for_next_frame() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut peer, _) = listener.accept().unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let current = CurrentConnection::default();
+        let viewport = v3::Viewport {
+            width: 64,
+            height: 64,
+            formats: V2PixelFormats::GRAY8,
+        };
+        let encodings = v3::Encodings::RAW_ZSTD;
+        current
+            .install_negotiated(&client, viewport.formats, (64, 64), Some(encodings))
+            .unwrap();
+        let sender = FrameSender::new(current.clone());
+        let target = current.frame_target(PixelFormat::Gray8).unwrap();
+
+        let mut state = 0x5eed_u32;
+        let noise = (0..4096)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                state as u8
+            })
+            .collect();
+        let mut decoder = v3::FrameDecoder::default();
+        for (pixels, encoding) in [
+            (vec![42; 4096], v3::Encoding::Zstd),
+            (noise, v3::Encoding::Raw),
+            (vec![176; 4096], v3::Encoding::Zstd),
+        ] {
+            let frame = Arc::new(Gray8Frame::new(64, 64, pixels).unwrap());
+            let sent = sender
+                .send_now_playing_frame(Arc::clone(&frame), target.clone())
+                .unwrap()
+                .unwrap()
+                .sent;
+            let mut header = [0; v3::HEADER_LEN];
+            peer.read_exact(&mut header).unwrap();
+            let received = decoder
+                .read_frame(
+                    &mut peer,
+                    v3::Header::decode(header).unwrap(),
+                    viewport,
+                    encodings,
+                )
+                .unwrap();
+            assert_eq!(received.id, sent.frame_id);
+            assert_eq!(received.encoded_len, sent.encoded_len);
+            assert_eq!(received.encoding, encoding);
+            assert_eq!(received.frame.pixels(), frame.pixels());
+        }
+    }
+
     fn read_sent_owned_frame(peer: &mut TcpStream, sent: SentFrame) -> (u64, Frame) {
         let mut encoded = vec![0; sent.encoded_len];
         peer.read_exact(&mut encoded).expect("read encoded frame");

@@ -1971,4 +1971,80 @@ mod tests {
         let mut byte = [0];
         assert_eq!(reconnected_peer.read(&mut byte).expect("read EOF"), 0);
     }
+
+    #[test]
+    fn v3_reconnects_after_a_partial_frame_and_renegotiates_raw() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let formats = V2PixelFormats::GRAY8;
+        let dimensions = (64, 64);
+        let mut paperspoon = Paperspoon::start_with_transport(
+            move || connect_stream(addr).map(|stream| (addr, stream)),
+            None,
+            dimensions,
+            formats,
+            RuntimeWake::default(),
+            v3::ClientMode::Auto,
+        );
+        let accept = |encodings| {
+            let mut peer = accept_before(&listener, Duration::from_secs(3));
+            peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+            let mut hello = [0; v3::HEADER_LEN + 8];
+            peer.read_exact(&mut hello).unwrap();
+            let header = v3::Header::decode(hello[..v3::HEADER_LEN].try_into().unwrap()).unwrap();
+            assert_eq!(header.kind, v3::Kind::Hello);
+            let hello = v3::Hello::decode(&hello[v3::HEADER_LEN..]).unwrap();
+            assert_eq!(
+                (hello.width, hello.height, hello.formats),
+                (64, 64, formats)
+            );
+            assert_eq!(hello.encodings, v3::Encodings::RAW_ZSTD);
+            peer.write_all(&v3::encode_ack(encodings)).unwrap();
+            peer
+        };
+        let take_frame = |paperspoon: &mut Paperspoon| {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            loop {
+                if let Some(frame) = paperspoon.poll_frame() {
+                    return frame;
+                }
+                assert!(Instant::now() < deadline, "frame did not arrive");
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        let frame = paper_protocol::Gray8Frame::new(64, 64, vec![98; 4096]).unwrap();
+        let mut encoder = paper_protocol::compression::ZstdEncoder::new(1).unwrap();
+        let mut message = Vec::new();
+        let mut first = accept(v3::Encodings::RAW_ZSTD);
+        assert!(
+            v3::compressed_frame(1, &frame, &mut encoder, &mut Vec::new(), &mut message).unwrap()
+        );
+        first.write_all(&message).unwrap();
+        let valid = take_frame(&mut paperspoon);
+        assert_eq!((valid.frame_id(), valid.pixels()), (1, frame.pixels()));
+
+        assert!(
+            v3::compressed_frame(2, &frame, &mut encoder, &mut Vec::new(), &mut message).unwrap()
+        );
+        first.write_all(&message[..message.len() - 1]).unwrap();
+        first.shutdown(Shutdown::Write).unwrap();
+
+        let mut second = accept(v3::Encodings::RAW);
+        let replacement = paper_protocol::Gray8Frame::new(64, 64, vec![128; 4096]).unwrap();
+        v3::raw_frame(3, &replacement, &mut message).unwrap();
+        second.write_all(&message).unwrap();
+        let received = take_frame(&mut paperspoon);
+        assert_eq!(
+            (received.frame_id(), received.pixels()),
+            (3, replacement.pixels())
+        );
+        assert_eq!(valid.pixels(), frame.pixels());
+        paperspoon.send_pointer(V2PointerPhase::Down, 7, 8).unwrap();
+        let mut control = [0; v3::HEADER_LEN + paper_protocol::V2_POINTER_PAYLOAD_LEN];
+        second.read_exact(&mut control).unwrap();
+        assert_eq!(
+            v3::decode_control(&mut control).unwrap(),
+            V2Payload::Pointer(V2Pointer::new(V2PointerPhase::Down, 7, 8))
+        );
+    }
 }

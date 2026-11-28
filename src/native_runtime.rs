@@ -8,6 +8,7 @@ use crate::net::Paperspoon;
 use crate::runtime::{PaperpadRuntime, RuntimeControl, RuntimePointerInput, remote_viewport_size};
 use crate::runtime_wait::{RuntimeNotifier, RuntimeWait};
 use anyhow::{Context, Result};
+use std::time::{Duration, Instant};
 
 pub(crate) fn run(
     shutdown_requested: impl Fn() -> bool,
@@ -72,6 +73,7 @@ pub(crate) fn run(
         runtime_notifier,
     );
     let mut runtime = PaperpadRuntime::new(size);
+    let mut metrics = TransportMetrics::start();
 
     let mut run_result = (|| -> Result<()> {
         eprintln!(
@@ -107,6 +109,9 @@ pub(crate) fn run(
             runtime
                 .service(&mut display, &mut paperspoon)
                 .context("service native PaperPad runtime")?;
+            if let Some(metrics) = &mut metrics {
+                metrics.sample_if_due();
+            }
 
             if ready.input.readable {
                 let decoded = match input_reader.drain() {
@@ -159,6 +164,9 @@ pub(crate) fn run(
             }
         }
     })();
+    if let Some(metrics) = metrics {
+        metrics.sample("end");
+    }
 
     if input_reader.shutdown().is_some() {
         runtime.cancel_contact();
@@ -188,5 +196,83 @@ pub(crate) fn run(
         (Err(primary), Ok(())) => Err(primary),
         (Ok(()), Err(cleanup_error)) => Err(cleanup_error),
         (Ok(()), Ok(())) => Ok(()),
+    }
+}
+
+const TRANSPORT_SAMPLE_INTERVAL: Duration = Duration::from_secs(30);
+
+struct TransportMetrics {
+    started: Instant,
+    next_sample: Instant,
+}
+
+impl TransportMetrics {
+    fn start() -> Option<Self> {
+        if std::env::var("PAPERPAD_MEASURE_TRANSPORT").as_deref() != Ok("1") {
+            return None;
+        }
+        let started = Instant::now();
+        let metrics = Self {
+            started,
+            next_sample: started + TRANSPORT_SAMPLE_INTERVAL,
+        };
+        metrics.sample("start");
+        Some(metrics)
+    }
+
+    fn sample_if_due(&mut self) {
+        let now = Instant::now();
+        if now >= self.next_sample {
+            self.sample("progress");
+            self.next_sample = now + TRANSPORT_SAMPLE_INTERVAL;
+        }
+    }
+
+    fn sample(&self, phase: &str) {
+        let elapsed_ms = self.started.elapsed().as_millis();
+        if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+            let kib = |name| {
+                status.lines().find_map(|line| {
+                    line.strip_prefix(name)?
+                        .split_whitespace()
+                        .next()?
+                        .parse::<u64>()
+                        .ok()
+                })
+            };
+            eprintln!(
+                "transport memory phase={phase} elapsed_ms={elapsed_ms} rss_kib={:?} peak_rss_kib={:?}",
+                kib("VmRSS:"),
+                kib("VmHWM:")
+            );
+        }
+
+        let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
+        // On success getrusage initializes the structure we provided.
+        if unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) } == 0 {
+            let usage = unsafe { usage.assume_init() };
+            let micros = |time: libc::timeval| {
+                i128::from(time.tv_sec) * 1_000_000 + i128::from(time.tv_usec)
+            };
+            eprintln!(
+                "transport cpu phase={phase} elapsed_ms={elapsed_ms} user_us={} system_us={}",
+                micros(usage.ru_utime),
+                micros(usage.ru_stime)
+            );
+        }
+
+        if let Ok(devices) = std::fs::read_to_string("/proc/net/dev") {
+            for (name, counters) in devices.lines().filter_map(|line| line.split_once(':')) {
+                let mut fields = counters.split_whitespace();
+                let rx = fields.next().and_then(|value| value.parse::<u64>().ok());
+                let tx = fields.nth(7).and_then(|value| value.parse::<u64>().ok());
+                if let (Some(rx), Some(tx)) = (rx, tx) {
+                    eprintln!(
+                        "transport interface phase={phase} elapsed_ms={elapsed_ms} name={} rx_bytes={rx} tx_bytes={tx}",
+                        name.trim()
+                    );
+                }
+            }
+        }
     }
 }

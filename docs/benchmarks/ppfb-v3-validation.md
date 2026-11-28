@@ -125,8 +125,9 @@ Zstandard level 1 at 1272×1624. The raw reference column shows the equivalent
 
 The Gray8 session used 0.70% of the equivalent raw PPFB frame bytes. These
 counts cover application messages over the live connection. The raw sizes
-are calculated from the framebuffer layout. Network interface counters
-and a matched raw Wi-Fi session remain pending.
+are calculated from the framebuffer layout. A subsequent paired run
+measured interface traffic with Raw and Zstandard.
+[Matched Wi-Fi results](#matched-wi-fi-sessions-on-paperwhite-6)
 
 On the Kindle, Now Playing decode P50 was 13.874 ms, P99 was 14.523 ms, and
 the maximum was 14.523 ms. The production timer includes allocating the
@@ -141,9 +142,9 @@ the fake provider, and the device submitted subsequent Gray8 frames. The
 MXCFB log showed three GC16 artwork submissions and 40 DU submissions for
 Gray8 UI updates. Local Exit released the evdev grab, restored the original
 framebuffer snapshot, and produced a stopped status with exit code 0. The
-log verifies requested waveforms and the cleanup path. Physical panel
-completion, seeking, reconnection, the raw Wi-Fi comparison, and extended
-memory and battery measurements remain open.
+log verifies requested waveforms and the cleanup path. The paired session
+below adds seeking and a short memory check. Physical panel completion,
+reconnection, and battery measurements remain open.
 
 
 ### Expanded corpus on Paperwhite 6
@@ -179,3 +180,148 @@ above the 10 ms animation target. Levels 3 and 6 took longer on that
 sequence. These results support keeping level 1 and retaining compression
 as opt-in while dense Gray8 workloads and the production session are
 investigated further.
+
+## Decoder and transport follow-up
+
+The shared decoder now writes directly into the output allocation when its
+capacity equals the validated pixel length. It retains a bounded slice for
+a larger reused allocation. Both paths enforce the same decoded size and
+clear scratch after a codec failure. The frame still owns its pixels before
+presentation. Including the opt-in measurement diagnostics, the static
+ARMv7 build passed verification at 1,518,072 bytes unstripped and 1,007,340
+bytes after `llvm-strip --strip-all`.
+
+### Identical-payload decoder comparison
+
+The baseline (`63a8c84`) and revised decoder read the same level-1 `.fbce`
+files on macOS ARM64. Each cell is the median of five per-process P95
+measurements. Each process used one warm-up and five timed passes. The
+fresh-buffer mode exercises the allocation pattern used by the production
+frame decoder.
+
+| Workload | Baseline fresh P95 (µs) | Revised fresh P95 (µs) | Baseline reused P95 (µs) | Revised reused P95 (µs) |
+|---|---:|---:|---:|---:|
+| Fake Now Playing | 257.38 | 241.92 | 242.83 | 235.17 |
+| JPEG Now Playing | 633.12 | 612.46 | 609.21 | 591.25 |
+| Gray8 scrolling | 1,680.04 | 1,618.67 | 1,528.54 | 1,517.25 |
+
+Some run-level ranges overlap. The host results show a small reduction and
+leave the larger observed Kindle latency difference unexplained. The same
+inputs and two independently built static ARMv7 decoders can repeat this
+comparison on Paperwhite 6. Run one workload at a time to save a complete
+CSV for each case.
+
+### Matched PaperSpoon loopback sessions
+
+Each of four PPFB v3 sessions sent the same application grid, repository
+JPEG rendered as Gray8, and Gray8 diagnostic gradient at 1272×1624. Each
+workload contributed 30 measured frames after two warm-up cycles. The
+receiver counted complete PPFB messages and verified that the decompressed
+pixels matched the raw session. Each cell shows bytes per frame and the
+sender's encode P95. Encode timing starts after JPEG acquisition and includes
+diagnostic generation for the gradient. These are application bytes sent
+over TCP loopback. Wi-Fi interface traffic and device latency are measured
+separately.
+
+| Workload | Raw bytes / encode P95 (ms) | Zstandard 1 | Zstandard 3 | Zstandard 6 |
+|---|---:|---:|---:|---:|
+| Application Grid | 258,244 / 0.007 | 963 / 0.029 | 1,100 / 0.034 | 1,093 / 0.092 |
+| JPEG diagnostic | 2,065,756 / 0.034 | 741,297 / 1.667 | 681,840 / 4.474 | 641,061 / 10.036 |
+| Gray8 gradient | 2,065,756 / 1.037 | 1,197 / 1.181 | 592 / 2.904 | 529 / 1.722 |
+
+Live fake Now Playing accepted three loopback pointer seeks, including a
+backward seek. Automated tests verified Raw fallback between two Zstandard
+frames on one PaperSpoon connection and PaperPad renegotiation after a
+truncated compressed frame.
+
+The paired Kindle measurement actions record process CPU and memory alongside
+network interface counters.
+[Kindle measurement instructions](../ppfb-v3.md#matched-kindle-measurements)
+
+### Identical-payload decoder comparison on Paperwhite 6
+
+All three comparisons completed. USB readback matched both distinct
+ARMv7 executables to their host builds. The device verified each input
+checksum before decoding. Each cell is the range of two per-process
+P95 results, with one warm-up pass and one timed pass per process.
+The `fresh` rows allocate a new output buffer for each frame, as the
+production receiver does. Both builds used the same level-1 payloads.
+
+| Workload | Buffer | Baseline P95 (ms) | Revised P95 (ms) |
+|---|---|---:|---:|
+| Fake Now Playing | Fresh | 6.43–6.55 | 5.00–5.02 |
+| Fake Now Playing | Reused | 4.90–4.92 | 3.97–3.97 |
+| JPEG Now Playing | Fresh | 13.19–13.21 | 12.10–12.15 |
+| JPEG Now Playing | Reused | 11.55–11.58 | 10.79–10.80 |
+| Gray8 scrolling | Fresh | 32.91–33.23 | 33.52–33.53 |
+| Gray8 scrolling | Reused | 31.72–31.72 | 30.98–30.99 |
+
+Eliminating the extra zero fill improved the two Now Playing workloads.
+Dense Gray8 remained above the 10 ms target in both buffer modes.
+The fresh-buffer change helps explain part of the allocation cost. The live
+Now Playing renderer uses a different sequence of frames, so its production
+decode timings should be compared within the paired run below. This evidence
+supports retaining Zstandard level 1 and keeping compression opt-in.
+
+The refreshed PaperPad build and paired measurement menu were deployed by
+the canonical MTP update. Independent readback matched the binary SHA-256
+`638d9b15aa2a6653b6846f2856a4fa9e919245e4d2e7694a542f8b561b38ca38`,
+and the retained rollback matched the previous deployment.
+
+### Matched Wi-Fi sessions on Paperwhite 6
+
+On 2026-11-28, the same deployed PaperPad binary used PPFB v3 with forced Raw
+and with Zstandard level 1. Both sessions used the same 1272×1624 viewport,
+fixture, fake Now Playing provider, and DU with GC16 for grayscale. Each
+session cycled through the same JPEG, gradient, and Application Grid stimuli
+six times, then streamed the live widget. The live comparison uses the first
+60 received widget frames in each run, spanning 59.27 s for Raw and 59.19 s
+for Zstandard. PaperSpoon and PaperPad logged identical PPFB byte counts for
+all 108 Raw and 377 Zstandard frames received over the full sessions.
+
+The table uses mean PPFB bytes per frame and nearest-rank P95 timings. Receive
+and decode starts when the first frame bytes are available to the device reader
+and excludes idle time before the frame. The six-frame P95s are sample maxima.
+
+| Workload | Frames per mode | Raw bytes/frame | Zstd bytes/frame | Raw receive + decode P95 (ms) | Zstd receive + decode P95 (ms) | Zstd decode P95 (ms) |
+|---|---:|---:|---:|---:|---:|---:|
+| JPEG diagnostic | 6 | 2,065,756 | 741,297 | 260.98 | 416.71 | 31.07 |
+| Gray8 gradient | 6 | 2,065,756 | 1,197 | 290.07 | 6.65 | 6.63 |
+| Application Grid | 6 | 258,244 | 963 | 35.61 | 1.68 | 1.66 |
+| Fake Now Playing | 60 | 2,065,756 | 14,997 | 321.02 | 13.59 | 13.51 |
+
+Now Playing used 99.27% fewer PPFB bytes per frame. Five of the six compressed
+JPEG frames finished receiving and decoding in 76–110 ms. One took 416.71 ms, including 23.64 ms
+of decode. Repeat runs are needed to characterize JPEG tail latency.
+
+Traffic and CPU time are deltas from measurement start to the first sample
+after 60 s, including the scripted frames. Current and peak RSS are the
+values at that sample. The `wlan0` counters include other interface traffic.
+
+| Measurement | Raw | Zstandard level 1 |
+|---|---:|---:|
+| Sample elapsed (s) | 60.652 | 60.817 |
+| `wlan0` RX (bytes) | 114,209,926 | 5,414,233 |
+| `wlan0` TX (bytes) | 1,210,871 | 129,413 |
+| PaperPad user + system CPU time (s) | 5.45 | 5.36 |
+| Current RSS (KiB) | 6,900 | 7,916 |
+| Peak RSS (KiB) | 13,056 | 14,184 |
+
+Zstandard ran for 364.69 s and received 358 live widget frames. Sampled RSS
+from 30 s onward ranged from 7,720 to 7,944 KiB and ended at 7,752 KiB.
+Peak RSS rose to 15,912 KiB at the 214 s sample and held there through exit.
+Raw ran for 110.20 s and ended with a peak RSS of 13,064 KiB. The unequal
+run lengths limit the peak-memory comparison. The six-minute run is a short
+stability check. A longer matched run and controlled battery and thermal
+measurements remain open.
+
+Five physical seek releases reached the fake provider and succeeded, including
+backward seeks. On the device's monotonic clock, the first subsequent
+`frame_present_return` was 46–220 ms after input receipt. The frame IDs were
+correlated by event order. This timing covers software presentation return.
+A Raw seek comparison and camera-observed panel completion remain open.
+
+Both runs logged DU and GC16 submissions and stopped with status 0 after
+releasing evdev and restoring the 2,157,312-byte framebuffer snapshot. Physical
+Wi-Fi reconnection remains unverified. PPFB v2 stays the default, with level 1
+as the initial Zstandard option, while dense Gray8 exceeds its decode target.

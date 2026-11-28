@@ -78,14 +78,28 @@ impl ZstdDecoder {
         output
             .try_reserve_exact(expected)
             .map_err(io::Error::other)?;
-        output.resize(expected, 0);
-        let written = self.0.decompress_to_buffer(input, output.as_mut_slice())?;
-        if written != expected {
-            return Err(invalid(
-                "Zstandard decompressed length does not match frame layout",
-            ));
+        let result = if output.capacity() == expected {
+            // Zstandard initializes the Vec and sets its length on success.
+            self.0.decompress_to_buffer(input, output)
+        } else {
+            // The Vec API writes up to capacity. A larger allocation from a
+            // previous frame still needs a destination with the exact limit.
+            output.resize(expected, 0);
+            self.0.decompress_to_buffer(input, output.as_mut_slice())
+        };
+        match result {
+            Ok(written) if written == expected => Ok(()),
+            Ok(_) => {
+                output.clear();
+                Err(invalid(
+                    "Zstandard decompressed length does not match frame layout",
+                ))
+            }
+            Err(error) => {
+                output.clear();
+                Err(error)
+            }
         }
-        Ok(())
     }
 }
 
@@ -126,6 +140,32 @@ fn codec_error(code: zstd_safe::ErrorCode) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn corrupt_data_never_leaves_pixels_in_fresh_or_oversized_output() {
+        let pixels = [42; 4096];
+        let mut encoder = ZstdEncoder::new(1).unwrap();
+        encoder
+            .0
+            .set_parameter(zstd_safe::CParameter::ChecksumFlag(true))
+            .unwrap();
+        let mut encoded = Vec::new();
+        encoder.encode(&pixels, &mut encoded).unwrap();
+        let mut corrupted = encoded.clone();
+        *corrupted.last_mut().unwrap() ^= 0x80;
+
+        let mut decoder = ZstdDecoder::new().unwrap();
+        for mut output in [Vec::new(), Vec::with_capacity(2 * pixels.len())] {
+            assert!(
+                decoder
+                    .decode(&corrupted, pixels.len(), &mut output)
+                    .is_err()
+            );
+            assert!(output.is_empty());
+            decoder.decode(&encoded, pixels.len(), &mut output).unwrap();
+            assert_eq!(output, pixels);
+        }
+    }
 
     #[test]
     fn reused_contexts_preserve_independent_frames_at_all_levels() {
